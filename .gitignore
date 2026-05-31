@@ -1,0 +1,37 @@
+# Env
+.env
+.env.local
+*.env.local
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+
+# pnpm
+.pnpm-store/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Docker volumes (local)
+infra/compose/data/
+
+# Generated
+packages/shared-types/src/generated.ts
+apps/api/openapi.json
+
+# DO NOT ignore apps/api/.sqlx — it's checked in so prod builds work without a live DB.
+
+# Logs
+*.log

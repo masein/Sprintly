@@ -1,0 +1,39 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dev override. Auto-loaded by `docker compose` alongside the base file.
+# Mounts source code and runs the API + web in dev/watch modes.
+#
+# In prod, do NOT use this file. Use docker-compose.prod.yml instead.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  api:
+    build:
+      target: dev
+    command: ["cargo", "watch", "-q", "-c", "-w", "src", "-w", "migrations", "-x", "run --bin sprintly-api"]
+    volumes:
+      - ../../apps/api:/app/apps/api
+      - ../../Cargo.toml:/app/Cargo.toml
+      - cargo_target:/app/target
+      - cargo_registry:/usr/local/cargo/registry
+    environment:
+      SPRINTLY_ENV: dev
+
+  web:
+    build:
+      target: dev
+    command: ["pnpm", "dev"]
+    volumes:
+      - ../../apps/web:/app/apps/web
+      - ../../packages:/app/packages
+      - ../../pnpm-workspace.yaml:/app/pnpm-workspace.yaml
+      - ../../package.json:/app/package.json
+      - web_node_modules:/app/apps/web/node_modules
+      - web_next:/app/apps/web/.next
+    environment:
+      NODE_ENV: development
+
+volumes:
+  cargo_target:
+  cargo_registry:
+  web_node_modules:
+  web_next:

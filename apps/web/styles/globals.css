@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Themes ──────────────────────────────────────────────────────────────
+   All five themes are CSS variables. The Tailwind config still references
+   them by token name (ink, chrome, accent), so individual components don't
+   need to know which theme is active.
+
+   Switching: `html[data-theme="hot_pink"]` etc. Default is midnight.
+*/
+:root,
+html[data-theme="midnight"] {
+  color-scheme: dark;
+  --ink:        #0a0a0b;
+  --ink-subtle: #111114;
+  --ink-muted:  #18181d;
+  --chrome:     #e6e6ea;
+  --chrome-dim: #9b9ba3;
+  --accent:     #7c5cff;
+  --accent-fg:  #ffffff;
+  --rule:       rgba(255,255,255,0.10);
+}
+html[data-theme="daylight"] {
+  color-scheme: light;
+  --ink:        #f7f7f9;
+  --ink-subtle: #ffffff;
+  --ink-muted:  #eceef2;
+  --chrome:     #1a1a1f;
+  --chrome-dim: #5b5e6a;
+  --accent:     #4338ca;
+  --accent-fg:  #ffffff;
+  --rule:       rgba(0,0,0,0.10);
+}
+html[data-theme="solarized_dusk"] {
+  color-scheme: dark;
+  --ink:        #002b36;
+  --ink-subtle: #073642;
+  --ink-muted:  #0d3f4c;
+  --chrome:     #fdf6e3;
+  --chrome-dim: #93a1a1;
+  --accent:     #b58900;
+  --accent-fg:  #002b36;
+  --rule:       rgba(253,246,227,0.10);
+}
+html[data-theme="terminal_green"] {
+  color-scheme: dark;
+  --ink:        #000000;
+  --ink-subtle: #061008;
+  --ink-muted:  #0a1a0f;
+  --chrome:     #4ade80;
+  --chrome-dim: #16a34a;
+  --accent:     #86efac;
+  --accent-fg:  #000000;
+  --rule:       rgba(74,222,128,0.20);
+}
+html[data-theme="hot_pink"] {
+  color-scheme: dark;
+  --ink:        #1a0a14;
+  --ink-subtle: #240f1c;
+  --ink-muted:  #2e1226;
+  --chrome:     #fce7f3;
+  --chrome-dim: #f9a8d4;
+  --accent:     #ec4899;
+  --accent-fg:  #1a0a14;
+  --rule:       rgba(236,72,153,0.20);
+}
+
+html, body {
+  background: var(--ink);
+  color: var(--chrome);
+}
+
+/* IDs, timestamps, code: always JetBrains Mono. */
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: "ss01", "ss02", "cv11";
+}
+
+/* Terminal Green wants the whole UI monospaced. */
+html[data-theme="terminal_green"] body {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ── konami easter egg: CRT mode ───────────────────────────────────────── */
+html.crt-mode { filter: contrast(1.05) saturate(0.9); }
+html.crt-mode body { position: relative; }
+html.crt-mode body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 255, 100, 0.04) 0px,
+    rgba(0, 255, 100, 0.04) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: overlay;
+}
+html.crt-mode body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 101;
+  background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.4) 100%);
+}
+
+/* ── confetti ──────────────────────────────────────────────────────────── */
+@keyframes confetti-fall {
+  0%   { transform: translateY(-20vh) rotate(0deg);    opacity: 1; }
+  100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+}
+.confetti-piece {
+  position: fixed;
+  top: 0;
+  width: 8px;
+  height: 12px;
+  pointer-events: none;
+  z-index: 200;
+  animation: confetti-fall linear forwards;
+}
