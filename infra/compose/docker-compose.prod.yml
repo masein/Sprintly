@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Prod overlay. Use:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Differences from dev:
+#   - No source mounts. Images are immutable.
+#   - No host port exposure for postgres/redis/minio (only caddy).
+#   - Caddy auto-TLS via Let's Encrypt using CADDY_DOMAIN + CADDY_EMAIL.
+#   - Stricter restart policies.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    ports: []
+    restart: always
+
+  redis:
+    ports: []
+    restart: always
+
+  minio:
+    ports: []
+    restart: always
+
+  api:
+    restart: always
+
+  web:
+    restart: always
+
+  caddy:
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"

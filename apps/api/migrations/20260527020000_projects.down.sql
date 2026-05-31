@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS board_columns;
+DROP TABLE IF EXISTS boards;
+DROP TABLE IF EXISTS project_members;
+DROP TABLE IF EXISTS projects;

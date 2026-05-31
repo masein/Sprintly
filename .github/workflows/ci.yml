@@ -1,0 +1,83 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    name: api · fmt · clippy · test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sprintly
+          POSTGRES_PASSWORD: sprintly
+          POSTGRES_DB: sprintly_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sprintly"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgres://sprintly:sprintly@localhost:5432/sprintly_test
+      REDIS_URL: redis://localhost:6379/0
+      SPRINTLY_ENV: dev
+      SPRINTLY_PUBLIC_URL: http://localhost:8080
+      SPRINTLY_API_BIND: 127.0.0.1:8081
+      SPRINTLY_OPEN_SIGNUP: "true"
+      SPRINTLY_JWT_SECRET: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      SPRINTLY_ACCESS_TTL_SECS: "900"
+      SPRINTLY_REFRESH_TTL_SECS: "2592000"
+      SPRINTLY_ARGON2_M_COST_KIB: "8192"
+      SPRINTLY_ARGON2_T_COST: "2"
+      SPRINTLY_ARGON2_P_COST: "1"
+      SPRINTLY_VAULT_MASTER_KEY: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+      SPRINTLY_VAULT_KEY_VERSION: "1"
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_PUBLIC_ENDPOINT: http://localhost:9000
+      MINIO_ROOT_USER: sprintly
+      MINIO_ROOT_PASSWORD: sprintly
+      MINIO_BUCKET: sprintly
+      MINIO_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features rustls,postgres --version 0.8.2
+      - name: Run migrations
+        working-directory: apps/api
+        run: sqlx migrate run
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --locked
+
+  web:
+    name: web · lint · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm --filter @sprintly/web lint
+      - run: pnpm --filter @sprintly/web typecheck
+      - run: pnpm --filter @sprintly/web build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:8080/api/v1
+          NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws
+          NEXT_PUBLIC_APP_NAME: Sprintly

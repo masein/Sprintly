@@ -1,0 +1,50 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Sprintly — Caddy config.
+#
+# Dev:  CADDY_DOMAIN=localhost  → plain HTTP on :80 (exposed as host :8080).
+# Prod: CADDY_DOMAIN=your.tld   → automatic HTTPS via Let's Encrypt.
+#
+# Routes:
+#   /api/*   → api:8081   (REST)
+#   /ws      → api:8081   (WebSocket)
+#   /*       → web:3000   (Next.js)
+# ─────────────────────────────────────────────────────────────────────────────
+
+{
+    email {$CADDY_EMAIL}
+    # In dev (CADDY_DOMAIN=localhost) we serve plain HTTP. The auto_https
+    # global option is disabled when the site label resolves to localhost.
+}
+
+{$CADDY_DOMAIN}:80, {$CADDY_DOMAIN} {
+    encode gzip zstd
+
+    # Security headers. CSP intentionally permissive in dev — tightened in prod
+    # once we know what scripts/images we actually load.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        -Server
+    }
+
+    # WebSocket upgrade.
+    @ws {
+        path /ws /ws/*
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    reverse_proxy @ws api:8081
+
+    # API.
+    handle /api/* {
+        reverse_proxy api:8081
+    }
+
+    # Frontend (catch-all).
+    handle {
+        reverse_proxy web:3000
+    }
+}

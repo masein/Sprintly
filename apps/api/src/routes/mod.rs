@@ -1,0 +1,23 @@
+//! HTTP route modules. Each exposes a `pub fn router() -> Router<AppState>`.
+
+pub mod achievements;
+pub mod admin;
+pub mod admin_panel;
+pub mod auth;
+pub mod backups;
+pub mod boards;
+pub mod dashboards;
+pub mod health;
+pub mod payroll;
+pub mod projects;
+pub mod retros;
+pub mod search;
+pub mod sprints;
+pub mod task_detail;
+pub mod tasks;
+pub mod time_logs;
+pub mod timesheets;
+pub mod users;
+pub mod vault;
+pub mod webhooks;
+pub mod ws;
