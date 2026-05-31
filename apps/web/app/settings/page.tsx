@@ -72,7 +72,7 @@ export default function SettingsPage() {
       setUser(updated);
       setSavedAt(new Date());
     } catch (e) {
-      setError((e as ApiError).message);
+      setError((e as unknown as ApiError).message);
     } finally {
       setSaving(false);
     }
@@ -90,7 +90,7 @@ export default function SettingsPage() {
     return (
       <Shell>
         <div className="mono text-sm text-chrome-dim">
-          You're not signed in.{" "}
+          You&apos;re not signed in.{" "}
           <Link href="/login" className="text-accent hover:underline">
             sign in
           </Link>

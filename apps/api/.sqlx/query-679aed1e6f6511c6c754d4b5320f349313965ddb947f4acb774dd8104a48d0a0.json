@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT v.project_id   AS \"project_id!: Uuid\",\n               a.can_view      AS \"can_view?: bool\",\n               a.can_edit      AS \"can_edit?: bool\"\n        FROM   vault_items v\n        LEFT JOIN vault_access a\n               ON a.vault_item_id = v.id AND a.user_id = $2\n        WHERE  v.id = $1 AND v.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "project_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "can_view?: bool",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "can_edit?: bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "679aed1e6f6511c6c754d4b5320f349313965ddb947f4acb774dd8104a48d0a0"
+}

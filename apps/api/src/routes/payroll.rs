@@ -35,15 +35,32 @@ use crate::{
 };
 
 pub fn router() -> Router<AppState> {
+    // matchit (axum's router) requires a single param name per tree position
+    // and forbids a literal suffix on a param segment. The 2-segment overview
+    // and the 3-segment per-user forms therefore use positional param names
+    // (`:a`/`:b`/`:c`) — axum tuple extraction is positional, so handlers read
+    // them in order. The trailing month segment may carry a `.csv`/`.pdf`
+    // suffix to pick the export format; the handlers split that off.
     Router::new()
-        .route("/payroll/:year/:month", get(month_overview))
-        .route("/payroll/:year/:month.csv", get(month_csv))
-        .route("/payroll/:user_id/:year/:month", get(user_month))
-        .route("/payroll/:user_id/:year/:month.pdf", get(user_month_pdf))
-        .route("/payroll/:user_id/:year/:month/mark-paid", post(mark_paid))
-        .route("/payroll/:user_id/:year/:month/reopen", post(reopen))
+        .route("/payroll/:a/:b", get(month_overview)) // :a=year, :b=month[.csv]
+        .route("/payroll/:a/:b/:c", get(user_month)) // :a=user, :b=year, :c=month[.pdf]
+        .route("/payroll/:a/:b/:c/mark-paid", post(mark_paid))
+        .route("/payroll/:a/:b/:c/reopen", post(reopen))
         .route("/projects/:key/budget", axum::routing::patch(set_budget))
         .route("/projects/:key/burn", get(burn))
+}
+
+/// Split an optional `.<ext>` suffix off a path segment that is otherwise a
+/// month number. Returns `(month, had_suffix)`.
+fn split_month_ext(raw: &str, ext: &str) -> AppResult<(u32, bool)> {
+    let (num, had) = match raw.strip_suffix(&format!(".{ext}")) {
+        Some(stripped) => (stripped, true),
+        None => (raw, false),
+    };
+    let month = num
+        .parse::<u32>()
+        .map_err(|_| AppError::BadRequest("month must be a number".into()))?;
+    Ok((month, had))
 }
 
 // ─── DTOs ───────────────────────────────────────────────────────────────────
@@ -115,14 +132,34 @@ pub struct BurnDto {
 async fn month_overview(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path((year, month)): Path<(i32, u32)>,
+    // `:b` is the month, optionally suffixed `.csv` to request CSV.
+    Path((year, month_raw)): Path<(i32, String)>,
 ) -> AppResult<impl IntoResponse> {
     if user.role != GlobalRole::Admin {
         return Err(AppError::Forbidden);
     }
+    let (month, want_csv) = split_month_ext(&month_raw, "csv")?;
     let (first, last) = bounds_or_400(year, month)?;
     let users = aggregate_users(&state.db, first, last).await?;
     let stamped = decorate_with_period_status(&state.db, year, month, users).await?;
+
+    if want_csv {
+        let mut csv = String::from("handle,display_name,total_minutes,billable_minutes,total_pay_cents,currency,status\n");
+        for u in &stamped {
+            csv.push_str(&format!(
+                "{},{},{},{},{},{},{}\n",
+                u.handle,
+                csv_escape(&u.display_name),
+                u.total_minutes,
+                u.billable_minutes,
+                u.total_pay_cents,
+                u.currency,
+                u.status,
+            ));
+        }
+        return Ok(csv_response(format!("payroll-{year}-{month:02}.csv"), csv).into_response());
+    }
+
     let grand = stamped.iter().map(|u| u.total_pay_cents).sum::<i64>();
     Ok(Json(MonthOverview {
         year,
@@ -130,62 +167,26 @@ async fn month_overview(
         users: stamped,
         grand_total_pay_cents: grand,
         currency: "USD".into(),
-    }))
-}
-
-async fn month_csv(
-    State(state): State<AppState>,
-    user: CurrentUser,
-    Path((year, month)): Path<(i32, u32)>,
-) -> AppResult<impl IntoResponse> {
-    if user.role != GlobalRole::Admin {
-        return Err(AppError::Forbidden);
-    }
-    let (first, last) = bounds_or_400(year, month)?;
-    let users = aggregate_users(&state.db, first, last).await?;
-    let stamped = decorate_with_period_status(&state.db, year, month, users).await?;
-    let mut csv = String::from("handle,display_name,total_minutes,billable_minutes,total_pay_cents,currency,status\n");
-    for u in &stamped {
-        csv.push_str(&format!(
-            "{},{},{},{},{},{},{}\n",
-            u.handle,
-            csv_escape(&u.display_name),
-            u.total_minutes,
-            u.billable_minutes,
-            u.total_pay_cents,
-            u.currency,
-            u.status,
-        ));
-    }
-    Ok(csv_response(
-        format!("payroll-{year}-{month:02}.csv"),
-        csv,
-    ))
+    })
+    .into_response())
 }
 
 async fn user_month(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path((target_user, year, month)): Path<(Uuid, i32, u32)>,
+    // `:c` is the month, optionally suffixed `.pdf` to request a PDF.
+    Path((target_user, year, month_raw)): Path<(Uuid, i32, String)>,
 ) -> AppResult<impl IntoResponse> {
     if user.role != GlobalRole::Admin && target_user != user.id {
         return Err(AppError::Forbidden);
     }
-    let (first, last) = bounds_or_400(year, month)?;
-    let detail = aggregate_user_detail(&state.db, target_user, year, month, first, last).await?;
-    Ok(Json(detail))
-}
-
-async fn user_month_pdf(
-    State(state): State<AppState>,
-    user: CurrentUser,
-    Path((target_user, year, month)): Path<(Uuid, i32, u32)>,
-) -> AppResult<impl IntoResponse> {
-    if user.role != GlobalRole::Admin && target_user != user.id {
-        return Err(AppError::Forbidden);
-    }
+    let (month, want_pdf) = split_month_ext(&month_raw, "pdf")?;
     let (first, last) = bounds_or_400(year, month)?;
     let d = aggregate_user_detail(&state.db, target_user, year, month, first, last).await?;
+
+    if !want_pdf {
+        return Ok(Json(d).into_response());
+    }
 
     // Hand-rolled PDF. Header + per-project table + total.
     let mut pdf = PdfBuilder::new();
@@ -227,7 +228,7 @@ async fn user_month_pdf(
         ))
         .unwrap(),
     );
-    Ok((StatusCode::OK, h, bytes))
+    Ok((StatusCode::OK, h, bytes).into_response())
 }
 
 const PAGE_H_FROM_TOP_FOOTER: f32 = 760.0;

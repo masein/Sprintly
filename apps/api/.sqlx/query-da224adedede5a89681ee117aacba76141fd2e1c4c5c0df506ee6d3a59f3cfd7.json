@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT encrypted_payload AS \"encrypted_payload!: Vec<u8>\",\n               nonce             AS \"nonce!: Vec<u8>\",\n               key_version       AS \"key_version!: i32\"\n        FROM   vault_items\n        WHERE  id = $1 AND deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "encrypted_payload!: Vec<u8>",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 1,
+        "name": "nonce!: Vec<u8>",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "key_version!: i32",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "da224adedede5a89681ee117aacba76141fd2e1c4c5c0df506ee6d3a59f3cfd7"
+}

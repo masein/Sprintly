@@ -262,7 +262,7 @@ async fn project_dashboard(
         JOIN   tasks t ON t.id = tl.task_id
         WHERE  t.project_id = $1 AND t.deleted_at IS NULL
         GROUP  BY u.id, u.handle, u.display_name
-        ORDER  BY minutes DESC
+        ORDER  BY 4 DESC
         LIMIT  5
         "#,
         pid,

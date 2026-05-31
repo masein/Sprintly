@@ -415,7 +415,7 @@ async fn health(
         let start = std::time::Instant::now();
         let r = match state.redis.get().await {
             Ok(mut conn) => redis::cmd("PING")
-                .query_async::<_, String>(&mut conn)
+                .query_async::<String>(&mut conn)
                 .await
                 .map_err(|e| e.to_string()),
             Err(e) => Err(e.to_string()),

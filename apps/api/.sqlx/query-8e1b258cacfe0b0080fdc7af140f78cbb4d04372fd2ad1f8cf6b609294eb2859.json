@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT a.code         AS \"code!: String\",\n               a.title        AS \"title!: String\",\n               a.description  AS \"description!: String\",\n               a.icon         AS \"icon!: String\",\n               ua.awarded_at  AS \"awarded_at!: DateTime<Utc>\",\n               ua.context     AS \"context!: serde_json::Value\"\n        FROM   user_achievements ua\n        JOIN   achievements a ON a.id = ua.achievement_id\n        WHERE  ua.user_id = $1\n        ORDER  BY ua.awarded_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "icon!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "awarded_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "context!: serde_json::Value",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8e1b258cacfe0b0080fdc7af140f78cbb4d04372fd2ad1f8cf6b609294eb2859"
+}

@@ -1,0 +1,93 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id           AS \"id!: Uuid\",\n               email        AS \"email!: String\",\n               handle       AS \"handle!: String\",\n               display_name AS \"display_name!: String\",\n               avatar_url,\n               role         AS \"role!: String\",\n               status       AS \"status!: String\",\n               timezone     AS \"timezone!: String\",\n               currency     AS \"currency!: String\",\n               settings     AS \"settings!: JsonValue\",\n               created_at   AS \"created_at!: chrono::DateTime<chrono::Utc>\",\n               last_seen_at\n        FROM   users\n        WHERE  id = $1 AND deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email!: String",
+        "type_info": {
+          "Custom": {
+            "name": "citext",
+            "kind": "Simple"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "role!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "status!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "timezone!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "currency!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "settings!: JsonValue",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at!: chrono::DateTime<chrono::Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "bbe20db7a12002f96f9ef1a5e5fd316c07a9169ae27c665f9d2e5d924375855f"
+}

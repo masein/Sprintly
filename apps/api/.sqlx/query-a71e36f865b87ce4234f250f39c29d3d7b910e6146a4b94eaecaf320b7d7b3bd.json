@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT s.id              AS \"id!: Uuid\",\n               s.project_id      AS \"project_id!: Uuid\",\n               p.key             AS \"project_key!: String\",\n               s.name            AS \"name!: String\",\n               s.goal            AS \"goal!: String\",\n               s.starts_at       AS \"starts_at!: DateTime<Utc>\",\n               s.ends_at         AS \"ends_at!: DateTime<Utc>\",\n               s.state           AS \"state!: String\",\n               s.velocity_points,\n               s.summary_md,\n               s.started_at,\n               s.completed_at,\n               COALESCE(t.total_points, 0)  AS \"total_points!: i64\",\n               COALESCE(t.done_points, 0)   AS \"done_points!: i64\",\n               COALESCE(t.task_count, 0)    AS \"task_count!: i64\"\n        FROM   sprints s\n        JOIN   projects p ON p.id = s.project_id\n        LEFT JOIN LATERAL (\n            SELECT  COUNT(*)::bigint                          AS task_count,\n                    COALESCE(SUM(story_points), 0)::bigint    AS total_points,\n                    COALESCE(SUM(CASE WHEN status = 'done'\n                                 THEN story_points END), 0)::bigint AS done_points\n            FROM    tasks\n            WHERE   sprint_id = s.id AND deleted_at IS NULL\n        ) t ON TRUE\n        WHERE  s.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "goal!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "starts_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "ends_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "state!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "velocity_points",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "summary_md",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "total_points!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "done_points!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 14,
+        "name": "task_count!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "a71e36f865b87ce4234f250f39c29d3d7b910e6146a4b94eaecaf320b7d7b3bd"
+}

@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT  rt.id            AS \"id!: Uuid\",\n                rt.session_id    AS \"session_id!: Uuid\",\n                rt.user_id       AS \"user_id!: Uuid\",\n                rt.expires_at    AS \"expires_at!: chrono::DateTime<chrono::Utc>\",\n                rt.rotated_to,\n                rt.revoked_at,\n                s.revoked_at     AS session_revoked_at,\n                u.role           AS \"role!: String\",\n                u.status         AS \"status!: String\"\n        FROM    refresh_tokens rt\n        JOIN    sessions s ON s.id = rt.session_id\n        JOIN    users    u ON u.id = rt.user_id\n        WHERE   rt.token_hash = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "session_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "expires_at!: chrono::DateTime<chrono::Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "rotated_to",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "session_revoked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "role!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "status!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "0598ce9c38de114b3a2cd699af4b0965ecbb55234f31fb2c6089472719682162"
+}

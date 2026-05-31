@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT key          AS \"key!: String\",\n               title        AS \"title!: String\",\n               status       AS \"status!: String\",\n               priority     AS \"priority!: String\",\n               type         AS \"type!: String\",\n               story_points,\n               assignee_id\n        FROM   tasks\n        WHERE  sprint_id = $1 AND deleted_at IS NULL\n        ORDER  BY status, priority, updated_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "priority!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "type!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "story_points",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "assignee_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "aa51317bb9bcd7549b72295383e9f6ba6b246d2c627d1f7493d7d64ba68709aa"
+}

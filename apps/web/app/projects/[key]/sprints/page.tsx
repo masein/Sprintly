@@ -19,12 +19,12 @@ export default function SprintsPage() {
   const q = useQuery({
     queryKey: ["sprints", projectKey],
     queryFn: () => listSprints(projectKey),
-    retry: (n, e) => (e as ApiError)?.status !== 401 && n < 1,
+    retry: (n, e) => (e as unknown as ApiError)?.status !== 401 && n < 1,
   });
   const [creating, setCreating] = useState(false);
 
   if (q.error) {
-    const e = q.error as ApiError;
+    const e = q.error as unknown as ApiError;
     if (e.status === 401) {
       router.push("/login");
       return null;
@@ -154,7 +154,7 @@ function CreateSprintForm({
       qc.invalidateQueries({ queryKey: ["sprints", projectKey] });
       onCreated(s.id);
     },
-    onError: (e) => setError((e as ApiError).message),
+    onError: (e) => setError((e as unknown as ApiError).message),
   });
 
   return (

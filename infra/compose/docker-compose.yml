@@ -92,11 +92,36 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
-      RUST_LOG: ${RUST_LOG}
-    command: ["/usr/local/bin/sprintly-api", "migrate"]
+    # The image ENTRYPOINT is already the binary, so the command is just the
+    # subcommand — repeating the binary path here would make argv[1] the path
+    # and silently fall through to `serve`.
+    command: ["migrate"]
     restart: "no"
+    # NOTE: `migrate` shells out to the same binary, whose Config::from_env()
+    # validates the full config up front — so it needs the same env as `api`,
+    # not just DATABASE_URL.
+    environment:
+      SPRINTLY_ENV: ${SPRINTLY_ENV}
+      SPRINTLY_PUBLIC_URL: ${SPRINTLY_PUBLIC_URL}
+      SPRINTLY_API_BIND: ${SPRINTLY_API_BIND}
+      SPRINTLY_OPEN_SIGNUP: ${SPRINTLY_OPEN_SIGNUP}
+      SPRINTLY_JWT_SECRET: ${SPRINTLY_JWT_SECRET}
+      SPRINTLY_ACCESS_TTL_SECS: ${SPRINTLY_ACCESS_TTL_SECS}
+      SPRINTLY_REFRESH_TTL_SECS: ${SPRINTLY_REFRESH_TTL_SECS}
+      SPRINTLY_ARGON2_M_COST_KIB: ${SPRINTLY_ARGON2_M_COST_KIB}
+      SPRINTLY_ARGON2_T_COST: ${SPRINTLY_ARGON2_T_COST}
+      SPRINTLY_ARGON2_P_COST: ${SPRINTLY_ARGON2_P_COST}
+      SPRINTLY_VAULT_MASTER_KEY: ${SPRINTLY_VAULT_MASTER_KEY}
+      SPRINTLY_VAULT_KEY_VERSION: ${SPRINTLY_VAULT_KEY_VERSION}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      MINIO_REGION: ${MINIO_REGION}
+      RUST_LOG: ${RUST_LOG}
 
   # ─── Rust API ────────────────────────────────────────────────────────────
   api:

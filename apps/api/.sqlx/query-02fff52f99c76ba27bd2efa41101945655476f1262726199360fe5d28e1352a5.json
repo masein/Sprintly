@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT tl.id              AS \"id!: Uuid\",\n               tl.task_id         AS \"task_id!: Uuid\",\n               t.key              AS \"task_key!: String\",\n               p.key              AS \"project_key!: String\",\n               tl.user_id         AS \"user_id!: Uuid\",\n               tl.started_at      AS \"started_at!: DateTime<Utc>\",\n               tl.ended_at,\n               tl.duration_minutes,\n               tl.note            AS \"note!: String\",\n               tl.billable        AS \"billable!: bool\"\n        FROM   time_logs tl\n        JOIN   tasks t ON t.id = tl.task_id\n        JOIN   projects p ON p.id = t.project_id\n        WHERE  tl.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "task_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "project_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "started_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "ended_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "duration_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "note!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "billable!: bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "02fff52f99c76ba27bd2efa41101945655476f1262726199360fe5d28e1352a5"
+}

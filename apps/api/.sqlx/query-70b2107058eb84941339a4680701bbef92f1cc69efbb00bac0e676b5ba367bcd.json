@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT budget_cents,\n               budget_currency AS \"budget_currency!: String\"\n        FROM   projects WHERE id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "budget_cents",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "budget_currency!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "70b2107058eb84941339a4680701bbef92f1cc69efbb00bac0e676b5ba367bcd"
+}

@@ -196,7 +196,8 @@ mod tests {
 
     #[test]
     fn put_url_shape() {
-        let p = Presigner::new(&cfg());
+        let c = cfg();
+        let p = Presigner::new(&c);
         let url = p.put("tasks/abc/foo.png", "image/png", 600);
         assert!(url.starts_with("http://localhost:9000/sprintly/tasks/abc/foo.png?"));
         assert!(url.contains("X-Amz-Algorithm=AWS4-HMAC-SHA256"));
@@ -206,7 +207,8 @@ mod tests {
 
     #[test]
     fn get_url_includes_disposition() {
-        let p = Presigner::new(&cfg());
+        let c = cfg();
+        let p = Presigner::new(&c);
         let url = p.get("tasks/abc/foo.png", Some("My File.png"), 600);
         // The disposition value gets uri-encoded; just check the marker exists.
         assert!(url.contains("response-content-disposition="));

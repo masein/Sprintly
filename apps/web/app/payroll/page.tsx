@@ -27,11 +27,20 @@ export default function PayrollPage() {
   const q = useQuery({
     queryKey: ["payroll", year, month],
     queryFn: () => monthOverview(year, month),
-    retry: (n, e) => (e as ApiError)?.status !== 401 && (e as ApiError)?.status !== 403 && n < 1,
+    retry: (n, e) => (e as unknown as ApiError)?.status !== 401 && (e as unknown as ApiError)?.status !== 403 && n < 1,
+  });
+
+  const paid = useMutation({
+    mutationFn: ({ user_id }: { user_id: string }) => markPaid(user_id, year, month),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["payroll", year, month] }),
+  });
+  const undo = useMutation({
+    mutationFn: ({ user_id }: { user_id: string }) => reopen(user_id, year, month),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["payroll", year, month] }),
   });
 
   if (q.error) {
-    const e = q.error as ApiError;
+    const e = q.error as unknown as ApiError;
     if (e.status === 401) {
       router.push("/login");
       return null;
@@ -46,15 +55,6 @@ export default function PayrollPage() {
       );
     }
   }
-
-  const paid = useMutation({
-    mutationFn: ({ user_id }: { user_id: string }) => markPaid(user_id, year, month),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["payroll", year, month] }),
-  });
-  const undo = useMutation({
-    mutationFn: ({ user_id }: { user_id: string }) => reopen(user_id, year, month),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["payroll", year, month] }),
-  });
 
   function shift(delta: number) {
     const m0 = year * 12 + (month - 1) + delta;

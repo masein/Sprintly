@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { listActivity, type Activity } from "@/lib/task-detail";
 
-const KIND_ICON: Record<string, React.ComponentType<{ size?: number }>> = {
+const KIND_ICON: Record<string, React.ComponentType<{ size?: string | number }>> = {
   created: Sparkles,
   moved: Move,
   assigned: User,

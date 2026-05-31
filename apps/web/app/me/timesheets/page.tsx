@@ -48,18 +48,18 @@ export default function TimesheetsPage() {
   const q = useQuery({
     queryKey: ["timesheet", periodStart],
     queryFn: () => specificTimesheet(periodStart),
-    retry: (n, e) => (e as ApiError)?.status !== 401 && n < 1,
+    retry: (n, e) => (e as unknown as ApiError)?.status !== 401 && n < 1,
   });
 
   const submit = useMutation({
     mutationFn: () => submitTimesheet(periodStart),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ["timesheet", periodStart] }),
-    onError: (e) => alert((e as ApiError).message),
+    onError: (e) => alert((e as unknown as ApiError).message),
   });
 
   if (q.error) {
-    const e = q.error as ApiError;
+    const e = q.error as unknown as ApiError;
     if (e.status === 401) {
       router.push("/login");
       return null;
@@ -120,7 +120,7 @@ export default function TimesheetsPage() {
             empty week
           </div>
           <p className="text-chrome-dim">
-            Either you didn't work this week or you forgot the timer. Both are valid.
+            Either you didn&apos;t work this week or you forgot the timer. Both are valid.
           </p>
           <Link
             href="/me/tasks"

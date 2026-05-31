@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT v.id              AS \"id!: Uuid\",\n               v.project_id      AS \"project_id!: Uuid\",\n               p.key             AS \"project_key!: String\",\n               v.name            AS \"name!: String\",\n               v.kind            AS \"kind!: String\",\n               v.description     AS \"description!: String\",\n               v.key_version     AS \"key_version!: i32\",\n               v.created_by,\n               v.last_rotated_at AS \"last_rotated_at!: DateTime<Utc>\",\n               v.created_at      AS \"created_at!: DateTime<Utc>\",\n               v.updated_at      AS \"updated_at!: DateTime<Utc>\"\n        FROM   vault_items v\n        JOIN   projects p ON p.id = v.project_id\n        WHERE  v.id = $1 AND v.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "description!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "key_version!: i32",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "last_rotated_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "20e1c756746e9021e29327a877c1d2e9e982c4ecd9637805934b6b91e17357d3"
+}

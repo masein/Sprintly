@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT key   AS \"key!: String\",\n                   name  AS \"name!: String\",\n                   color AS \"color!: String\",\n                   icon  AS \"icon!: String\"\n            FROM   projects\n            WHERE  id = ANY($1) AND deleted_at IS NULL\n              AND (key ILIKE $2 || '%' OR name % $2)\n            ORDER BY (key ILIKE $2 || '%') DESC, similarity(name, $2) DESC\n            LIMIT  $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "color!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "icon!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4fbb9c4be3cfdc09231e0735251260e12ebcfa337fe9f20f2b791b08827483d7"
+}

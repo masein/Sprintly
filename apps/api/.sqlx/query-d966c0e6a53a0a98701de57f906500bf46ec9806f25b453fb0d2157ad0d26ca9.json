@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n              COUNT(*) FILTER (WHERE finished_at IS NULL AND claimed_at IS NULL)\n                  AS \"pending!: i64\",\n              COUNT(*) FILTER (WHERE finished_at IS NULL AND claimed_at IS NOT NULL)\n                  AS \"running!: i64\",\n              COUNT(*) FILTER (WHERE finished_at IS NOT NULL AND last_error IS NOT NULL)\n                  AS \"failed!: i64\",\n              MAX(finished_at) AS last_finished_at\n            FROM jobs\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "running!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "failed!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_finished_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "d966c0e6a53a0a98701de57f906500bf46ec9806f25b453fb0d2157ad0d26ca9"
+}

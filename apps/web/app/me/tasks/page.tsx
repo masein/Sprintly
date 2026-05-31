@@ -19,7 +19,7 @@ const STATUS_LABEL: Record<MyTask["status"], string> = {
 };
 const STATUS_ORDER: MyTask["status"][] = ["in_progress", "review", "todo", "done"];
 
-const TYPE_ICON: Record<string, React.ComponentType<{ size?: number }>> = {
+const TYPE_ICON: Record<string, React.ComponentType<{ size?: string | number }>> = {
   feature: Sparkles,
   bug: Bug,
   chore: Wrench,
@@ -40,13 +40,13 @@ export default function MyTasksPage() {
     queryKey: ["my-tasks"],
     queryFn: () => myTasks(),
     retry: (failureCount, err) => {
-      const e = err as ApiError;
+      const e = err as unknown as ApiError;
       return e?.status !== 401 && failureCount < 1;
     },
   });
 
   if (q.error) {
-    const e = q.error as ApiError;
+    const e = q.error as unknown as ApiError;
     if (e.status === 401) {
       router.push("/login");
       return null;
@@ -66,7 +66,7 @@ export default function MyTasksPage() {
         <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
           sprintly · my queue
         </div>
-        <h1 className="text-3xl font-semibold">What you're on the hook for.</h1>
+        <h1 className="text-3xl font-semibold">What you&apos;re on the hook for.</h1>
       </header>
 
       {q.isLoading && (

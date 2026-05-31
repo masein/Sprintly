@@ -92,7 +92,7 @@ pub struct CreateItemReq {
     #[validate(length(max = 4000))]
     pub description: Option<String>,
     /// The plaintext secret. Discarded server-side after encryption.
-    #[validate(length(min = 1, max = 64 * 1024))]
+    #[validate(length(min = 1, max = 65536))]
     pub value: String,
 }
 
@@ -105,7 +105,7 @@ pub struct EditItemReq {
     /// If provided, the row is re-encrypted under a fresh nonce. Key version
     /// follows the current `SPRINTLY_VAULT_KEY_VERSION` so writes naturally
     /// migrate to the latest key.
-    #[validate(length(min = 1, max = 64 * 1024))]
+    #[validate(length(min = 1, max = 65536))]
     pub value: Option<String>,
 }
 
@@ -568,8 +568,8 @@ async fn require_access(
     let row = sqlx::query!(
         r#"
         SELECT v.project_id   AS "project_id!: Uuid",
-               a.can_view,
-               a.can_edit
+               a.can_view      AS "can_view?: bool",
+               a.can_edit      AS "can_edit?: bool"
         FROM   vault_items v
         LEFT JOIN vault_access a
                ON a.vault_item_id = v.id AND a.user_id = $2

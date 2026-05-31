@@ -65,7 +65,7 @@ function TabButton({
   current, self, onClick, icon: Icon, children,
 }: {
   current: Tab; self: Tab; onClick: () => void;
-  icon: React.ComponentType<{ size?: number }>;
+  icon: React.ComponentType<{ size?: string | number }>;
   children: React.ReactNode;
 }) {
   const active = current === self;
@@ -94,7 +94,7 @@ function UsersTab({ onAuthExpired }: { onAuthExpired: () => void }) {
     queryKey: ["admin-users", q, status],
     queryFn: () => listAdminUsers({ q: q || undefined, status: status || undefined }),
     retry: (n, e) => {
-      const ae = e as ApiError;
+      const ae = e as unknown as ApiError;
       if (ae?.status === 401) {
         onAuthExpired();
         return false;
@@ -125,7 +125,7 @@ function UsersTab({ onAuthExpired }: { onAuthExpired: () => void }) {
   });
 
   if (users.error) {
-    const ae = users.error as ApiError;
+    const ae = users.error as unknown as ApiError;
     if (ae.status === 403) {
       return (
         <div className="mono rounded border border-white/10 bg-ink-subtle p-6 text-sm text-chrome-dim">
@@ -280,7 +280,7 @@ function HealthCard({
 }: {
   label: string;
   check: { ok: boolean; latency_ms: number; detail: string | null };
-  icon: React.ComponentType<{ size?: number }>;
+  icon: React.ComponentType<{ size?: string | number }>;
 }) {
   return (
     <div

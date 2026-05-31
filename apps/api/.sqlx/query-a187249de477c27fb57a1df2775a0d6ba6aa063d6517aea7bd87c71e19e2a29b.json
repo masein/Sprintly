@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT n.column_kind     AS \"column_kind!: String\",\n               n.body            AS \"body!: String\",\n               n.promoted_task_id,\n               s.project_id      AS \"project_id!: Uuid\"\n        FROM   retro_notes n\n        JOIN   sprint_retros r ON r.id = n.retro_id\n        JOIN   sprints s ON s.id = r.sprint_id\n        WHERE  n.id = $1 AND n.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "column_kind!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "body!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "promoted_task_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "project_id!: Uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "a187249de477c27fb57a1df2775a0d6ba6aa063d6517aea7bd87c71e19e2a29b"
+}

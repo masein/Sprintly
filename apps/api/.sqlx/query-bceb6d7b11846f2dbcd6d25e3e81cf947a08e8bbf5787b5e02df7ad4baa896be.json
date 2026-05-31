@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id          AS \"id!: Uuid\",\n               task_id     AS \"task_id!: Uuid\",\n               filename    AS \"filename!: String\",\n               mime_type   AS \"mime_type!: String\",\n               size_bytes,\n               storage_key AS \"storage_key!: String\",\n               status      AS \"status!: String\",\n               uploader_id,\n               created_at  AS \"created_at!: DateTime<Utc>\"\n        FROM   task_attachments\n        WHERE  task_id = $1 AND deleted_at IS NULL\n        ORDER  BY created_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "filename!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "mime_type!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "size_bytes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "storage_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "status!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "uploader_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "bceb6d7b11846f2dbcd6d25e3e81cf947a08e8bbf5787b5e02df7ad4baa896be"
+}

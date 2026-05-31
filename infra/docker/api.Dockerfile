@@ -11,7 +11,7 @@
 #   runtime  — small final image with just the binary + ca-certs
 # ─────────────────────────────────────────────────────────────────────────────
 
-FROM rust:1.85-slim-bookworm AS chef
+FROM rust:1.88-slim-bookworm AS chef
 RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config libssl-dev ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
@@ -20,7 +20,7 @@ WORKDIR /app
 
 # ─── Planner: produce dependency recipe ──────────────────────────────────
 FROM chef AS planner
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY apps/api ./apps/api
 RUN cargo chef prepare --recipe-path recipe.json
 
@@ -31,19 +31,19 @@ FROM chef AS builder
 ENV SQLX_OFFLINE=true
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY apps/api ./apps/api
-RUN cargo build --release --bin sprintly-api --bin sprintly-seed
+RUN cargo build --release --locked --bin sprintly-api --bin sprintly-seed
 
 # ─── Dev image: source-mounted, watch mode ───────────────────────────────
-FROM rust:1.85-slim-bookworm AS dev
+FROM rust:1.88-slim-bookworm AS dev
 RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config libssl-dev ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-watch --locked --version 8.5.2
 RUN cargo install sqlx-cli --locked --version 0.8.2 --no-default-features --features rustls,postgres
 WORKDIR /app
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY apps/api ./apps/api
 EXPOSE 8081
 CMD ["cargo", "run", "--bin", "sprintly-api"]

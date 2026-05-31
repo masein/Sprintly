@@ -101,13 +101,9 @@ pub fn unauthorized() -> (StatusCode, &'static str) {
     (StatusCode::UNAUTHORIZED, "unauthorized")
 }
 
-// Make AppState referenceable for the extractor when the router state IS
-// AppState (the common case).
-impl FromRef<AppState> for AppState {
-    fn from_ref(s: &AppState) -> Self {
-        s.clone()
-    }
-}
+// NOTE: `FromRef<AppState> for AppState` is provided by axum's blanket
+// `impl<T: Clone> FromRef<T> for T`, so no manual impl is needed (and one
+// would conflict).
 
 // Pull Config out of state for convenience in handlers.
 impl FromRef<AppState> for std::sync::Arc<Config> {

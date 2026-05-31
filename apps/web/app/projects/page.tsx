@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Plus, Archive } from "lucide-react";
@@ -11,6 +11,14 @@ import type { ApiError } from "@/lib/api";
 import { Sprint } from "@/components/Sprint";
 
 export default function ProjectsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ProjectsInner />
+    </Suspense>
+  );
+}
+
+function ProjectsInner() {
   const router = useRouter();
   const search = useSearchParams();
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -21,7 +29,7 @@ export default function ProjectsPage() {
     try {
       setProjects(await listProjects());
     } catch (e) {
-      const err = e as ApiError;
+      const err = e as unknown as ApiError;
       if (err.status === 401) {
         router.push("/login");
         return;

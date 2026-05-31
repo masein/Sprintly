@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT n.column_kind     AS \"column_kind!: String\",\n               n.body            AS \"body!: String\",\n               (SELECT COUNT(*) FROM retro_votes v WHERE v.retro_note_id = n.id)\n                                 AS \"vote_count!: i64\"\n        FROM   retro_notes n\n        WHERE  n.retro_id = $1 AND n.deleted_at IS NULL\n        ORDER  BY n.column_kind,\n                  (SELECT COUNT(*) FROM retro_votes v WHERE v.retro_note_id = n.id) DESC,\n                  n.created_at ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "column_kind!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "body!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "vote_count!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "ef32409a020c008b6ac0fd2939da111af10dc3ea8e7da74ba1e3b8d3d3039064"
+}

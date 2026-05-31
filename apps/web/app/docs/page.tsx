@@ -46,8 +46,8 @@ export default function DocsPage() {
               Secrets are encrypted with a per-project key derived from a master
               you set in <span className="mono">SPRINTLY_VAULT_MASTER_KEY</span>.
               Reveals are <span className="mono">rate-limited</span> (10/hr) and
-              audit-logged. Clipboard copies auto-clear after 30 seconds. Don't
-              put the actual secret in the description field — there's a field
+              audit-logged. Clipboard copies auto-clear after 30 seconds. Don&apos;t
+              put the actual secret in the description field — there&apos;s a field
               for that further down.
             </p>
           </Section>
@@ -104,7 +104,7 @@ function Section({
   title,
   children,
 }: {
-  icon: React.ComponentType<{ size?: number }>;
+  icon: React.ComponentType<{ size?: string | number }>;
   title: string;
   children: React.ReactNode;
 }) {

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id         AS \"id!: Uuid\",\n               board_id   AS \"board_id!: Uuid\",\n               name       AS \"name!: String\",\n               category   AS \"category!: String\",\n               wip_limit,\n               sort_order AS \"sort_order!: f64\"\n        FROM   board_columns\n        WHERE  id = $1 AND deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "board_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "category!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "wip_limit",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "sort_order!: f64",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "23c8fa3b95e1a4350a76c42d779d6228314cd929b2c0db6dda83a1b7e293f717"
+}

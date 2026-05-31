@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT u.id            AS \"user_id!: Uuid\",\n               u.handle        AS \"handle!: String\",\n               u.display_name  AS \"display_name!: String\",\n               COALESCE(SUM(tl.duration_minutes), 0)::bigint AS \"minutes!: i64\"\n        FROM   users u\n        JOIN   time_logs tl ON tl.user_id = u.id\n               AND tl.deleted_at IS NULL\n               AND tl.ended_at IS NOT NULL\n               AND tl.started_at >= $2\n        JOIN   tasks t ON t.id = tl.task_id\n        WHERE  t.project_id = $1 AND t.deleted_at IS NULL\n        GROUP  BY u.id, u.handle, u.display_name\n        ORDER  BY 4 DESC\n        LIMIT  5\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "minutes!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "a16b9b88934522a5554fb521ce17625a1084df7d2c2a58199d180d41c81a06b3"
+}

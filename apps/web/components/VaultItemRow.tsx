@@ -80,7 +80,7 @@ export function VaultItemRow({
       }, REVEAL_TTL_MS);
     },
     onError: (e) => {
-      const err = e as ApiError;
+      const err = e as unknown as ApiError;
       alert(err.status === 429 ? "Reveal rate limit hit. Try again in an hour." : err.message);
     },
   });
@@ -93,7 +93,7 @@ export function VaultItemRow({
         const r = await revealVaultItem(item.id);
         plaintext = r.value;
       } catch (e) {
-        const err = e as ApiError;
+        const err = e as unknown as ApiError;
         alert(err.status === 429 ? "Reveal rate limit hit." : err.message);
         return;
       }
