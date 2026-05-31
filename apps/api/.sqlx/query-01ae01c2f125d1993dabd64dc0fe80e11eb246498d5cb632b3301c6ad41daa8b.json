@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT a.user_id      AS \"user_id!: Uuid\",\n               u.handle       AS \"handle!: String\",\n               u.display_name AS \"display_name!: String\",\n               a.can_view     AS \"can_view!: bool\",\n               a.can_edit     AS \"can_edit!: bool\",\n               a.granted_at   AS \"granted_at!: DateTime<Utc>\"\n        FROM   vault_access a\n        JOIN   users u ON u.id = a.user_id\n        WHERE  a.vault_item_id = $1 AND u.deleted_at IS NULL\n        ORDER  BY u.handle\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "can_view!: bool",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "can_edit!: bool",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "granted_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "01ae01c2f125d1993dabd64dc0fe80e11eb246498d5cb632b3301c6ad41daa8b"
+}

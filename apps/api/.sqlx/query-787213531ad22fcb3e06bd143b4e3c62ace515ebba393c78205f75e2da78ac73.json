@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT status AS \"status!: String\", paid_at\n           FROM payroll_periods WHERE user_id = $1 AND period_year = $2 AND period_month = $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "paid_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int2",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "787213531ad22fcb3e06bd143b4e3c62ace515ebba393c78205f75e2da78ac73"
+}

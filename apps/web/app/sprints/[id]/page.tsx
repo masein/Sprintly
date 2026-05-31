@@ -49,7 +49,7 @@ export default function SprintDetailPage() {
   const start = useMutation({
     mutationFn: () => startSprint(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sprint", id] }),
-    onError: (e) => alert((e as ApiError).message),
+    onError: (e) => alert((e as unknown as ApiError).message),
   });
   const complete = useMutation({
     mutationFn: () => completeSprint(id),
@@ -60,11 +60,11 @@ export default function SprintDetailPage() {
       // Brief pause so the user actually sees the confetti before nav.
       setTimeout(() => router.push(`/sprints/${id}/retro`), 1100);
     },
-    onError: (e) => alert((e as ApiError).message),
+    onError: (e) => alert((e as unknown as ApiError).message),
   });
 
   if (sprintQ.error) {
-    const e = sprintQ.error as ApiError;
+    const e = sprintQ.error as unknown as ApiError;
     if (e.status === 401) {
       router.push("/login");
       return null;
@@ -262,7 +262,7 @@ function AddTaskRow({
       setOpen(false);
       onAdded();
     },
-    onError: (e) => alert((e as ApiError).message),
+    onError: (e) => alert((e as unknown as ApiError).message),
   });
 
   if (!open) {

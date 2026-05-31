@@ -37,7 +37,7 @@ export default function ProjectPage() {
       setProject(p);
       setBoards(b);
     } catch (e) {
-      const err = e as ApiError;
+      const err = e as unknown as ApiError;
       if (err.status === 401) {
         router.push("/login");
         return;
@@ -157,7 +157,7 @@ export default function ProjectPage() {
                 else await archiveProject(project.key);
                 await reload();
               } catch (e) {
-                setError((e as ApiError).message);
+                setError((e as unknown as ApiError).message);
               }
             }}
             className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
@@ -185,7 +185,7 @@ export default function ProjectPage() {
         />
       ) : (
         <div className="mono rounded border border-dashed border-white/10 p-8 text-center text-sm text-chrome-dim">
-          no boards yet — that's unusual; recreate the project
+          no boards yet — that&apos;s unusual; recreate the project
         </div>
       )}
     </AppShell>

@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id            AS \"id!: Uuid\",\n               email         AS \"email!: String\",\n               handle        AS \"handle!: String\",\n               display_name  AS \"display_name!: String\",\n               role          AS \"role!: String\",\n               status        AS \"status!: String\",\n               created_at    AS \"created_at!: DateTime<Utc>\",\n               last_seen_at\n        FROM   users\n        WHERE  deleted_at IS NULL\n          AND  ($1::text IS NULL OR\n                handle ILIKE '%' || $1 || '%'\n                OR display_name ILIKE '%' || $1 || '%'\n                OR email::text ILIKE '%' || $1 || '%')\n          AND  ($2::text IS NULL OR status = $2)\n          AND  ($3::text IS NULL OR role = $3)\n        ORDER  BY handle\n        LIMIT  500\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email!: String",
+        "type_info": {
+          "Custom": {
+            "name": "citext",
+            "kind": "Simple"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "role!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "last_seen_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "cb4f1fdbd004484d310ce2672bb6111f2b8273b4640bb39aaec8a807ff56a13e"
+}

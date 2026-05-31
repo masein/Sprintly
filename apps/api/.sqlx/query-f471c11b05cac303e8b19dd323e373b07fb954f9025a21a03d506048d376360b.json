@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT ON (s.id)\n               s.id           AS \"sprint_id!: Uuid\",\n               t.id           AS \"task_id!: Uuid\",\n               a.actor_id     AS \"user_id?: Uuid\"\n        FROM   sprints s\n        JOIN   tasks t ON t.sprint_id = s.id\n                      AND t.status = 'done'\n                      AND t.completed_at IS NOT NULL\n        LEFT JOIN LATERAL (\n            SELECT actor_id\n            FROM   task_activity\n            WHERE  task_id = t.id AND kind = 'moved'\n            ORDER  BY created_at DESC\n            LIMIT  1\n        ) a ON TRUE\n        WHERE  s.state = 'completed' AND s.deleted_at IS NULL\n        ORDER  BY s.id, t.completed_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sprint_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id?: Uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "f471c11b05cac303e8b19dd323e373b07fb954f9025a21a03d506048d376360b"
+}

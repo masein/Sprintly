@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT  p.id          AS \"id!: Uuid\",\n                p.key         AS \"key!: String\",\n                p.archived_at,\n                pm.role       AS \"actor_role?: String\"\n        FROM    projects p\n        LEFT JOIN project_members pm\n               ON pm.project_id = p.id AND pm.user_id = $2\n        WHERE   p.key = $1 AND p.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "archived_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "actor_role?: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "c7550dae739c1488551024e89ec3f190b55d3cbf8404268161d3de52dc12f1ea"
+}

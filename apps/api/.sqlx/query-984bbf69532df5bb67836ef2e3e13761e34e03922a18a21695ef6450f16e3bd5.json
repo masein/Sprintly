@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT handle        AS \"handle!: String\",\n               display_name  AS \"display_name!: String\",\n               currency      AS \"currency!: String\",\n               COALESCE(hourly_rate_cents, 0) AS \"rate!: i64\"\n        FROM   users WHERE id = $1 AND deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "display_name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "currency!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "rate!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "984bbf69532df5bb67836ef2e3e13761e34e03922a18a21695ef6450f16e3bd5"
+}

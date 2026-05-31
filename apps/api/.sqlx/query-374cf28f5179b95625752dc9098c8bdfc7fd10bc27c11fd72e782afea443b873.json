@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id              AS \"id!: Uuid\",\n               suggested_role  AS \"suggested_role!: String\",\n               expires_at      AS \"expires_at!: chrono::DateTime<chrono::Utc>\",\n               consumed_at\n        FROM   invite_tokens\n        WHERE  token_hash = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "suggested_role!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "expires_at!: chrono::DateTime<chrono::Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "consumed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "374cf28f5179b95625752dc9098c8bdfc7fd10bc27c11fd72e782afea443b873"
+}

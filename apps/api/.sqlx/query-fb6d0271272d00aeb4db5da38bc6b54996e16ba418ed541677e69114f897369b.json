@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT  p.id           AS \"id!: Uuid\",\n                p.key          AS \"key!: String\",\n                p.name         AS \"name!: String\",\n                p.description  AS \"description!: String\",\n                p.icon         AS \"icon!: String\",\n                p.color        AS \"color!: String\",\n                p.archived_at,\n                p.settings     AS \"settings!: serde_json::Value\",\n                p.created_at   AS \"created_at!: DateTime<Utc>\",\n                pm.role        AS \"your_role?: String\",\n                (SELECT COUNT(*) FROM project_members pmc WHERE pmc.project_id = p.id)\n                               AS \"member_count!: i64\"\n        FROM    projects p\n        LEFT JOIN project_members pm\n               ON pm.project_id = p.id AND pm.user_id = $2\n        WHERE   p.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "description!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "icon!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "color!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "archived_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "settings!: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "your_role?: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "member_count!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "fb6d0271272d00aeb4db5da38bc6b54996e16ba418ed541677e69114f897369b"
+}

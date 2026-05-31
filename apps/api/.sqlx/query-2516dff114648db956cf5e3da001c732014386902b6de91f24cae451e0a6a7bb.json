@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT w.user_id      AS \"user_id!: Uuid\",\n               u.handle       AS \"handle!: String\",\n               u.display_name AS \"display_name!: String\",\n               w.added_at     AS \"added_at!: DateTime<Utc>\"\n        FROM   task_watchers w\n        JOIN   users u ON u.id = w.user_id\n        WHERE  w.task_id = $1 AND u.deleted_at IS NULL\n        ORDER  BY u.handle\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "added_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2516dff114648db956cf5e3da001c732014386902b6de91f24cae451e0a6a7bb"
+}

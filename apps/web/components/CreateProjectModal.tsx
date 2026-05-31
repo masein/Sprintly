@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 const COLORS = ["#7c5cff", "#22d3ee", "#10b981", "#f59e0b", "#ef4444", "#ec4899"];
-const ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
+const ICONS: Record<string, React.ComponentType<{ size?: string | number }>> = {
   folder: Folder,
   kanban: FolderKanban,
   boxes: Boxes,
@@ -87,7 +87,7 @@ export function CreateProjectModal({
       const p = await createProject({ key, name, icon, color });
       onCreated(p.key);
     } catch (err) {
-      setError((err as ApiError).message);
+      setError((err as unknown as ApiError).message);
     } finally {
       setSubmitting(false);
     }

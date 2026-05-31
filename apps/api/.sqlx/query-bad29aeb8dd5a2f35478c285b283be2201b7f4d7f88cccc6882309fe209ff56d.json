@@ -1,0 +1,149 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id              AS \"id!: Uuid\",\n               t.key             AS \"key!: String\",\n               t.project_id      AS \"project_id!: Uuid\",\n               p.key             AS \"project_key!: String\",\n               t.board_id        AS \"board_id!: Uuid\",\n               t.column_id       AS \"column_id!: Uuid\",\n               t.title           AS \"title!: String\",\n               t.description     AS \"description!: String\",\n               t.type            AS \"type!: String\",\n               t.priority        AS \"priority!: String\",\n               t.status          AS \"status!: String\",\n               t.assignee_id,\n               t.reporter_id,\n               t.parent_task_id,\n               t.estimate_minutes,\n               t.story_points,\n               t.due_date,\n               t.labels          AS \"labels!: Vec<String>\",\n               t.order_in_column AS \"order_in_column!: f64\",\n               t.created_at      AS \"created_at!: DateTime<Utc>\",\n               t.updated_at      AS \"updated_at!: DateTime<Utc>\",\n               t.completed_at\n        FROM   tasks t\n        JOIN   projects p ON p.id = t.project_id\n        WHERE  t.key = $1 AND t.project_id = $2 AND t.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "project_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "board_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "column_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "title!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "description!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "type!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "priority!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "status!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "assignee_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "reporter_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
+        "name": "parent_task_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 14,
+        "name": "estimate_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "story_points",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "due_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 17,
+        "name": "labels!: Vec<String>",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 18,
+        "name": "order_in_column!: f64",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 19,
+        "name": "created_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "updated_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "bad29aeb8dd5a2f35478c285b283be2201b7f4d7f88cccc6882309fe209ff56d"
+}

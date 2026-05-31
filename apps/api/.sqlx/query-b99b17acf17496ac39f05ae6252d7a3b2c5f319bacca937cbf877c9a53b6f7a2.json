@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT a.task_id     AS \"task_id!: Uuid\",\n               a.uploader_id,\n               b.project_id  AS \"project_id!: Uuid\"\n        FROM   task_attachments a\n        JOIN   tasks t ON t.id = a.task_id\n        JOIN   boards b ON b.id = t.board_id\n        WHERE  a.id = $1 AND a.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "uploader_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_id!: Uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "b99b17acf17496ac39f05ae6252d7a3b2c5f319bacca937cbf877c9a53b6f7a2"
+}

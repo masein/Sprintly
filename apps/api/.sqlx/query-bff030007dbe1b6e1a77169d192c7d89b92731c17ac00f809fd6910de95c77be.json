@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT s.id          AS \"id!: Uuid\",\n               s.name        AS \"name!: String\",\n               s.starts_at   AS \"starts_at!: DateTime<Utc>\",\n               s.ends_at     AS \"ends_at!: DateTime<Utc>\",\n               COALESCE((SELECT COUNT(*) FROM tasks t\n                          WHERE t.sprint_id = s.id AND t.deleted_at IS NULL), 0)\n                             AS \"task_count!: i64\",\n               COALESCE((SELECT SUM(story_points) FROM tasks t\n                          WHERE t.sprint_id = s.id AND t.deleted_at IS NULL), 0)::bigint\n                             AS \"total_points!: i64\",\n               COALESCE((SELECT SUM(story_points) FROM tasks t\n                          WHERE t.sprint_id = s.id AND t.status = 'done'\n                            AND t.deleted_at IS NULL), 0)::bigint\n                             AS \"done_points!: i64\"\n        FROM   sprints s\n        WHERE  s.project_id = $1 AND s.state = 'active' AND s.deleted_at IS NULL\n        LIMIT  1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "starts_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "ends_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "task_count!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "total_points!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "done_points!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "bff030007dbe1b6e1a77169d192c7d89b92731c17ac00f809fd6910de95c77be"
+}

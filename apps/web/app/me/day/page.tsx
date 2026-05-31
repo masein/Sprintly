@@ -30,7 +30,7 @@ export default function MyDayPage() {
   });
 
   if (q.error) {
-    const e = q.error as ApiError;
+    const e = q.error as unknown as ApiError;
     if (e.status === 401) {
       router.push("/login");
       return null;

@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT  p.id           AS \"id!: Uuid\",\n                p.key          AS \"key!: String\",\n                p.name         AS \"name!: String\",\n                p.description  AS \"description!: String\",\n                p.icon         AS \"icon!: String\",\n                p.color        AS \"color!: String\",\n                p.archived_at,\n                p.settings     AS \"settings!: serde_json::Value\",\n                p.created_at   AS \"created_at!: DateTime<Utc>\",\n                pm_self.role   AS \"your_role?: String\",\n                (SELECT COUNT(*) FROM project_members pmc WHERE pmc.project_id = p.id)\n                               AS \"member_count!: i64\"\n        FROM    projects p\n        LEFT JOIN project_members pm_self\n               ON pm_self.project_id = p.id AND pm_self.user_id = $1\n        WHERE   p.deleted_at IS NULL\n          AND   ($2 OR pm_self.user_id IS NOT NULL)\n        ORDER BY p.archived_at IS NOT NULL, p.created_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "description!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "icon!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "color!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "archived_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "settings!: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "your_role?: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "member_count!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "3875c039232628fd31c8c63095e7b69b8b1e33a2ff7f27b0eb79ab826a2f7ff9"
+}

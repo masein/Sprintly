@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id              AS \"id!: Uuid\",\n               name            AS \"name!: String\",\n               completed_at,\n               velocity_points AS \"velocity_points!: i32\"\n        FROM   sprints\n        WHERE  project_id = $1 AND state = 'completed'\n          AND  velocity_points IS NOT NULL\n          AND  deleted_at IS NULL\n        ORDER  BY completed_at DESC\n        LIMIT  10\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "velocity_points!: i32",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "2a73ca85affda549d3efa31a60daefa4a9dd300a3c0389525ec3b0541d4baf7a"
+}

@@ -43,7 +43,7 @@ export function TaskTimer({ taskKey }: { taskKey: string }) {
       qc.invalidateQueries({ queryKey: ["me-timer"] });
       qc.invalidateQueries({ queryKey: ["task-logs", taskKey] });
     },
-    onError: (e) => alert((e as ApiError).message),
+    onError: (e) => alert((e as unknown as ApiError).message),
   });
   const stop = useMutation({
     mutationFn: () => stopTimer(),
@@ -142,7 +142,7 @@ function ManualEntry({
       });
       onSaved();
     } catch (e) {
-      setError((e as ApiError).message);
+      setError((e as unknown as ApiError).message);
     } finally {
       setBusy(false);
     }

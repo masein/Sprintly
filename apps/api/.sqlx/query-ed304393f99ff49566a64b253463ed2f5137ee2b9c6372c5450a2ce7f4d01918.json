@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE projects\n           SET next_task_seq = next_task_seq + 1\n         WHERE id = $1 AND deleted_at IS NULL\n        RETURNING key             AS \"key!: String\",\n                  next_task_seq - 1 AS \"seq!: i64\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "seq!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "ed304393f99ff49566a64b253463ed2f5137ee2b9c6372c5450a2ce7f4d01918"
+}

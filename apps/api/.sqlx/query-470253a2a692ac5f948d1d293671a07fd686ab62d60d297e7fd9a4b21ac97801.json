@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT user_id AS \"user_id!: Uuid\",\n               COUNT(*)::bigint AS \"n!: i64\"\n        FROM   time_logs\n        WHERE  deleted_at IS NULL AND ended_at IS NOT NULL\n          AND  EXTRACT(HOUR FROM ended_at AT TIME ZONE 'UTC') < 5\n        GROUP  BY user_id\n        HAVING COUNT(*) >= 10\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "n!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "470253a2a692ac5f948d1d293671a07fd686ab62d60d297e7fd9a4b21ac97801"
+}

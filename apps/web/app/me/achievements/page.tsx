@@ -21,7 +21,7 @@ export default function AchievementsPage() {
   const mine = useQuery({ queryKey: ["my-achievements"], queryFn: listMyAchievements });
 
   if (catalog.error) {
-    const e = catalog.error as ApiError;
+    const e = catalog.error as unknown as ApiError;
     if (e.status === 401) {
       router.push("/login");
       return null;

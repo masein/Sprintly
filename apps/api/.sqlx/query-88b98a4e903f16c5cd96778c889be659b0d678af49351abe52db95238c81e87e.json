@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH per_task AS (\n            SELECT t.assignee_id AS user_id,\n                   t.id          AS task_id,\n                   t.estimate_minutes,\n                   COALESCE(SUM(tl.duration_minutes), 0)::bigint AS logged\n            FROM   tasks t\n            JOIN   time_logs tl ON tl.task_id = t.id AND tl.user_id = t.assignee_id\n                                 AND tl.deleted_at IS NULL AND tl.ended_at IS NOT NULL\n            WHERE  t.assignee_id IS NOT NULL\n              AND  t.deleted_at IS NULL\n              AND  t.estimate_minutes IS NOT NULL AND t.estimate_minutes > 0\n              AND  t.status = 'done'\n            GROUP BY t.assignee_id, t.id, t.estimate_minutes\n        )\n        SELECT user_id AS \"user_id!: Uuid\",\n               COUNT(*)::bigint AS \"n!: i64\"\n        FROM   per_task\n        WHERE  ABS(logged - estimate_minutes) <= GREATEST(1, estimate_minutes / 10)\n        GROUP  BY user_id\n        HAVING COUNT(*) >= 20\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "n!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "88b98a4e903f16c5cd96778c889be659b0d678af49351abe52db95238c81e87e"
+}

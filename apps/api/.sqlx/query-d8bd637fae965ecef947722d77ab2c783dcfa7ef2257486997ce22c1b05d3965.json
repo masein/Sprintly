@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT period_start    AS \"period_start!: NaiveDate\",\n               period_end      AS \"period_end!: NaiveDate\",\n               status          AS \"status!: String\",\n               total_minutes   AS \"total_minutes!: i32\",\n               billable_minutes AS \"billable_minutes!: i32\",\n               total_pay_cents AS \"total_pay_cents!: i64\",\n               currency        AS \"currency!: String\"\n        FROM   timesheets\n        WHERE  user_id = $1\n        ORDER  BY period_start DESC\n        LIMIT  104\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "period_start!: NaiveDate",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 1,
+        "name": "period_end!: NaiveDate",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "total_minutes!: i32",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "billable_minutes!: i32",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "total_pay_cents!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "currency!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d8bd637fae965ecef947722d77ab2c783dcfa7ef2257486997ce22c1b05d3965"
+}

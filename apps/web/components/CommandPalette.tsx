@@ -44,7 +44,7 @@ type Action = {
   id: string;
   label: string;
   hint?: string;
-  icon: React.ComponentType<{ size?: number }>;
+  icon: React.ComponentType<{ size?: string | number }>;
   run: (ctx: ActionCtx) => void | Promise<void>;
 };
 
@@ -251,7 +251,7 @@ export function CommandPalette({
 type RowItem = {
   kind: "task" | "project" | "user" | "action";
   id: string;
-  icon: React.ComponentType<{ size?: number }>;
+  icon: React.ComponentType<{ size?: string | number }>;
   label: string;
   hint?: string;
   sub?: string;
@@ -410,7 +410,7 @@ function HelpPanel() {
         ))}
       </ul>
       <div className="mono mt-3 flex items-center gap-2 px-2 text-[10px] text-chrome-dim">
-        <Sparkles size={11} /> there are easter eggs. you'll find them.
+        <Sparkles size={11} /> there are easter eggs. you&apos;ll find them.
       </div>
     </div>
   );

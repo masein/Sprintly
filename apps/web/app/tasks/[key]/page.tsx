@@ -43,7 +43,7 @@ export default function TaskPage() {
   const meQ = useQuery({ queryKey: ["me"], queryFn: () => me() });
 
   if (taskQ.error) {
-    const err = taskQ.error as ApiError;
+    const err = taskQ.error as unknown as ApiError;
     if (err.status === 401) {
       router.push("/login");
       return null;

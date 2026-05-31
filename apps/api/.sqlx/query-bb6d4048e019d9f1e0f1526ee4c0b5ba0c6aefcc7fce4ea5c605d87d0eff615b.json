@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT b.id  AS \"board_id!: Uuid\",\n                       bc.id AS \"column_id!: Uuid\"\n                FROM   boards b\n                JOIN   board_columns bc ON bc.board_id = b.id AND bc.deleted_at IS NULL\n                WHERE  b.project_id = $1 AND b.is_default = true AND b.deleted_at IS NULL\n                ORDER  BY bc.sort_order ASC\n                LIMIT  1\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "board_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "column_id!: Uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "bb6d4048e019d9f1e0f1526ee4c0b5ba0c6aefcc7fce4ea5c605d87d0eff615b"
+}

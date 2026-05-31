@@ -54,7 +54,7 @@ export default function VaultPage() {
   const [accessId, setAccessId] = useState<string | null>(null);
 
   if (itemsQ.error) {
-    const e = itemsQ.error as ApiError;
+    const e = itemsQ.error as unknown as ApiError;
     if (e.status === 401) {
       router.push("/login");
       return null;
@@ -177,7 +177,7 @@ function CreateVaultForm({
       qc.invalidateQueries({ queryKey: ["vault", projectKey] });
       onClose();
     },
-    onError: (e) => setError((e as ApiError).message),
+    onError: (e) => setError((e as unknown as ApiError).message),
   });
 
   return (

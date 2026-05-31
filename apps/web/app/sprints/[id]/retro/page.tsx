@@ -57,11 +57,11 @@ export default function RetroPage() {
       qc.invalidateQueries({ queryKey: ["retro", sprintId] });
       qc.invalidateQueries({ queryKey: ["sprint", sprintId] });
     },
-    onError: (e) => alert((e as ApiError).message),
+    onError: (e) => alert((e as unknown as ApiError).message),
   });
 
   if (retroQ.error) {
-    const e = retroQ.error as ApiError;
+    const e = retroQ.error as unknown as ApiError;
     if (e.status === 401) {
       router.push("/login");
       return null;
@@ -289,7 +289,7 @@ function NoteCard({
   const promote = useMutation({
     mutationFn: () => promoteNote(note.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["retro", sprintId] }),
-    onError: (e) => alert((e as ApiError).message),
+    onError: (e) => alert((e as unknown as ApiError).message),
   });
   const del = useMutation({
     mutationFn: () => deleteNote(note.id),

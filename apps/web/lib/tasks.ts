@@ -114,7 +114,7 @@ export function useMoveTask(projectId: string) {
       return { snapshots };
     },
     onError: (_err, _vars, ctx) => {
-      ctx?.snapshots.forEach(([key, data]) => qc.setQueryData(key, data));
+      ctx?.snapshots.forEach(([key, data]) => qc.setQueryData<Task[]>(key, data));
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["tasks", projectId] });

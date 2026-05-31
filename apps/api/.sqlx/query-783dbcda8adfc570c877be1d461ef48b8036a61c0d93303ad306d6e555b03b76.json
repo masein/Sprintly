@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT starts_at  AS \"starts_at!: DateTime<Utc>\",\n               ends_at    AS \"ends_at!: DateTime<Utc>\"\n        FROM   sprints WHERE id = $1 AND deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "starts_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "ends_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "783dbcda8adfc570c877be1d461ef48b8036a61c0d93303ad306d6e555b03b76"
+}

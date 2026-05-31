@@ -74,7 +74,7 @@ pub async fn publish(redis: &Pool, ev: &Event) {
             if let Err(e) = redis::cmd("PUBLISH")
                 .arg(CHANNEL)
                 .arg(payload)
-                .query_async::<_, i64>(&mut conn)
+                .query_async::<i64>(&mut conn)
                 .await
             {
                 warn!(error = %e, "event publish failed");

@@ -22,18 +22,18 @@ export default function ApprovalsPage() {
   const q = useQuery({
     queryKey: ["pending-approvals"],
     queryFn: () => pendingApprovals(),
-    retry: (n, e) => (e as ApiError)?.status !== 401 && n < 1,
+    retry: (n, e) => (e as unknown as ApiError)?.status !== 401 && n < 1,
   });
 
   const approve = useMutation({
     mutationFn: ({ userId, periodStart }: { userId: string; periodStart: string }) =>
       approveTimesheet(userId, periodStart),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pending-approvals"] }),
-    onError: (e) => alert((e as ApiError).message),
+    onError: (e) => alert((e as unknown as ApiError).message),
   });
 
   if (q.error) {
-    const e = q.error as ApiError;
+    const e = q.error as unknown as ApiError;
     if (e.status === 401) {
       router.push("/login");
       return null;
@@ -42,7 +42,7 @@ export default function ApprovalsPage() {
       return (
         <AppShell>
           <div className="mono rounded border border-white/10 bg-ink-subtle p-6 text-sm text-chrome-dim">
-            You don't have access to this page.
+            You don&apos;t have access to this page.
           </div>
         </AppShell>
       );

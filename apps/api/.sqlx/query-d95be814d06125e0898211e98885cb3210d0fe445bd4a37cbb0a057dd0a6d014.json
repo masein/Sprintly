@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT code        AS \"code!: String\",\n               title       AS \"title!: String\",\n               description AS \"description!: String\",\n               icon        AS \"icon!: String\"\n        FROM   achievements\n        ORDER  BY title ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "code!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "icon!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d95be814d06125e0898211e98885cb3210d0fe445bd4a37cbb0a057dd0a6d014"
+}

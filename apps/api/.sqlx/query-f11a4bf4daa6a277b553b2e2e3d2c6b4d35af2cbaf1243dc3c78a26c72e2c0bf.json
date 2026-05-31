@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.key             AS \"key!: String\",\n               p.key             AS \"project_key!: String\",\n               t.title           AS \"title!: String\",\n               t.status          AS \"status!: String\",\n               t.priority        AS \"priority!: String\",\n               t.type            AS \"type!: String\",\n               t.due_date,\n               t.updated_at      AS \"updated_at!: DateTime<Utc>\"\n        FROM   tasks t\n        JOIN   projects p ON p.id = t.project_id\n        WHERE  t.assignee_id = $1\n          AND  t.deleted_at IS NULL\n          AND  p.deleted_at IS NULL\n        ORDER BY\n            CASE t.status\n                WHEN 'in_progress' THEN 0\n                WHEN 'review'      THEN 1\n                WHEN 'todo'        THEN 2\n                WHEN 'done'        THEN 3\n                ELSE 4\n            END,\n            t.priority ASC,\n            t.due_date NULLS LAST,\n            t.updated_at DESC\n        LIMIT 200\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "title!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "priority!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "type!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "due_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "f11a4bf4daa6a277b553b2e2e3d2c6b4d35af2cbaf1243dc3c78a26c72e2c0bf"
+}

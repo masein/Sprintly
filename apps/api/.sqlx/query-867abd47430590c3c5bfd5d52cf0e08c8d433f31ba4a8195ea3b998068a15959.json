@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.assignee_id AS \"user_id?: Uuid\",\n               COUNT(*)::bigint AS \"n!: i64\"\n        FROM   tasks t\n        WHERE  t.status = 'done' AND t.deleted_at IS NULL\n          AND  t.assignee_id IS NOT NULL\n        GROUP  BY t.assignee_id\n        HAVING COUNT(*) >= 50\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id?: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "n!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "867abd47430590c3c5bfd5d52cf0e08c8d433f31ba4a8195ea3b998068a15959"
+}

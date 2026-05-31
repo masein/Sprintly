@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.reporter_id AS \"user_id?: Uuid\",\n               COUNT(*)::bigint AS \"n!: i64\"\n        FROM   tasks t\n        WHERE  t.type = 'bug' AND t.status = 'done'\n          AND  t.deleted_at IS NULL AND t.reporter_id IS NOT NULL\n        GROUP  BY t.reporter_id\n        HAVING COUNT(*) >= 50\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id?: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "n!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "ffb76fd6ad3d9af0af90f95f85cf46f101c91a6648d580d4bdfacbb72e73dc96"
+}

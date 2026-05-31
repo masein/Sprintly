@@ -43,7 +43,9 @@ pub fn router() -> Router<AppState> {
         .route("/me/timesheets/:period_start/submit", post(submit))
         .route("/timesheets/:user_id/:period_start/approve", post(approve))
         .route("/timesheets/:user_id/:period_start/mark-paid", post(mark_paid))
-        .route("/timesheets/:user_id/:period_start.csv", get(csv_export))
+        // `:period_start` carries an optional `.csv` suffix — matchit can't put
+        // a literal after a param segment, so the handler splits it off.
+        .route("/timesheets/:user_id/:period_start", get(csv_export))
         .route("/timesheets/pending", get(pending_approvals))
 }
 
@@ -278,8 +280,14 @@ async fn mark_paid(
 async fn csv_export(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path((target_user, period_start)): Path<(Uuid, NaiveDate)>,
+    // The export URL is `.../:period_start.csv`; strip the suffix before parsing.
+    Path((target_user, period_raw)): Path<(Uuid, String)>,
 ) -> AppResult<impl IntoResponse> {
+    let period_start: NaiveDate = period_raw
+        .strip_suffix(".csv")
+        .unwrap_or(&period_raw)
+        .parse()
+        .map_err(|_| AppError::BadRequest("invalid period_start".into()))?;
     if target_user != user.id {
         require_can_approve(&state.db, &user, target_user).await?;
     }
@@ -345,6 +353,21 @@ async fn csv_export(
     Ok((StatusCode::OK, h, csv))
 }
 
+// Shared row shape for the two query branches below. Two `query!` calls
+// produce distinct anonymous record types even with identical columns, so we
+// map both into this named struct via `query_as!`.
+struct PendingRow {
+    user_id: Uuid,
+    period_start: NaiveDate,
+    period_end: NaiveDate,
+    total_minutes: i32,
+    billable_minutes: i32,
+    total_pay_cents: i64,
+    currency: String,
+    handle: String,
+    display_name: String,
+}
+
 async fn pending_approvals(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -352,7 +375,8 @@ async fn pending_approvals(
     // Admins see every submitted week. Anyone else sees submissions from
     // users who logged time on a project they lead.
     let rows = if user.role == GlobalRole::Admin {
-        sqlx::query!(
+        sqlx::query_as!(
+            PendingRow,
             r#"
             SELECT ts.user_id        AS "user_id!: Uuid",
                    ts.period_start   AS "period_start!: NaiveDate",
@@ -372,7 +396,8 @@ async fn pending_approvals(
         .fetch_all(&state.db)
         .await?
     } else {
-        sqlx::query!(
+        sqlx::query_as!(
+            PendingRow,
             r#"
             SELECT DISTINCT
                    ts.user_id        AS "user_id!: Uuid",

@@ -1,0 +1,51 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id           AS \"id!: Uuid\",\n               email        AS \"email!: String\",\n               handle       AS \"handle!: String\",\n               display_name AS \"display_name!: String\",\n               role         AS \"role!: String\"\n        FROM   users WHERE id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "email!: String",
+        "type_info": {
+          "Custom": {
+            "name": "citext",
+            "kind": "Simple"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "role!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8ae2e820f6940a43eb631d8c361e3889dec6b65f2cb2489a0874908d1253f528"
+}

@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT a.id           AS \"id!: Uuid\",\n               actor.handle   AS \"actor_handle?: String\",\n               a.action       AS \"action!: String\",\n               target.handle  AS \"target_handle?: String\",\n               a.payload      AS \"payload!: serde_json::Value\",\n               a.ip,\n               a.occurred_at  AS \"occurred_at!: DateTime<Utc>\"\n        FROM   admin_audit_log a\n        LEFT JOIN users actor  ON actor.id  = a.actor_id\n        LEFT JOIN users target ON target.id = a.target_user_id\n        ORDER  BY a.occurred_at DESC\n        LIMIT  $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "actor_handle?: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "action!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "target_handle?: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "payload!: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "ip",
+        "type_info": "Inet"
+      },
+      {
+        "ordinal": 6,
+        "name": "occurred_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "65e186da310fcbbf52694385958f3fbd7883146fe0dedbbe986c34e9d4f8eece"
+}

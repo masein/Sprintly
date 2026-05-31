@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id        AS \"id!: Uuid\",\n               t.project_id AS \"project_id!: Uuid\"\n        FROM   tasks t\n        WHERE  t.key = $1 AND t.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id!: Uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "cfd62578db905a84a85f81eaeeb31fc9a222958ed97f4543d54a78fe8f0b58ec"
+}

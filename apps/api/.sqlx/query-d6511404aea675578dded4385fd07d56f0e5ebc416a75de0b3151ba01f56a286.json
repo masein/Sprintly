@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.key         AS \"task_key!: String\",\n               tl.started_at AS \"started_at!: DateTime<Utc>\"\n        FROM   time_logs tl\n        JOIN   tasks t ON t.id = tl.task_id\n        WHERE  tl.user_id = $1 AND tl.ended_at IS NULL AND tl.deleted_at IS NULL\n        LIMIT  1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "started_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d6511404aea675578dded4385fd07d56f0e5ebc416a75de0b3151ba01f56a286"
+}

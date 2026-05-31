@@ -25,7 +25,7 @@ pub async fn readiness(State(state): State<AppState>) -> impl IntoResponse {
 
     let redis_ok = match state.redis.get().await {
         Ok(mut conn) => redis::cmd("PING")
-            .query_async::<_, String>(&mut conn)
+            .query_async::<String>(&mut conn)
             .await
             .map(|s| s == "PONG")
             .unwrap_or(false),

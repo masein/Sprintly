@@ -39,7 +39,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
       router.push("/");
       router.refresh();
     } catch (err) {
-      const apiErr = err as ApiError;
+      const apiErr = err as unknown as ApiError;
       setError(humanize(apiErr, mode));
     } finally {
       setSubmitting(false);

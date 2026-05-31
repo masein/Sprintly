@@ -45,12 +45,18 @@ RUN pnpm build
 FROM node:20-alpine AS runtime
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+# Next's standalone server binds to $HOSTNAME, which Docker otherwise sets to
+# the container id — that leaves localhost unbound and fails the healthcheck.
+ENV HOSTNAME=0.0.0.0
 RUN apk add --no-cache wget && \
     addgroup -S sprintly && adduser -S sprintly -G sprintly
 WORKDIR /app
+# `next build` with output:"standalone" (no outputFileTracingRoot) roots the
+# traced bundle at the app, so server.js sits at the standalone root and the
+# server serves ./.next/static and ./public relative to it.
 COPY --from=builder --chown=sprintly:sprintly /app/apps/web/.next/standalone ./
-COPY --from=builder --chown=sprintly:sprintly /app/apps/web/.next/static ./apps/web/.next/static
-COPY --from=builder --chown=sprintly:sprintly /app/apps/web/public ./apps/web/public
+COPY --from=builder --chown=sprintly:sprintly /app/apps/web/.next/static ./.next/static
+COPY --from=builder --chown=sprintly:sprintly /app/apps/web/public ./public
 USER sprintly
 EXPOSE 3000
-CMD ["node", "apps/web/server.js"]
+CMD ["node", "server.js"]

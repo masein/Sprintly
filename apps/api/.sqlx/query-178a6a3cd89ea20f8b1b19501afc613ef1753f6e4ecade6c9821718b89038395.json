@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT emoji      AS \"emoji!: String\",\n               COUNT(*)   AS \"count!: i64\",\n               bool_or(user_id = $2) AS \"user_reacted!: bool\"\n        FROM   task_reactions\n        WHERE  comment_id = $1\n        GROUP  BY emoji\n        ORDER  BY emoji\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "emoji!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_reacted!: bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "178a6a3cd89ea20f8b1b19501afc613ef1753f6e4ecade6c9821718b89038395"
+}

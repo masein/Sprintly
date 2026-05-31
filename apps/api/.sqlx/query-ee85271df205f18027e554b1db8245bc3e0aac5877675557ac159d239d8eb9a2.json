@@ -1,0 +1,45 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id            AS \"id!: Uuid\",\n               password_hash AS \"password_hash!: String\",\n               role          AS \"role!: String\",\n               status        AS \"status!: String\"\n        FROM   users\n        WHERE  email = $1 AND deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "password_hash!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "role!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        {
+          "Custom": {
+            "name": "citext",
+            "kind": "Simple"
+          }
+        }
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ee85271df205f18027e554b1db8245bc3e0aac5877675557ac159d239d8eb9a2"
+}

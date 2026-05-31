@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT tl.started_at      AS \"started_at!: DateTime<Utc>\",\n               tl.duration_minutes,\n               tl.billable        AS \"billable!: bool\",\n               t.key              AS \"task_key!: String\",\n               p.key              AS \"project_key!: String\",\n               t.title            AS \"title!: String\"\n        FROM   time_logs tl\n        JOIN   tasks t ON t.id = tl.task_id\n        JOIN   projects p ON p.id = t.project_id\n        WHERE  tl.user_id = $1\n          AND  tl.deleted_at IS NULL\n          AND  tl.ended_at IS NOT NULL\n          AND  tl.started_at >= $2\n          AND  tl.started_at <  $3\n        ORDER  BY tl.started_at ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "started_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "duration_minutes",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "billable!: bool",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "task_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "project_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "title!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "699d804e055892d41b9a6946996ba8d8427d3d7376ab39ad7bfd5e84c97ad9fa"
+}

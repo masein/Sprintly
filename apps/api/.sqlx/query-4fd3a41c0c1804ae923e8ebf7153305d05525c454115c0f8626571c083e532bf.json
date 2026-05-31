@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT t.key             AS \"key!: String\",\n                   p.key             AS \"project_key!: String\",\n                   t.title           AS \"title!: String\",\n                   t.status          AS \"status!: String\",\n                   t.priority        AS \"priority!: String\",\n                   t.type            AS \"type!: String\"\n            FROM   tasks t\n            JOIN   projects p ON p.id = t.project_id\n            WHERE  t.project_id = ANY($1)\n              AND  t.deleted_at IS NULL\n              AND  (t.search_tsv @@ plainto_tsquery('english', $2)\n                    OR t.title % $2)\n            ORDER BY\n                COALESCE(ts_rank(t.search_tsv, plainto_tsquery('english', $2)), 0) DESC,\n                similarity(t.title, $2) DESC,\n                t.updated_at DESC\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "title!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "status!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "priority!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "type!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4fd3a41c0c1804ae923e8ebf7153305d05525c454115c0f8626571c083e532bf"
+}

@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT ts.user_id        AS \"user_id!: Uuid\",\n                   ts.period_start   AS \"period_start!: NaiveDate\",\n                   ts.period_end     AS \"period_end!: NaiveDate\",\n                   ts.total_minutes  AS \"total_minutes!: i32\",\n                   ts.billable_minutes AS \"billable_minutes!: i32\",\n                   ts.total_pay_cents AS \"total_pay_cents!: i64\",\n                   ts.currency       AS \"currency!: String\",\n                   u.handle          AS \"handle!: String\",\n                   u.display_name    AS \"display_name!: String\"\n            FROM   timesheets ts\n            JOIN   users u ON u.id = ts.user_id\n            WHERE  ts.status = 'submitted'\n            ORDER  BY ts.submitted_at ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "period_start!: NaiveDate",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 2,
+        "name": "period_end!: NaiveDate",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 3,
+        "name": "total_minutes!: i32",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "billable_minutes!: i32",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "total_pay_cents!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "currency!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "display_name!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1934d40714fb48982ef78245aa8df7eee996e7eaed0007925620c06bf84561df"
+}

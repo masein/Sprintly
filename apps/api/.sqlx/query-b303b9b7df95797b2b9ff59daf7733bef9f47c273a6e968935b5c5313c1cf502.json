@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT l.kind         AS \"kind!: String\",\n               'outgoing'     AS \"direction!: String\",\n               t2.key         AS \"other_key!: String\",\n               t2.title       AS \"other_title!: String\",\n               t2.status      AS \"other_status!: String\"\n        FROM   task_links l\n        JOIN   tasks t2 ON t2.id = l.to_task_id\n        WHERE  l.from_task_id = $1 AND t2.deleted_at IS NULL\n        UNION ALL\n        SELECT l.kind,\n               'incoming',\n               t1.key,\n               t1.title,\n               t1.status\n        FROM   task_links l\n        JOIN   tasks t1 ON t1.id = l.from_task_id\n        WHERE  l.to_task_id = $1 AND t1.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "direction!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "other_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "other_title!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "other_status!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b303b9b7df95797b2b9ff59daf7733bef9f47c273a6e968935b5c5313c1cf502"
+}

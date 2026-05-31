@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT u.id                                AS \"user_id!: Uuid\",\n               u.handle                            AS \"handle!: String\",\n               u.display_name                      AS \"display_name!: String\",\n               u.currency                          AS \"currency!: String\",\n               COALESCE(u.hourly_rate_cents, 0)    AS \"rate!: i64\",\n               COALESCE(SUM(tl.duration_minutes), 0)::bigint AS \"total_minutes!: i64\",\n               COALESCE(SUM(tl.duration_minutes)\n                        FILTER (WHERE tl.billable = true), 0)::bigint\n                                                   AS \"billable_minutes!: i64\"\n        FROM   users u\n        LEFT JOIN time_logs tl ON tl.user_id = u.id\n               AND tl.deleted_at IS NULL\n               AND tl.ended_at IS NOT NULL\n               AND tl.started_at >= $1 AND tl.started_at < $2\n        WHERE  u.deleted_at IS NULL AND u.status = 'active'\n        GROUP  BY u.id, u.handle, u.display_name, u.currency, u.hourly_rate_cents\n        ORDER  BY u.handle\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "currency!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "rate!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "total_minutes!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "billable_minutes!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "9b2e995fb2dd915e25c88181a3ac064d772221bb4cb6a09c3a1d858e6946ef76"
+}

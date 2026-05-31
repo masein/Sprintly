@@ -116,13 +116,13 @@ export function Sprint({
   const grid = useMemo(() => {
     const g = BODY.map((row) => row.split(""));
     for (const [r, c, ch] of OVERLAYS[mood]) {
-      g[r][c] = ch;
+      g[r]![c] = ch;
     }
     if (sunglasses) {
       // Black bar across both eye rows (rows 6+7, cols 3-12).
       for (let r = 6; r <= 7; r++) {
         for (let c = 3; c <= 12; c++) {
-          g[r][c] = "g";
+          g[r]![c] = "g";
         }
       }
     }

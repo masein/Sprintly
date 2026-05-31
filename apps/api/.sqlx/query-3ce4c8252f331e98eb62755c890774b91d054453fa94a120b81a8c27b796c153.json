@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT n.id              AS \"id!: Uuid\",\n               n.column_kind     AS \"column_kind!: String\",\n               n.body            AS \"body!: String\",\n               n.anonymous       AS \"anonymous!: bool\",\n               u.handle          AS \"author_handle?: String\",\n               n.created_at      AS \"created_at!: DateTime<Utc>\",\n               n.promoted_task_id,\n               (SELECT key FROM tasks t WHERE t.id = n.promoted_task_id)\n                                 AS \"promoted_task_key?: String\",\n               (SELECT COUNT(*) FROM retro_votes v WHERE v.retro_note_id = n.id)\n                                 AS \"vote_count!: i64\",\n               EXISTS(SELECT 1 FROM retro_votes v WHERE v.retro_note_id = n.id AND v.user_id = $2)\n                                 AS \"you_voted!: bool\"\n        FROM   retro_notes n\n        LEFT JOIN users u ON u.id = n.author_id\n        WHERE  n.retro_id = $1 AND n.deleted_at IS NULL\n        ORDER  BY n.column_kind, n.sort_order ASC, n.created_at ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "column_kind!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "body!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "anonymous!: bool",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "author_handle?: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "promoted_task_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "promoted_task_key?: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "vote_count!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "you_voted!: bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "3ce4c8252f331e98eb62755c890774b91d054453fa94a120b81a8c27b796c153"
+}

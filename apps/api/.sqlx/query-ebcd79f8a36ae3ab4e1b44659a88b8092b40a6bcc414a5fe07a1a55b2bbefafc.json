@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT a.id          AS \"id!: Uuid\",\n               a.task_id     AS \"task_id!: Uuid\",\n               a.actor_id,\n               u.handle      AS \"actor_handle?: String\",\n               a.kind        AS \"kind!: String\",\n               a.payload     AS \"payload!: serde_json::Value\",\n               a.created_at  AS \"created_at!: DateTime<Utc>\"\n        FROM   task_activity a\n        LEFT JOIN users u ON u.id = a.actor_id\n        WHERE  a.task_id = $1\n        ORDER  BY a.created_at DESC\n        LIMIT  200\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "task_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "actor_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "actor_handle?: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "kind!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "payload!: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ebcd79f8a36ae3ab4e1b44659a88b8092b40a6bcc414a5fe07a1a55b2bbefafc"
+}

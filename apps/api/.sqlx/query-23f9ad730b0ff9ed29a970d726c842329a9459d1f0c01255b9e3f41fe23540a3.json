@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT ON (r.id)\n               r.id           AS \"retro_id!: Uuid\",\n               n.author_id    AS \"user_id?: Uuid\",\n               (SELECT COUNT(*) FROM retro_votes v WHERE v.retro_note_id = n.id)::bigint\n                              AS \"votes!: i64\"\n        FROM   sprint_retros r\n        JOIN   retro_notes n ON n.retro_id = r.id AND n.deleted_at IS NULL\n                            AND n.anonymous = false\n                            AND n.author_id IS NOT NULL\n        WHERE  r.state = 'closed'\n        ORDER  BY r.id,\n                  (SELECT COUNT(*) FROM retro_votes v WHERE v.retro_note_id = n.id) DESC,\n                  n.created_at ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "retro_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id?: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "votes!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "23f9ad730b0ff9ed29a970d726c842329a9459d1f0c01255b9e3f41fe23540a3"
+}
