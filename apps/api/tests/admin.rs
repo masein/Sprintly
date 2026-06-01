@@ -32,8 +32,8 @@ async fn make_user(pool: &PgPool, role: &str) -> Uuid {
            VALUES ($1, $2, $3, $4, $5, $6)"#,
     )
     .bind(id)
-    .bind(format!("u{}@x.test", &id.to_string()[..8]))
-    .bind(format!("h{}", &id.to_string()[..8]))
+    .bind(format!("u{}@x.test", id.simple()))
+    .bind(format!("h{}", id.simple()))
     .bind("Test")
     .bind(&hash)
     .bind(role)

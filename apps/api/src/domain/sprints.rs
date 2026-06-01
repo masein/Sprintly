@@ -2,7 +2,9 @@
 //!
 //! State machine (boring on purpose):
 //!
-//!     planned ──start──▶ active ──complete──▶ completed
+//! ```text
+//! planned ──start──▶ active ──complete──▶ completed
+//! ```
 //!
 //! No going back. M10 may add an admin-only `reopen` for completed sprints,
 //! but we don't expose it now.

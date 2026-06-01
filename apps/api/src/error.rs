@@ -2,8 +2,10 @@
 //! `Result<_, AppError>`; the `IntoResponse` impl turns it into a
 //! JSON body shaped like:
 //!
-//!     { "error": { "code": "auth.invalid_credentials", "message": "…",
-//!                  "trace_id": "abc123", "details": null } }
+//! ```text
+//! { "error": { "code": "auth.invalid_credentials", "message": "…",
+//!              "trace_id": "abc123", "details": null } }
+//! ```
 //!
 //! Never `unwrap` in a handler. If you find yourself wanting to, add a new
 //! variant here instead.

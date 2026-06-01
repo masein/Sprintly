@@ -29,8 +29,8 @@ async fn make_user(pool: &PgPool) -> Uuid {
            VALUES ($1, $2, $3, $4, $5, 'member')"#,
     )
     .bind(id)
-    .bind(format!("u{}@x.test", &id.to_string()[..8]))
-    .bind(format!("h{}", &id.to_string()[..8]))
+    .bind(format!("u{}@x.test", id.simple()))
+    .bind(format!("h{}", id.simple()))
     .bind("Test")
     .bind(&hash)
     .execute(pool)
@@ -156,6 +156,9 @@ async fn item_name_unique_per_project(pool: PgPool) {
         let p = pid;
         let o = owner;
         let n = name.to_string();
+        // Clone a fresh pool handle per call so the closure stays `Fn` (the
+        // `async move` would otherwise move `pool` in on the first call).
+        let pool = pool.clone();
         async move {
             sqlx::query(
                 r#"INSERT INTO vault_items

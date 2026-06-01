@@ -135,8 +135,10 @@ mod tests {
         let bytes = b.finish();
         assert!(bytes.starts_with(b"%PDF-1.4"));
         assert!(bytes.ends_with(b"%%EOF\n"));
-        // Must contain the text in some form (post-escape).
-        let s = std::str::from_utf8(&bytes).unwrap_or("");
+        // Must contain the text in some form (post-escape). The PDF has a
+        // binary marker comment, so it isn't valid UTF-8 as a whole — use a
+        // lossy decode that keeps the ASCII content stream intact.
+        let s = String::from_utf8_lossy(&bytes);
         assert!(s.contains("(Hello, world.) Tj"));
     }
 
@@ -145,7 +147,7 @@ mod tests {
         let mut b = PdfBuilder::new();
         b.text(0.0, 0.0, 10.0, "(a)\\ über");
         let bytes = b.finish();
-        let s = std::str::from_utf8(&bytes).unwrap_or("");
+        let s = String::from_utf8_lossy(&bytes);
         assert!(s.contains(r"\(a\)\\ ?ber"));
     }
 }
