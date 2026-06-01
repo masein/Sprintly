@@ -41,10 +41,7 @@ pub struct MeDto {
     pub last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-async fn get_me(
-    State(state): State<AppState>,
-    user: CurrentUser,
-) -> AppResult<impl IntoResponse> {
+async fn get_me(State(state): State<AppState>, user: CurrentUser) -> AppResult<impl IntoResponse> {
     if !can(&user.as_actor(), Action::ViewUser, Resource::SelfRef) {
         return Err(AppError::Forbidden);
     }

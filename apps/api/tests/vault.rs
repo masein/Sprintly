@@ -124,16 +124,26 @@ async fn audit_log_is_append_only(pool: PgPool) {
               (id, project_id, name, kind, encrypted_payload, nonce, key_version, created_by)
            VALUES ($1, $2, 'c', 'password', $3, $4, 1, $5)"#,
     )
-    .bind(item_id).bind(pid).bind(vec![1u8; 32]).bind(vec![0u8; 24]).bind(owner)
-    .execute(&pool).await.unwrap();
+    .bind(item_id)
+    .bind(pid)
+    .bind(vec![1u8; 32])
+    .bind(vec![0u8; 24])
+    .bind(owner)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let audit_id = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO vault_audit_log
               (id, vault_item_id, user_id, action) VALUES ($1, $2, $3, 'revealed')"#,
     )
-    .bind(audit_id).bind(item_id).bind(owner)
-    .execute(&pool).await.unwrap();
+    .bind(audit_id)
+    .bind(item_id)
+    .bind(owner)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let upd = sqlx::query("UPDATE vault_audit_log SET action = 'edited' WHERE id = $1")
         .bind(audit_id)
@@ -193,17 +203,30 @@ async fn access_pk_dedupes(pool: PgPool) {
               (id, project_id, name, kind, encrypted_payload, nonce, key_version, created_by)
            VALUES ($1, $2, 'd', 'password', $3, $4, 1, $5)"#,
     )
-    .bind(item_id).bind(pid).bind(vec![1u8; 32]).bind(vec![0u8; 24]).bind(owner)
-    .execute(&pool).await.unwrap();
+    .bind(item_id)
+    .bind(pid)
+    .bind(vec![1u8; 32])
+    .bind(vec![0u8; 24])
+    .bind(owner)
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(
         r#"INSERT INTO vault_access (vault_item_id, user_id, can_view, can_edit)
            VALUES ($1, $2, true, false)"#,
     )
-    .bind(item_id).bind(other).execute(&pool).await.unwrap();
+    .bind(item_id)
+    .bind(other)
+    .execute(&pool)
+    .await
+    .unwrap();
     let dup = sqlx::query(
         r#"INSERT INTO vault_access (vault_item_id, user_id, can_view, can_edit)
            VALUES ($1, $2, true, true)"#,
     )
-    .bind(item_id).bind(other).execute(&pool).await;
+    .bind(item_id)
+    .bind(other)
+    .execute(&pool)
+    .await;
     assert!(dup.is_err(), "(item, user) PK must dedupe — use UPSERT");
 }

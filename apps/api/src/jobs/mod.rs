@@ -122,11 +122,10 @@ async fn run_create_backup(pool: &PgPool, job_id: Uuid) -> anyhow::Result<()> {
     use tokio::process::Command;
 
     // Read the backup row id from the job payload.
-    let payload: serde_json::Value =
-        sqlx::query_scalar("SELECT payload FROM jobs WHERE id = $1")
-            .bind(job_id)
-            .fetch_one(pool)
-            .await?;
+    let payload: serde_json::Value = sqlx::query_scalar("SELECT payload FROM jobs WHERE id = $1")
+        .bind(job_id)
+        .fetch_one(pool)
+        .await?;
     let backup_id: Uuid = payload
         .get("backup_id")
         .and_then(|v| v.as_str())
@@ -152,7 +151,16 @@ async fn run_create_backup(pool: &PgPool, job_id: Uuid) -> anyhow::Result<()> {
     // postgresql-client), mark this attempt failed with a helpful error
     // instead of panicking.
     let dump = Command::new("pg_dump")
-        .args(["--format=custom", "--no-owner", "--no-acl", "-Z", "6", "-f", &tmp_path, &database_url])
+        .args([
+            "--format=custom",
+            "--no-owner",
+            "--no-acl",
+            "-Z",
+            "6",
+            "-f",
+            &tmp_path,
+            &database_url,
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .output()
@@ -201,9 +209,12 @@ async fn run_create_backup(pool: &PgPool, job_id: Uuid) -> anyhow::Result<()> {
         .args([
             "--fail-with-body",
             "-sS",
-            "-X", "PUT",
-            "--data-binary", &format!("@{tmp_path}"),
-            "-H", "Content-Type: application/octet-stream",
+            "-X",
+            "PUT",
+            "--data-binary",
+            &format!("@{tmp_path}"),
+            "-H",
+            "Content-Type: application/octet-stream",
             &url,
         ])
         .stdout(Stdio::piped())
@@ -299,11 +310,10 @@ async fn finish_ok(pool: &PgPool, id: Uuid, kind: &str) -> anyhow::Result<()> {
 
 async fn finish_err(pool: &PgPool, id: Uuid, msg: &str) -> anyhow::Result<()> {
     // Bump attempts. If at max, finish with the error and stop retrying.
-    let row: (i32, i32) =
-        sqlx::query_as("SELECT attempts, max_attempts FROM jobs WHERE id = $1")
-            .bind(id)
-            .fetch_one(pool)
-            .await?;
+    let row: (i32, i32) = sqlx::query_as("SELECT attempts, max_attempts FROM jobs WHERE id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await?;
     let attempts = row.0 + 1;
     if attempts >= row.1 {
         sqlx::query(

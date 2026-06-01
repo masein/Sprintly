@@ -38,14 +38,8 @@ use crate::{
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/projects/:key/webhooks",
-            get(list).post(create),
-        )
-        .route(
-            "/webhooks/:id",
-            axum::routing::patch(edit).delete(remove),
-        )
+        .route("/projects/:key/webhooks", get(list).post(create))
+        .route("/webhooks/:id", axum::routing::patch(edit).delete(remove))
 }
 
 #[derive(Debug, Serialize)]
@@ -164,13 +158,12 @@ async fn edit(
 ) -> AppResult<impl IntoResponse> {
     req.validate()
         .map_err(|e| AppError::Validation(e.to_string()))?;
-    let pid: Uuid = sqlx::query_scalar(
-        "SELECT project_id FROM webhooks WHERE id = $1 AND deleted_at IS NULL",
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or(AppError::NotFound)?;
+    let pid: Uuid =
+        sqlx::query_scalar("SELECT project_id FROM webhooks WHERE id = $1 AND deleted_at IS NULL")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
     let ctx = project_ctx::load_by_id(&state.db, pid, user.id).await?;
     if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
         return Err(AppError::Forbidden);
@@ -207,13 +200,12 @@ async fn remove(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<impl IntoResponse> {
-    let pid: Uuid = sqlx::query_scalar(
-        "SELECT project_id FROM webhooks WHERE id = $1 AND deleted_at IS NULL",
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or(AppError::NotFound)?;
+    let pid: Uuid =
+        sqlx::query_scalar("SELECT project_id FROM webhooks WHERE id = $1 AND deleted_at IS NULL")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
     let ctx = project_ctx::load_by_id(&state.db, pid, user.id).await?;
     if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
         return Err(AppError::Forbidden);

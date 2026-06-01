@@ -28,8 +28,7 @@ use validator::Validate;
 use crate::{
     domain::{
         permissions::{can, Action},
-        projects as project_ctx,
-        sprints as sprint_domain,
+        projects as project_ctx, sprints as sprint_domain,
     },
     infra::AppState,
     middleware::CurrentUser,
@@ -38,10 +37,7 @@ use crate::{
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/projects/:key/sprints",
-            post(create).get(list_for_project),
-        )
+        .route("/projects/:key/sprints", post(create).get(list_for_project))
         .route("/sprints/:id", get(detail).patch(edit))
         .route("/sprints/:id/start", post(start))
         .route("/sprints/:id/complete", post(complete))
@@ -112,7 +108,9 @@ async fn create(
     req.validate()
         .map_err(|e| AppError::Validation(e.to_string()))?;
     if req.ends_at <= req.starts_at {
-        return Err(AppError::Validation("ends_at must be after starts_at".into()));
+        return Err(AppError::Validation(
+            "ends_at must be after starts_at".into(),
+        ));
     }
     let ctx = project_ctx::load_by_key(&state.db, &project_key, user.id).await?;
     if !can(&user.as_actor(), Action::ManageBoards, ctx.as_resource()) {
@@ -281,20 +279,21 @@ async fn start(
         .bind(id)
         .fetch_one(&state.db)
         .await?;
-    let cur = sprint_domain::SprintState::parse(&cur_state).ok_or_else(|| AppError::Internal(anyhow::anyhow!("unknown state")))?;
+    let cur = sprint_domain::SprintState::parse(&cur_state)
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("unknown state")))?;
     let next = sprint_domain::next_state(cur, "start").map_err(|m| AppError::Conflict(m.into()))?;
     // The partial unique index "one active per project" backstops a concurrent
     // start race; we translate the violation to a clean 409.
-    let upd = sqlx::query(
-        r#"UPDATE sprints SET state = $2, started_at = now() WHERE id = $1"#,
-    )
-    .bind(id)
-    .bind(next.as_str())
-    .execute(&state.db)
-    .await;
+    let upd = sqlx::query(r#"UPDATE sprints SET state = $2, started_at = now() WHERE id = $1"#)
+        .bind(id)
+        .bind(next.as_str())
+        .execute(&state.db)
+        .await;
     if let Err(sqlx::Error::Database(e)) = &upd {
         if e.is_unique_violation() {
-            return Err(AppError::Conflict("another sprint is already active".into()));
+            return Err(AppError::Conflict(
+                "another sprint is already active".into(),
+            ));
         }
     }
     upd?;
@@ -316,8 +315,10 @@ async fn complete(
         .bind(id)
         .fetch_one(&state.db)
         .await?;
-    let cur = sprint_domain::SprintState::parse(&cur_state).ok_or_else(|| AppError::Internal(anyhow::anyhow!("unknown state")))?;
-    let next = sprint_domain::next_state(cur, "complete").map_err(|m| AppError::Conflict(m.into()))?;
+    let cur = sprint_domain::SprintState::parse(&cur_state)
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("unknown state")))?;
+    let next =
+        sprint_domain::next_state(cur, "complete").map_err(|m| AppError::Conflict(m.into()))?;
 
     let mut tx = state.db.begin().await?;
     // Snapshot velocity.
@@ -438,15 +439,17 @@ async fn list_tasks(
     .await?;
     let items: Vec<_> = rows
         .into_iter()
-        .map(|r| serde_json::json!({
-            "key": r.key,
-            "title": r.title,
-            "status": r.status,
-            "priority": r.priority,
-            "type": r.r#type,
-            "story_points": r.story_points,
-            "assignee_id": r.assignee_id,
-        }))
+        .map(|r| {
+            serde_json::json!({
+                "key": r.key,
+                "title": r.title,
+                "status": r.status,
+                "priority": r.priority,
+                "type": r.r#type,
+                "story_points": r.story_points,
+                "assignee_id": r.assignee_id,
+            })
+        })
         .collect();
     Ok(Json(serde_json::json!({ "items": items })))
 }

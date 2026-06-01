@@ -102,14 +102,10 @@ async fn my_achievements(
     Ok(Json(serde_json::json!({ "items": items })))
 }
 
-async fn rtfm(
-    State(state): State<AppState>,
-    user: CurrentUser,
-) -> AppResult<impl IntoResponse> {
-    let aid: Option<Uuid> =
-        sqlx::query_scalar("SELECT id FROM achievements WHERE code = 'RTFM'")
-            .fetch_optional(&state.db)
-            .await?;
+async fn rtfm(State(state): State<AppState>, user: CurrentUser) -> AppResult<impl IntoResponse> {
+    let aid: Option<Uuid> = sqlx::query_scalar("SELECT id FROM achievements WHERE code = 'RTFM'")
+        .fetch_optional(&state.db)
+        .await?;
     let Some(aid) = aid else {
         return Err(AppError::Internal(anyhow::anyhow!(
             "RTFM achievement missing from catalog"
@@ -128,8 +124,14 @@ async fn rtfm(
     .await?;
     // 201 on first award, 200 on idempotent replay.
     if r.rows_affected() > 0 {
-        Ok((StatusCode::CREATED, Json(serde_json::json!({ "awarded": true }))))
+        Ok((
+            StatusCode::CREATED,
+            Json(serde_json::json!({ "awarded": true })),
+        ))
     } else {
-        Ok((StatusCode::OK, Json(serde_json::json!({ "awarded": false }))))
+        Ok((
+            StatusCode::OK,
+            Json(serde_json::json!({ "awarded": false })),
+        ))
     }
 }

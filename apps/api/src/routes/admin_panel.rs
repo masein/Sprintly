@@ -30,7 +30,6 @@ use chrono::{DateTime, Duration, Utc};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
@@ -188,12 +187,10 @@ async fn suspend(
         return Err(AppError::Conflict("can't suspend yourself".into()));
     }
     let mut tx = state.db.begin().await?;
-    sqlx::query(
-        r#"UPDATE users SET status = 'suspended' WHERE id = $1 AND deleted_at IS NULL"#,
-    )
-    .bind(id)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query(r#"UPDATE users SET status = 'suspended' WHERE id = $1 AND deleted_at IS NULL"#)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     // Revoke every active session so the suspended user gets kicked out now,
     // not at access-token expiry.
     sqlx::query(
@@ -226,12 +223,10 @@ async fn reactivate(
 ) -> AppResult<impl IntoResponse> {
     require_admin(&user)?;
     let mut tx = state.db.begin().await?;
-    sqlx::query(
-        r#"UPDATE users SET status = 'active' WHERE id = $1 AND deleted_at IS NULL"#,
-    )
-    .bind(id)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query(r#"UPDATE users SET status = 'active' WHERE id = $1 AND deleted_at IS NULL"#)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
     write_admin_audit(
         &mut tx,
         user.id,
@@ -256,7 +251,9 @@ async fn set_role(
 ) -> AppResult<impl IntoResponse> {
     require_admin(&user)?;
     if !matches!(req.role.as_str(), "admin" | "member" | "viewer") {
-        return Err(AppError::BadRequest("role must be admin/member/viewer".into()));
+        return Err(AppError::BadRequest(
+            "role must be admin/member/viewer".into(),
+        ));
     }
     if id == user.id && req.role != "admin" {
         return Err(AppError::Conflict(
@@ -265,13 +262,11 @@ async fn set_role(
     }
 
     let mut tx = state.db.begin().await?;
-    sqlx::query(
-        r#"UPDATE users SET role = $2 WHERE id = $1 AND deleted_at IS NULL"#,
-    )
-    .bind(id)
-    .bind(&req.role)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query(r#"UPDATE users SET role = $2 WHERE id = $1 AND deleted_at IS NULL"#)
+        .bind(id)
+        .bind(&req.role)
+        .execute(&mut *tx)
+        .await?;
     write_admin_audit(
         &mut tx,
         user.id,
@@ -393,10 +388,7 @@ async fn list_audit(
     Ok(Json(serde_json::json!({ "items": items })))
 }
 
-async fn health(
-    State(state): State<AppState>,
-    user: CurrentUser,
-) -> AppResult<impl IntoResponse> {
+async fn health(State(state): State<AppState>, user: CurrentUser) -> AppResult<impl IntoResponse> {
     require_admin(&user)?;
 
     let db_check = {

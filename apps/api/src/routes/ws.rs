@@ -50,11 +50,7 @@ async fn ws_upgrade(
     })
 }
 
-async fn handle_socket(
-    socket: WebSocket,
-    state: AppState,
-    user_id: Uuid,
-) -> AppResult<()> {
+async fn handle_socket(socket: WebSocket, state: AppState, user_id: Uuid) -> AppResult<()> {
     let (mut sender, mut receiver) = socket.split();
     info!(%user_id, "ws connected");
 
@@ -156,10 +152,7 @@ fn should_forward(ev: &Event, user_id: Uuid, accessible: &HashSet<Uuid>) -> bool
     }
 }
 
-async fn load_accessible_projects(
-    state: &AppState,
-    user_id: Uuid,
-) -> AppResult<HashSet<Uuid>> {
+async fn load_accessible_projects(state: &AppState, user_id: Uuid) -> AppResult<HashSet<Uuid>> {
     // Admins see everything; for them we cheaply load all non-deleted projects.
     let is_admin: bool = sqlx::query_scalar(
         r#"SELECT role = 'admin' FROM users WHERE id = $1 AND deleted_at IS NULL"#,
@@ -170,11 +163,9 @@ async fn load_accessible_projects(
     .unwrap_or(false);
 
     let ids: Vec<Uuid> = if is_admin {
-        sqlx::query_scalar(
-            r#"SELECT id FROM projects WHERE deleted_at IS NULL"#,
-        )
-        .fetch_all(&state.db)
-        .await?
+        sqlx::query_scalar(r#"SELECT id FROM projects WHERE deleted_at IS NULL"#)
+            .fetch_all(&state.db)
+            .await?
     } else {
         sqlx::query_scalar(
             r#"
@@ -202,4 +193,6 @@ struct ClientPresence {
     #[serde(default = "default_true")]
     active: bool,
 }
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}

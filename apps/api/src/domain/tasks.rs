@@ -43,9 +43,9 @@ pub async fn next_key(
 /// Where to drop a card in a column.
 #[derive(Debug, Clone, Copy)]
 pub enum Position {
-    Append,             // place at the end
-    Prepend,            // place at the front
-    Between(f64, f64),  // place between two existing order values
+    Append,            // place at the end
+    Prepend,           // place at the front
+    Between(f64, f64), // place between two existing order values
 }
 
 /// Compute a concrete `order_in_column` given current min/max and an intent.
@@ -80,7 +80,9 @@ pub async fn resolve_position(
     }
 
     if let Some(after) = after_id {
-        let after_o = order_in(db, column_id, after).await?.ok_or(AppError::NotFound)?;
+        let after_o = order_in(db, column_id, after)
+            .await?
+            .ok_or(AppError::NotFound)?;
         let next_o: Option<f64> = sqlx::query_scalar(
             r#"SELECT MIN(order_in_column) FROM tasks
                WHERE column_id = $1 AND deleted_at IS NULL AND order_in_column > $2"#,
@@ -96,7 +98,9 @@ pub async fn resolve_position(
     }
 
     if let Some(before) = before_id {
-        let before_o = order_in(db, column_id, before).await?.ok_or(AppError::NotFound)?;
+        let before_o = order_in(db, column_id, before)
+            .await?
+            .ok_or(AppError::NotFound)?;
         let prev_o: Option<f64> = sqlx::query_scalar(
             r#"SELECT MAX(order_in_column) FROM tasks
                WHERE column_id = $1 AND deleted_at IS NULL AND order_in_column < $2"#,

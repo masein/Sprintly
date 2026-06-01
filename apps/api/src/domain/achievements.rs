@@ -182,7 +182,10 @@ async fn sprint_closer(pool: &PgPool) -> AppResult<Vec<AwardCandidate>> {
     .await?;
     Ok(rows
         .into_iter()
-        .filter_map(|r| r.user_id.map(|u| (u, json!({ "sprint_id": r.sprint_id, "task_id": r.task_id }))))
+        .filter_map(|r| {
+            r.user_id
+                .map(|u| (u, json!({ "sprint_id": r.sprint_id, "task_id": r.task_id })))
+        })
         .collect())
 }
 
@@ -211,8 +214,11 @@ async fn retro_hero(pool: &PgPool) -> AppResult<Vec<AwardCandidate>> {
     Ok(rows
         .into_iter()
         .filter_map(|r| {
-            if r.votes < 1 { return None; }
-            r.user_id.map(|u| (u, json!({ "retro_id": r.retro_id, "votes": r.votes })))
+            if r.votes < 1 {
+                return None;
+            }
+            r.user_id
+                .map(|u| (u, json!({ "retro_id": r.retro_id, "votes": r.votes })))
         })
         .collect())
 }

@@ -603,11 +603,11 @@ fn monday_utc(now: DateTime<Utc>) -> DateTime<Utc> {
 
 async fn accessible_project_ids(db: &PgPool, user: &CurrentUser) -> AppResult<Vec<Uuid>> {
     if user.role == GlobalRole::Admin {
-        Ok(sqlx::query_scalar(
-            r#"SELECT id FROM projects WHERE deleted_at IS NULL"#,
+        Ok(
+            sqlx::query_scalar(r#"SELECT id FROM projects WHERE deleted_at IS NULL"#)
+                .fetch_all(db)
+                .await?,
         )
-        .fetch_all(db)
-        .await?)
     } else {
         Ok(sqlx::query_scalar(
             r#"

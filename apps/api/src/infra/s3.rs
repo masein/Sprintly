@@ -104,7 +104,10 @@ impl<'a> Presigner<'a> {
         let string_to_sign = format!("{ALG}\n{amz_date}\n{scope}\n{hashed_cr}");
 
         // Derive signing key.
-        let k_date = hmac_sha256(format!("AWS4{}", self.cfg.secret_key).as_bytes(), date.as_bytes());
+        let k_date = hmac_sha256(
+            format!("AWS4{}", self.cfg.secret_key).as_bytes(),
+            date.as_bytes(),
+        );
         let k_region = hmac_sha256(&k_date, self.cfg.region.as_bytes());
         let k_service = hmac_sha256(&k_region, SERVICE.as_bytes());
         let k_signing = hmac_sha256(&k_service, b"aws4_request");

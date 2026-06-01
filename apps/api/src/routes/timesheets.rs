@@ -26,10 +26,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{
-    domain::{
-        permissions::Role as GlobalRole,
-        timesheets as ts,
-    },
+    domain::{permissions::Role as GlobalRole, timesheets as ts},
     infra::AppState,
     middleware::CurrentUser,
     AppError, AppResult,
@@ -42,7 +39,10 @@ pub fn router() -> Router<AppState> {
         .route("/me/timesheets", get(my_history))
         .route("/me/timesheets/:period_start/submit", post(submit))
         .route("/timesheets/:user_id/:period_start/approve", post(approve))
-        .route("/timesheets/:user_id/:period_start/mark-paid", post(mark_paid))
+        .route(
+            "/timesheets/:user_id/:period_start/mark-paid",
+            post(mark_paid),
+        )
         // `:period_start` carries an optional `.csv` suffix — matchit can't put
         // a literal after a param segment, so the handler splits it off.
         .route("/timesheets/:user_id/:period_start", get(csv_export))
@@ -143,7 +143,9 @@ async fn submit(
 ) -> AppResult<impl IntoResponse> {
     let view = compute_view(&state.db, user.id, period_start).await?;
     if view.total_minutes == 0 {
-        return Err(AppError::Conflict("nothing to submit — log time first".into()));
+        return Err(AppError::Conflict(
+            "nothing to submit — log time first".into(),
+        ));
     }
     let row: Option<(Uuid, String, NaiveDate)> = sqlx::query_as(
         r#"
@@ -215,9 +217,7 @@ async fn submit(
             .await?;
         }
         Some((_, status, _)) => {
-            return Err(AppError::Conflict(format!(
-                "timesheet is already {status}"
-            )));
+            return Err(AppError::Conflict(format!("timesheet is already {status}")));
         }
     }
 
@@ -315,7 +315,10 @@ async fn csv_export(
         "#,
         target_user,
         chrono::Utc.from_utc_datetime(&NaiveDateTime::new(view.period_start, NaiveTime::MIN)),
-        chrono::Utc.from_utc_datetime(&NaiveDateTime::new(view.period_end + chrono::Duration::days(1), NaiveTime::MIN)),
+        chrono::Utc.from_utc_datetime(&NaiveDateTime::new(
+            view.period_end + chrono::Duration::days(1),
+            NaiveTime::MIN
+        )),
     )
     .fetch_all(&state.db)
     .await?;
@@ -333,10 +336,7 @@ async fn csv_export(
             mins
         ));
     }
-    csv.push_str(&format!(
-        "\nTOTAL,,,,,{}\n",
-        view.total_minutes
-    ));
+    csv.push_str(&format!("\nTOTAL,,,,,{}\n", view.total_minutes));
 
     let mut h = HeaderMap::new();
     h.insert(
@@ -427,17 +427,19 @@ async fn pending_approvals(
     };
     let items: Vec<_> = rows
         .into_iter()
-        .map(|r| serde_json::json!({
-            "user_id": r.user_id,
-            "handle": r.handle,
-            "display_name": r.display_name,
-            "period_start": r.period_start,
-            "period_end": r.period_end,
-            "total_minutes": r.total_minutes,
-            "billable_minutes": r.billable_minutes,
-            "total_pay_cents": r.total_pay_cents,
-            "currency": r.currency,
-        }))
+        .map(|r| {
+            serde_json::json!({
+                "user_id": r.user_id,
+                "handle": r.handle,
+                "display_name": r.display_name,
+                "period_start": r.period_start,
+                "period_end": r.period_end,
+                "total_minutes": r.total_minutes,
+                "billable_minutes": r.billable_minutes,
+                "total_pay_cents": r.total_pay_cents,
+                "currency": r.currency,
+            })
+        })
         .collect();
     Ok(Json(serde_json::json!({ "items": items })))
 }
@@ -451,9 +453,7 @@ async fn compute_view(
 ) -> AppResult<TimesheetView> {
     let (monday, sunday) = ts::week_bounds(period_start);
     if monday != period_start {
-        return Err(AppError::BadRequest(
-            "period_start must be a Monday".into(),
-        ));
+        return Err(AppError::BadRequest("period_start must be a Monday".into()));
     }
 
     use chrono::TimeZone as _;
@@ -514,11 +514,19 @@ async fn compute_view(
         let d = row.started_at.date_naive();
         let entry = day_totals.entry(d).or_insert((0, 0));
         entry.0 += mins;
-        if row.billable { entry.1 += mins; }
-        let tk = (row.task_key.clone(), row.project_key.clone(), row.task_title.clone());
+        if row.billable {
+            entry.1 += mins;
+        }
+        let tk = (
+            row.task_key.clone(),
+            row.project_key.clone(),
+            row.task_title.clone(),
+        );
         let te = task_totals.entry(tk).or_insert((0, 0));
         te.0 += mins;
-        if row.billable { te.1 += mins; }
+        if row.billable {
+            te.1 += mins;
+        }
         totals.add(mins, row.billable);
     }
 
@@ -556,12 +564,11 @@ async fn compute_view(
         ),
         _ => {
             // Compute live pay from current rate.
-            let rate: Option<(Option<i64>, String)> = sqlx::query_as(
-                "SELECT hourly_rate_cents, currency FROM users WHERE id = $1",
-            )
-            .bind(user_id)
-            .fetch_optional(db)
-            .await?;
+            let rate: Option<(Option<i64>, String)> =
+                sqlx::query_as("SELECT hourly_rate_cents, currency FROM users WHERE id = $1")
+                    .bind(user_id)
+                    .fetch_optional(db)
+                    .await?;
             let (rate_cents, cur) = match rate {
                 Some((r, c)) => (r, c),
                 None => (None, "USD".into()),
@@ -593,11 +600,7 @@ async fn compute_view(
 /// True if `actor` is allowed to approve `target`'s timesheets:
 ///   • global admin, OR
 ///   • project lead of any project where `target` logged time.
-async fn require_can_approve(
-    db: &PgPool,
-    actor: &CurrentUser,
-    target: Uuid,
-) -> AppResult<()> {
+async fn require_can_approve(db: &PgPool, actor: &CurrentUser, target: Uuid) -> AppResult<()> {
     if actor.role == GlobalRole::Admin {
         return Ok(());
     }

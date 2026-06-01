@@ -13,7 +13,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::post,
     Json, Router,
 };
 use base64::Engine as _;
@@ -81,7 +81,11 @@ async fn create_invite(
         None | Some("member") => "member",
         Some("admin") => "admin",
         Some("viewer") => "viewer",
-        Some(_) => return Err(AppError::BadRequest("suggested_role must be admin/member/viewer".into())),
+        Some(_) => {
+            return Err(AppError::BadRequest(
+                "suggested_role must be admin/member/viewer".into(),
+            ))
+        }
     };
 
     let ttl_hours = req.ttl_hours.unwrap_or(168).clamp(1, 720);

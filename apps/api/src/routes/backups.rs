@@ -16,7 +16,7 @@ use axum::{
     extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
-    routing::{get, post},
+    routing::post,
     Json, Router,
 };
 use chrono::{DateTime, Utc};
@@ -25,16 +25,12 @@ use std::net::SocketAddr;
 use uuid::Uuid;
 
 use crate::{
-    domain::permissions::Role as GlobalRole,
-    infra::AppState,
-    middleware::CurrentUser,
-    routes::admin_panel::write_admin_audit,
-    AppError, AppResult,
+    domain::permissions::Role as GlobalRole, infra::AppState, middleware::CurrentUser,
+    routes::admin_panel::write_admin_audit, AppError, AppResult,
 };
 
 pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/admin/backups", post(start_backup).get(list_backups))
+    Router::new().route("/admin/backups", post(start_backup).get(list_backups))
 }
 
 #[derive(Debug, Serialize)]
@@ -62,13 +58,11 @@ async fn start_backup(
 
     let backup_id = Uuid::now_v7();
     let mut tx = state.db.begin().await?;
-    sqlx::query(
-        r#"INSERT INTO backups (id, requested_by, status) VALUES ($1, $2, 'pending')"#,
-    )
-    .bind(backup_id)
-    .bind(user.id)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query(r#"INSERT INTO backups (id, requested_by, status) VALUES ($1, $2, 'pending')"#)
+        .bind(backup_id)
+        .bind(user.id)
+        .execute(&mut *tx)
+        .await?;
     // Enqueue the worker job carrying the backup row id.
     sqlx::query(
         r#"

@@ -3,12 +3,7 @@
 //!   GET /healthz  — liveness. Always 200 if the process is up.
 //!   GET /readyz   — readiness. 200 only if DB + Redis are reachable.
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde_json::json;
 
 use crate::infra::AppState;
