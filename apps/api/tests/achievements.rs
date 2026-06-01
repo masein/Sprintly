@@ -31,8 +31,8 @@ async fn make_user(pool: &PgPool) -> Uuid {
            VALUES ($1, $2, $3, $4, $5, 'member')"#,
     )
     .bind(id)
-    .bind(format!("u{}@x.test", &id.to_string()[..8]))
-    .bind(format!("h{}", &id.to_string()[..8]))
+    .bind(format!("u{}@x.test", id.simple()))
+    .bind(format!("h{}", id.simple()))
     .bind("Test")
     .bind(&hash)
     .execute(pool)
@@ -43,8 +43,11 @@ async fn make_user(pool: &PgPool) -> Uuid {
 
 async fn make_project_with_task_done(pool: &PgPool, owner: Uuid, n: usize) {
     let pid = Uuid::now_v7();
-    sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, 'A', 'A', $2)"#)
-        .bind(pid).bind(owner).execute(pool).await.unwrap();
+    // Key must match `^[A-Z][A-Z0-9]{1,9}$` and be unique; derive it from the
+    // random tail of the v7 uuid (this helper is called more than once).
+    let key = format!("P{}", pid.simple().to_string()[26..32].to_uppercase());
+    sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, $2, $2, $3)"#)
+        .bind(pid).bind(&key).bind(owner).execute(pool).await.unwrap();
     sqlx::query(
         r#"INSERT INTO project_members (project_id, user_id, role, added_by)
            VALUES ($1, $2, 'lead', $2)"#,
