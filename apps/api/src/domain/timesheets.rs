@@ -9,7 +9,7 @@
 //! Pay math: minutes × hourly_rate_cents / 60. Rounded down. We use BIGINT
 //! cents throughout — never floats for money.
 
-use chrono::{Datelike, NaiveDate, Weekday};
+use chrono::{Datelike, NaiveDate};
 
 /// (Monday, Sunday) of the week containing `d`.
 pub fn week_bounds(d: NaiveDate) -> (NaiveDate, NaiveDate) {
@@ -61,6 +61,7 @@ impl Totals {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Weekday;
 
     #[test]
     fn week_bounds_monday_is_monday() {
@@ -115,8 +116,8 @@ mod tests {
         let mut t = Totals::default();
         t.add(60, true);
         t.add(45, false);
-        t.add(-5, true);   // skipped
-        t.add(0, true);    // skipped
+        t.add(-5, true); // skipped
+        t.add(0, true); // skipped
         assert_eq!(t.total_minutes, 105);
         assert_eq!(t.billable_minutes, 60);
     }

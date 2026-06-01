@@ -14,7 +14,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post, delete},
+    routing::{delete, get, post},
     Json, Router,
 };
 use chrono::{DateTime, Utc};
@@ -25,9 +25,9 @@ use validator::Validate;
 
 use crate::{
     domain::{
+        permissions::Role as GlobalRole,
         permissions::{can, Action},
         projects as project_ctx,
-        permissions::Role as GlobalRole,
     },
     infra::{events::Event, s3::Presigner, AppState},
     middleware::CurrentUser,
@@ -36,7 +36,10 @@ use crate::{
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/tasks/:task_key/comments", get(list_comments).post(create_comment))
+        .route(
+            "/tasks/:task_key/comments",
+            get(list_comments).post(create_comment),
+        )
         .route(
             "/comments/:id",
             axum::routing::patch(edit_comment).delete(delete_comment),
@@ -48,10 +51,7 @@ pub fn router() -> Router<AppState> {
             "/tasks/:task_key/watchers",
             get(list_watchers).post(add_watcher),
         )
-        .route(
-            "/tasks/:task_key/watchers/:user_id",
-            delete(remove_watcher),
-        )
+        .route("/tasks/:task_key/watchers/:user_id", delete(remove_watcher))
         .route(
             "/tasks/:task_key/links",
             get(list_links).post(add_link).delete(remove_link),
@@ -61,14 +61,8 @@ pub fn router() -> Router<AppState> {
             "/tasks/:task_key/attachments",
             post(create_attachment).get(list_attachments),
         )
-        .route(
-            "/attachments/:id",
-            delete(delete_attachment),
-        )
-        .route(
-            "/attachments/:id/complete",
-            post(complete_attachment),
-        )
+        .route("/attachments/:id", delete(delete_attachment))
+        .route("/attachments/:id/complete", post(complete_attachment))
 }
 
 // ─── DTOs ───────────────────────────────────────────────────────────────────
@@ -292,7 +286,7 @@ async fn create_comment(
 
     if let Err(sqlx::Error::Database(db)) = &insert {
         // Threading trigger raises a generic exception.
-        if let Some(msg) = db.message().to_string().split('\n').next() {
+        if let Some(msg) = db.message().split('\n').next() {
             if msg.contains("one level deep") {
                 return Err(AppError::BadRequest(
                     "replies can be one level deep only".into(),
@@ -302,9 +296,15 @@ async fn create_comment(
     }
     insert?;
 
-    crate::domain::tasks::log_activity(&mut tx, task.id, Some(user.id), "commented", &serde_json::json!({
-        "comment_id": id,
-    }))
+    crate::domain::tasks::log_activity(
+        &mut tx,
+        task.id,
+        Some(user.id),
+        "commented",
+        &serde_json::json!({
+            "comment_id": id,
+        }),
+    )
     .await?;
     tx.commit().await?;
 
@@ -346,13 +346,11 @@ async fn edit_comment(
         return Err(AppError::Forbidden);
     }
 
-    sqlx::query(
-        r#"UPDATE task_comments SET body = $1, edited_at = now() WHERE id = $2"#,
-    )
-    .bind(&req.body)
-    .bind(id)
-    .execute(&state.db)
-    .await?;
+    sqlx::query(r#"UPDATE task_comments SET body = $1, edited_at = now() WHERE id = $2"#)
+        .bind(&req.body)
+        .bind(id)
+        .execute(&state.db)
+        .await?;
 
     let dto = fetch_one_comment(&state.db, id, user.id).await?;
     Ok(Json(dto))
@@ -393,7 +391,11 @@ async fn add_reaction(
     let (task_id, comment_id) = match (req.task_key.as_deref(), req.comment_id) {
         (Some(k), None) => (Some(resolve_task(&state.db, k).await?.id), None),
         (None, Some(cid)) => (None, Some(cid)),
-        _ => return Err(AppError::BadRequest("target task_key XOR comment_id".into())),
+        _ => {
+            return Err(AppError::BadRequest(
+                "target task_key XOR comment_id".into(),
+            ))
+        }
     };
 
     if !is_emoji_ok(&req.emoji) {
@@ -533,7 +535,9 @@ async fn add_watcher(
     // Self-add is always allowed (if you can view, you can watch yourself).
     let actor_can_view = can(&user.as_actor(), Action::ViewBoard, ctx.as_resource());
     let adding_self = req.user_id == user.id;
-    if !actor_can_view || (!adding_self && !can(&user.as_actor(), Action::EditProject, ctx.as_resource())) {
+    if !actor_can_view
+        || (!adding_self && !can(&user.as_actor(), Action::EditProject, ctx.as_resource()))
+    {
         return Err(AppError::Forbidden);
     }
     sqlx::query(
@@ -576,7 +580,10 @@ async fn add_link(
     Path(task_key): Path<String>,
     Json(req): Json<LinkReq>,
 ) -> AppResult<impl IntoResponse> {
-    if !matches!(req.kind.as_str(), "blocks" | "relates_to" | "duplicates" | "parent_of") {
+    if !matches!(
+        req.kind.as_str(),
+        "blocks" | "relates_to" | "duplicates" | "parent_of"
+    ) {
         return Err(AppError::BadRequest("kind invalid".into()));
     }
     let from = resolve_task(&state.db, &task_key).await?;
@@ -1001,7 +1008,5 @@ async fn fetch_one_comment(db: &PgPool, id: Uuid, viewer: Uuid) -> AppResult<Com
 /// Minimal allowlist — we accept basic unicode emoji and short shortcode
 /// strings (e.g. `:+1:`). Reject anything with line breaks or > 16 bytes.
 fn is_emoji_ok(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 16
-        && !s.contains(['\n', '\r', '\t'])
+    !s.is_empty() && s.len() <= 16 && !s.contains(['\n', '\r', '\t'])
 }

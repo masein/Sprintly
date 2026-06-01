@@ -44,10 +44,7 @@ use crate::{
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/projects/:key/boards",
-            get(list_boards).post(create_board),
-        )
+        .route("/projects/:key/boards", get(list_boards).post(create_board))
         .route("/boards/:id", get(get_board).patch(edit_board))
         .route("/boards/:id/columns", post(create_column))
         .route("/boards/:id/columns/reorder", post(reorder_columns))
@@ -210,7 +207,10 @@ async fn create_column(
 ) -> AppResult<impl IntoResponse> {
     req.validate()
         .map_err(|e| AppError::Validation(e.to_string()))?;
-    if !matches!(req.category.as_str(), "todo" | "in_progress" | "review" | "done") {
+    if !matches!(
+        req.category.as_str(),
+        "todo" | "in_progress" | "review" | "done"
+    ) {
         return Err(AppError::BadRequest("category invalid".into()));
     }
     let project_id = project_id_of_board(&state.db, board_id).await?;
@@ -341,9 +341,7 @@ async fn reorder_columns(
     .bind(board_id)
     .fetch_all(&state.db)
     .await?;
-    if existing.len() != req.order.len()
-        || !existing.iter().all(|e| req.order.contains(e))
-    {
+    if existing.len() != req.order.len() || !existing.iter().all(|e| req.order.contains(e)) {
         return Err(AppError::BadRequest(
             "reorder list must contain every active column exactly once".into(),
         ));

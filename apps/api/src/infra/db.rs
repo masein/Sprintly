@@ -12,8 +12,7 @@ use std::time::Duration;
 use crate::config::Config;
 
 pub async fn connect(cfg: &Config) -> Result<PgPool> {
-    let opts = PgConnectOptions::from_str(&cfg.database_url)?
-        .application_name("sprintly-api");
+    let opts = PgConnectOptions::from_str(&cfg.database_url)?.application_name("sprintly-api");
 
     let pool = PgPoolOptions::new()
         .max_connections(20)

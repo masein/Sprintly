@@ -40,20 +40,41 @@ async fn make_user(pool: &PgPool) -> Uuid {
 async fn make_project_with_board(pool: &PgPool, key: &str, owner: Uuid) -> (Uuid, Uuid, Uuid) {
     let pid = Uuid::now_v7();
     sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, $2, $3, $4)"#)
-        .bind(pid).bind(key).bind(key).bind(owner).execute(pool).await.unwrap();
+        .bind(pid)
+        .bind(key)
+        .bind(key)
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query(
         r#"INSERT INTO project_members (project_id, user_id, role, added_by)
            VALUES ($1, $2, 'lead', $2)"#,
-    ).bind(pid).bind(owner).execute(pool).await.unwrap();
+    )
+    .bind(pid)
+    .bind(owner)
+    .execute(pool)
+    .await
+    .unwrap();
     let board = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO boards (id, project_id, name, is_default) VALUES ($1, $2, 'B', true)"#,
-    ).bind(board).bind(pid).execute(pool).await.unwrap();
+    )
+    .bind(board)
+    .bind(pid)
+    .execute(pool)
+    .await
+    .unwrap();
     let col = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO board_columns (id, board_id, name, category, sort_order)
            VALUES ($1, $2, 'C', 'todo', 1024.0)"#,
-    ).bind(col).bind(board).execute(pool).await.unwrap();
+    )
+    .bind(col)
+    .bind(board)
+    .execute(pool)
+    .await
+    .unwrap();
     (pid, board, col)
 }
 
@@ -89,7 +110,11 @@ async fn blocked_query_finds_tasks_blocked_by_open_blockers(pool: PgPool) {
         r#"INSERT INTO task_links (from_task_id, to_task_id, kind)
            VALUES ($1, $2, 'blocks')"#,
     )
-    .bind(a).bind(b).execute(&pool).await.unwrap();
+    .bind(a)
+    .bind(b)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // Replicate the dashboard's blocked query.
     let blocked: Vec<(String, i64)> = sqlx::query_as(
@@ -155,22 +180,38 @@ async fn time_this_week_sums_for_project(pool: PgPool) {
         r#"INSERT INTO time_logs (id, task_id, user_id, started_at, ended_at)
            VALUES ($1, $2, $3, $4, $5)"#,
     )
-    .bind(Uuid::now_v7()).bind(task).bind(owner).bind(now - Duration::minutes(60)).bind(now)
-    .execute(&pool).await.unwrap();
+    .bind(Uuid::now_v7())
+    .bind(task)
+    .bind(owner)
+    .bind(now - Duration::minutes(60))
+    .bind(now)
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(
         r#"INSERT INTO time_logs (id, task_id, user_id, started_at, ended_at)
            VALUES ($1, $2, $3, $4, $5)"#,
     )
-    .bind(Uuid::now_v7()).bind(task).bind(owner).bind(now - Duration::minutes(30)).bind(now - Duration::minutes(15))
-    .execute(&pool).await.unwrap();
+    .bind(Uuid::now_v7())
+    .bind(task)
+    .bind(owner)
+    .bind(now - Duration::minutes(30))
+    .bind(now - Duration::minutes(15))
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(
         r#"INSERT INTO time_logs (id, task_id, user_id, started_at, ended_at)
            VALUES ($1, $2, $3, $4, $5)"#,
     )
-    .bind(Uuid::now_v7()).bind(task).bind(owner)
+    .bind(Uuid::now_v7())
+    .bind(task)
+    .bind(owner)
     .bind(now - Duration::days(14))
     .bind(now - Duration::days(14) + Duration::minutes(45))
-    .execute(&pool).await.unwrap();
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // Sum since this week's Monday (UTC).
     let monday = {
@@ -194,7 +235,10 @@ async fn time_this_week_sums_for_project(pool: PgPool) {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert!(mins >= 60 && mins < 120, "this week sums 60+15=75 (got {mins})");
+    assert!(
+        (60..120).contains(&mins),
+        "this week sums 60+15=75 (got {mins})"
+    );
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -244,15 +288,30 @@ async fn overdue_query_picks_past_unfinished(pool: PgPool) {
     // Overdue (in_progress + past due) — should appear.
     let due_past = make_task(&pool, pid, board, col, "due past", "in_progress").await;
     sqlx::query("UPDATE tasks SET assignee_id = $1, due_date = $2 WHERE id = $3")
-        .bind(owner).bind(yesterday).bind(due_past).execute(&pool).await.unwrap();
+        .bind(owner)
+        .bind(yesterday)
+        .bind(due_past)
+        .execute(&pool)
+        .await
+        .unwrap();
     // Due tomorrow — not overdue.
     let due_soon = make_task(&pool, pid, board, col, "due soon", "todo").await;
     sqlx::query("UPDATE tasks SET assignee_id = $1, due_date = $2 WHERE id = $3")
-        .bind(owner).bind(tomorrow).bind(due_soon).execute(&pool).await.unwrap();
+        .bind(owner)
+        .bind(tomorrow)
+        .bind(due_soon)
+        .execute(&pool)
+        .await
+        .unwrap();
     // Past due but done — not overdue.
     let done_late = make_task(&pool, pid, board, col, "done late", "done").await;
     sqlx::query("UPDATE tasks SET assignee_id = $1, due_date = $2 WHERE id = $3")
-        .bind(owner).bind(yesterday).bind(done_late).execute(&pool).await.unwrap();
+        .bind(owner)
+        .bind(yesterday)
+        .bind(done_late)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let n: i64 = sqlx::query_scalar(
         r#"
@@ -263,7 +322,13 @@ async fn overdue_query_picks_past_unfinished(pool: PgPool) {
         "#,
     )
     .bind(owner)
-    .bind(NaiveDate::from_yo_opt(Utc::now().date_naive().year(), Utc::now().date_naive().ordinal()).unwrap())
+    .bind(
+        NaiveDate::from_yo_opt(
+            Utc::now().date_naive().year(),
+            Utc::now().date_naive().ordinal(),
+        )
+        .unwrap(),
+    )
     .fetch_one(&pool)
     .await
     .unwrap();

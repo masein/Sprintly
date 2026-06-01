@@ -40,8 +40,7 @@ use validator::Validate;
 use crate::{
     domain::{
         permissions::{can, Action, ProjectRole, Role as GlobalRole},
-        projects as project_ctx,
-        vault as vault_crypto,
+        projects as project_ctx, vault as vault_crypto,
     },
     infra::AppState,
     middleware::CurrentUser,
@@ -52,10 +51,7 @@ const REVEAL_LIMIT_PER_HOUR: u32 = 10;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/projects/:key/vault",
-            post(create_item).get(list_items),
-        )
+        .route("/projects/:key/vault", post(create_item).get(list_items))
         .route(
             "/vault/:id",
             get(get_item).patch(edit_item).delete(delete_item),
@@ -166,8 +162,7 @@ async fn create_item(
     let key_version = state.cfg.vault.key_version;
     let pkey = vault_crypto::ProjectKey::derive(&state.cfg.vault.master_key, ctx.id, key_version);
     let aad = item_id.as_bytes(); // bind ciphertext to the row's identity
-    let (ciphertext, nonce) =
-        vault_crypto::encrypt(&pkey, req.value.as_bytes(), aad)?;
+    let (ciphertext, nonce) = vault_crypto::encrypt(&pkey, req.value.as_bytes(), aad)?;
 
     let mut tx = state.db.begin().await?;
     let insert = sqlx::query(
@@ -214,8 +209,8 @@ async fn list_items(
     if !can(&user.as_actor(), Action::ViewProject, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
-    let user_is_lead_or_admin = user.role == GlobalRole::Admin
-        || ctx.actor_role == Some(ProjectRole::Lead);
+    let user_is_lead_or_admin =
+        user.role == GlobalRole::Admin || ctx.actor_role == Some(ProjectRole::Lead);
 
     let rows = sqlx::query!(
         r#"
@@ -297,11 +292,8 @@ async fn edit_item(
     let mut new_version: Option<i32> = None;
     if let Some(value) = req.value.as_deref() {
         let key_version = state.cfg.vault.key_version;
-        let pkey = vault_crypto::ProjectKey::derive(
-            &state.cfg.vault.master_key,
-            ctx.id,
-            key_version,
-        );
+        let pkey =
+            vault_crypto::ProjectKey::derive(&state.cfg.vault.master_key, ctx.id, key_version);
         let (ct, nonce) = vault_crypto::encrypt(&pkey, value.as_bytes(), id.as_bytes())?;
         new_ct = Some(ct);
         new_nonce = Some(nonce);
@@ -329,7 +321,11 @@ async fn edit_item(
     .execute(&mut *tx)
     .await?;
 
-    let action = if new_ct.is_some() { "rotated" } else { "edited" };
+    let action = if new_ct.is_some() {
+        "rotated"
+    } else {
+        "edited"
+    };
     write_audit(&mut tx, id, Some(user.id), action, &headers, addr).await?;
     tx.commit().await?;
 
@@ -387,11 +383,8 @@ async fn reveal_item(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    let pkey = vault_crypto::ProjectKey::derive(
-        &state.cfg.vault.master_key,
-        ctx.id,
-        row.key_version,
-    );
+    let pkey =
+        vault_crypto::ProjectKey::derive(&state.cfg.vault.master_key, ctx.id, row.key_version);
     let plaintext_bytes =
         vault_crypto::decrypt(&pkey, &row.encrypted_payload, &row.nonce, id.as_bytes())?;
     let plaintext = String::from_utf8(plaintext_bytes)
@@ -403,7 +396,10 @@ async fn reveal_item(
     write_audit(&mut tx, id, Some(user.id), "revealed", &headers, addr).await?;
     tx.commit().await?;
 
-    Ok(Json(RevealResp { id, value: plaintext }))
+    Ok(Json(RevealResp {
+        id,
+        value: plaintext,
+    }))
 }
 
 async fn mark_copied(
@@ -682,10 +678,7 @@ async fn rate_limit_ok(state: &AppState, user_id: Uuid) -> AppResult<bool> {
         .get()
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("redis: {e}")))?;
-    let n: i64 = redis::cmd("INCR")
-        .arg(&key)
-        .query_async(&mut conn)
-        .await?;
+    let n: i64 = redis::cmd("INCR").arg(&key).query_async(&mut conn).await?;
     if n == 1 {
         // First call in window → set TTL.
         let _: () = redis::cmd("EXPIRE")

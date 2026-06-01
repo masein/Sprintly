@@ -14,6 +14,10 @@ use tower_http::{
 
 use crate::{infra::AppState, middleware as own_mw, routes};
 
+// `TimeoutLayer::new` is deprecated in this tower-http in favour of
+// `with_status_code`, but `new` (which responds 408) is exactly the behaviour
+// we want and the replacement's signature is version-sensitive; allow it here.
+#[allow(deprecated)]
 pub fn router(state: AppState) -> Router {
     // Liveness/readiness live outside /api/v1 so dumb HTTP checks work.
     let probes = Router::new()

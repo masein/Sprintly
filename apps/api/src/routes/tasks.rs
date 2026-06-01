@@ -27,8 +27,7 @@ use validator::Validate;
 use crate::{
     domain::{
         permissions::{can, Action},
-        projects as project_ctx,
-        tasks as task_domain,
+        projects as project_ctx, tasks as task_domain,
     },
     infra::{events::Event, AppState},
     middleware::CurrentUser,
@@ -37,10 +36,7 @@ use crate::{
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/projects/:key/tasks",
-            post(create_task).get(list_tasks),
-        )
+        .route("/projects/:key/tasks", post(create_task).get(list_tasks))
         .route(
             "/tasks/:task_key",
             get(get_task).patch(edit_task).delete(delete_task),
@@ -82,7 +78,7 @@ pub struct CreateTaskReq {
     pub title: String,
     #[validate(length(max = 100_000))]
     pub description: Option<String>,
-    pub column_id: Option<Uuid>,    // defaults to first column of default board
+    pub column_id: Option<Uuid>, // defaults to first column of default board
     pub r#type: Option<String>,
     pub priority: Option<String>,
     pub assignee_id: Option<Uuid>,
@@ -176,7 +172,9 @@ async fn create_task(
             )
             .fetch_optional(&mut *tx)
             .await?
-            .ok_or(AppError::BadRequest("column does not belong to this project".into()))?;
+            .ok_or(AppError::BadRequest(
+                "column does not belong to this project".into(),
+            ))?;
             (row.board_id, col_id)
         }
         None => {
@@ -194,18 +192,19 @@ async fn create_task(
             )
             .fetch_optional(&mut *tx)
             .await?
-            .ok_or(AppError::Conflict("project has no default board with columns".into()))?;
+            .ok_or(AppError::Conflict(
+                "project has no default board with columns".into(),
+            ))?;
             (row.board_id, row.column_id)
         }
     };
 
     // Status derives from column category.
-    let category: String = sqlx::query_scalar(
-        r#"SELECT category FROM board_columns WHERE id = $1"#,
-    )
-    .bind(column_id)
-    .fetch_one(&mut *tx)
-    .await?;
+    let category: String =
+        sqlx::query_scalar(r#"SELECT category FROM board_columns WHERE id = $1"#)
+            .bind(column_id)
+            .fetch_one(&mut *tx)
+            .await?;
 
     // Append to end of the target column.
     let max_o: Option<f64> = sqlx::query_scalar(
@@ -589,9 +588,13 @@ async fn move_task(
         ));
     }
 
-    let new_order =
-        task_domain::resolve_position(&state.db, req.column_id, req.after_task_id, req.before_task_id)
-            .await?;
+    let new_order = task_domain::resolve_position(
+        &state.db,
+        req.column_id,
+        req.after_task_id,
+        req.before_task_id,
+    )
+    .await?;
 
     let mut tx = state.db.begin().await?;
     sqlx::query(
@@ -649,10 +652,7 @@ async fn move_task(
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-async fn resolve_project_from_task_key(
-    db: &PgPool,
-    task_key: &str,
-) -> AppResult<(Uuid, String)> {
+async fn resolve_project_from_task_key(db: &PgPool, task_key: &str) -> AppResult<(Uuid, String)> {
     // Task key is "PROJ-N". Look up project by prefix; tasks.key is unique per
     // project so we can also just JOIN.
     let row = sqlx::query!(
@@ -745,7 +745,9 @@ fn parse_filter(raw: Option<&str>, current_user: Uuid) -> ParsedFilter {
     let Some(raw) = raw else { return out };
     let mut labels: Vec<String> = Vec::new();
     for token in raw.split('+') {
-        let Some((k, v)) = token.split_once(':') else { continue };
+        let Some((k, v)) = token.split_once(':') else {
+            continue;
+        };
         match k {
             "assignee" => {
                 if v == "me" {

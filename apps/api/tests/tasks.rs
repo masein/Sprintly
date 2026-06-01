@@ -40,26 +40,44 @@ async fn make_user(pool: &PgPool) -> Uuid {
 
 async fn make_project_with_board(pool: &PgPool, key: &str, owner: Uuid) -> (Uuid, Uuid, Uuid) {
     let pid = Uuid::now_v7();
-    sqlx::query(
-        r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, $2, $3, $4)"#,
-    )
-    .bind(pid).bind(key).bind(key).bind(owner)
-    .execute(pool).await.unwrap();
+    sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, $2, $3, $4)"#)
+        .bind(pid)
+        .bind(key)
+        .bind(key)
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query(
         r#"INSERT INTO project_members (project_id, user_id, role, added_by)
            VALUES ($1, $2, 'lead', $2)"#,
-    ).bind(pid).bind(owner).execute(pool).await.unwrap();
+    )
+    .bind(pid)
+    .bind(owner)
+    .execute(pool)
+    .await
+    .unwrap();
 
     let board_id = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO boards (id, project_id, name, is_default) VALUES ($1, $2, 'B', true)"#,
-    ).bind(board_id).bind(pid).execute(pool).await.unwrap();
+    )
+    .bind(board_id)
+    .bind(pid)
+    .execute(pool)
+    .await
+    .unwrap();
 
     let col_id = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO board_columns (id, board_id, name, category, sort_order)
            VALUES ($1, $2, 'To do', 'todo', 1024.0)"#,
-    ).bind(col_id).bind(board_id).execute(pool).await.unwrap();
+    )
+    .bind(col_id)
+    .bind(board_id)
+    .execute(pool)
+    .await
+    .unwrap();
     (pid, board_id, col_id)
 }
 
@@ -141,13 +159,17 @@ async fn resolve_position_between_two_tasks(pool: PgPool) {
     let (t1, _) = make_task(&pool, pid, board, col, 1024.0).await;
     let (t2, _) = make_task(&pool, pid, board, col, 2048.0).await;
 
-    let between = task_domain::resolve_position(&pool, col, Some(t1), None).await.unwrap();
+    let between = task_domain::resolve_position(&pool, col, Some(t1), None)
+        .await
+        .unwrap();
     assert!(
         between > 1024.0 && between < 2048.0,
         "drop-after-t1 must land strictly between t1 and t2 (got {between})"
     );
 
-    let before_t2 = task_domain::resolve_position(&pool, col, None, Some(t2)).await.unwrap();
+    let before_t2 = task_domain::resolve_position(&pool, col, None, Some(t2))
+        .await
+        .unwrap();
     assert!(
         before_t2 > 1024.0 && before_t2 < 2048.0,
         "drop-before-t2 must also land between t1 and t2 (got {before_t2})"
@@ -161,6 +183,8 @@ async fn resolve_position_append_when_no_hints(pool: PgPool) {
     let (_, _) = make_task(&pool, pid, board, col, 1024.0).await;
     let (_, _) = make_task(&pool, pid, board, col, 2048.0).await;
 
-    let appended = task_domain::resolve_position(&pool, col, None, None).await.unwrap();
+    let appended = task_domain::resolve_position(&pool, col, None, None)
+        .await
+        .unwrap();
     assert!(appended > 2048.0);
 }

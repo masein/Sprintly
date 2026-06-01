@@ -1,14 +1,13 @@
 //! M9 integration tests — achievement awarding + idempotency.
 
+use serde_json::json;
 use sprintly_api::{
     config::AuthConfig,
     domain::{
         achievements::{award_batch, scan_all},
-        password,
-        tasks as task_domain,
+        password, tasks as task_domain,
     },
 };
-use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -47,20 +46,40 @@ async fn make_project_with_task_done(pool: &PgPool, owner: Uuid, n: usize) {
     // random tail of the v7 uuid (this helper is called more than once).
     let key = format!("P{}", pid.simple().to_string()[26..32].to_uppercase());
     sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, $2, $2, $3)"#)
-        .bind(pid).bind(&key).bind(owner).execute(pool).await.unwrap();
+        .bind(pid)
+        .bind(&key)
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query(
         r#"INSERT INTO project_members (project_id, user_id, role, added_by)
            VALUES ($1, $2, 'lead', $2)"#,
-    ).bind(pid).bind(owner).execute(pool).await.unwrap();
+    )
+    .bind(pid)
+    .bind(owner)
+    .execute(pool)
+    .await
+    .unwrap();
     let board = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO boards (id, project_id, name, is_default) VALUES ($1, $2, 'B', true)"#,
-    ).bind(board).bind(pid).execute(pool).await.unwrap();
+    )
+    .bind(board)
+    .bind(pid)
+    .execute(pool)
+    .await
+    .unwrap();
     let col = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO board_columns (id, board_id, name, category, sort_order)
            VALUES ($1, $2, 'D', 'done', 1024.0)"#,
-    ).bind(col).bind(board).execute(pool).await.unwrap();
+    )
+    .bind(col)
+    .bind(board)
+    .execute(pool)
+    .await
+    .unwrap();
 
     for _ in 0..n {
         let mut tx = pool.begin().await.unwrap();
@@ -70,8 +89,15 @@ async fn make_project_with_task_done(pool: &PgPool, owner: Uuid, n: usize) {
                                   assignee_id, order_in_column)
                VALUES ($1, $2, $3, $4, $5, 't', 'done', $6, 1024.0)"#,
         )
-        .bind(Uuid::now_v7()).bind(pid).bind(board).bind(col).bind(&k).bind(owner)
-        .execute(&mut *tx).await.unwrap();
+        .bind(Uuid::now_v7())
+        .bind(pid)
+        .bind(board)
+        .bind(col)
+        .bind(&k)
+        .bind(owner)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
     }
 }
@@ -82,15 +108,24 @@ async fn catalog_was_seeded(pool: PgPool) {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert!(n >= 8, "catalog should have at least 8 seeded rows (got {n})");
+    assert!(
+        n >= 8,
+        "catalog should have at least 8 seeded rows (got {n})"
+    );
 
     let codes: Vec<String> = sqlx::query_scalar("SELECT code FROM achievements ORDER BY code")
         .fetch_all(&pool)
         .await
         .unwrap();
     for needed in [
-        "BUG_SLAYER", "COFFEE_ADDICT", "ESTIMATOR_SUPREME", "PR_WIZARD",
-        "RETRO_HERO", "RTFM", "SPRINT_CLOSER", "WATCHER_IN_WHEAT_FIELD",
+        "BUG_SLAYER",
+        "COFFEE_ADDICT",
+        "ESTIMATOR_SUPREME",
+        "PR_WIZARD",
+        "RETRO_HERO",
+        "RTFM",
+        "SPRINT_CLOSER",
+        "WATCHER_IN_WHEAT_FIELD",
     ] {
         assert!(codes.iter().any(|c| c == needed), "missing {needed}");
     }
@@ -108,14 +143,22 @@ async fn pk_dedupes_repeated_awards(pool: PgPool) {
         r#"INSERT INTO user_achievements (user_id, achievement_id) VALUES ($1, $2)
            ON CONFLICT DO NOTHING"#,
     )
-    .bind(u).bind(aid).execute(&pool).await.unwrap();
+    .bind(u)
+    .bind(aid)
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(first.rows_affected(), 1);
 
     let again = sqlx::query(
         r#"INSERT INTO user_achievements (user_id, achievement_id) VALUES ($1, $2)
            ON CONFLICT DO NOTHING"#,
     )
-    .bind(u).bind(aid).execute(&pool).await.unwrap();
+    .bind(u)
+    .bind(aid)
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_eq!(again.rows_affected(), 0, "PK must collapse re-runs");
 }
 

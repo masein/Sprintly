@@ -44,20 +44,41 @@ async fn make_user(pool: &PgPool) -> Uuid {
 async fn make_project(pool: &PgPool, key: &str, owner: Uuid) -> (Uuid, Uuid, Uuid) {
     let pid = Uuid::now_v7();
     sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, $2, $3, $4)"#)
-        .bind(pid).bind(key).bind(key).bind(owner).execute(pool).await.unwrap();
+        .bind(pid)
+        .bind(key)
+        .bind(key)
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query(
         r#"INSERT INTO project_members (project_id, user_id, role, added_by)
            VALUES ($1, $2, 'lead', $2)"#,
-    ).bind(pid).bind(owner).execute(pool).await.unwrap();
+    )
+    .bind(pid)
+    .bind(owner)
+    .execute(pool)
+    .await
+    .unwrap();
     let board = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO boards (id, project_id, name, is_default) VALUES ($1, $2, 'B', true)"#,
-    ).bind(board).bind(pid).execute(pool).await.unwrap();
+    )
+    .bind(board)
+    .bind(pid)
+    .execute(pool)
+    .await
+    .unwrap();
     let col = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO board_columns (id, board_id, name, category, sort_order)
            VALUES ($1, $2, 'C', 'todo', 1024.0)"#,
-    ).bind(col).bind(board).execute(pool).await.unwrap();
+    )
+    .bind(col)
+    .bind(board)
+    .execute(pool)
+    .await
+    .unwrap();
     (pid, board, col)
 }
 
@@ -68,8 +89,15 @@ async fn make_sprint(pool: &PgPool, project_id: Uuid, state: &str) -> Uuid {
     sqlx::query(
         r#"INSERT INTO sprints (id, project_id, name, starts_at, ends_at, state)
            VALUES ($1, $2, 'S', $3, $4, $5)"#,
-    ).bind(id).bind(project_id).bind(start).bind(end).bind(state)
-    .execute(pool).await.unwrap();
+    )
+    .bind(id)
+    .bind(project_id)
+    .bind(start)
+    .bind(end)
+    .bind(state)
+    .execute(pool)
+    .await
+    .unwrap();
     id
 }
 
@@ -82,8 +110,14 @@ async fn one_active_sprint_per_project(pool: PgPool) {
         r#"INSERT INTO sprints (id, project_id, name, starts_at, ends_at, state)
            VALUES ($1, $2, 'S2', now(), now() + INTERVAL '1 day', 'active')"#,
     )
-    .bind(Uuid::now_v7()).bind(pid).execute(&pool).await;
-    assert!(res.is_err(), "partial unique index must reject a second active sprint");
+    .bind(Uuid::now_v7())
+    .bind(pid)
+    .execute(&pool)
+    .await;
+    assert!(
+        res.is_err(),
+        "partial unique index must reject a second active sprint"
+    );
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -112,8 +146,17 @@ async fn completing_creates_retro_and_velocity(pool: PgPool) {
                    sprint_id, story_points, status)
                VALUES ($1, $2, $3, $4, $5, 't', 1024.0, $6, $7, $8)"#,
         )
-        .bind(tid).bind(pid).bind(board).bind(col).bind(&k).bind(sid).bind(sp).bind(status)
-        .execute(&mut *tx).await.unwrap();
+        .bind(tid)
+        .bind(pid)
+        .bind(board)
+        .bind(col)
+        .bind(&k)
+        .bind(sid)
+        .bind(sp)
+        .bind(status)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
     }
     tx.commit().await.unwrap();
 
@@ -134,18 +177,28 @@ async fn completing_creates_retro_and_velocity(pool: PgPool) {
               SET state = 'completed', completed_at = now(), velocity_points = $2
             WHERE id = $1"#,
     )
-    .bind(sid).bind(velocity as i32).execute(&pool).await.unwrap();
+    .bind(sid)
+    .bind(velocity as i32)
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(
         r#"INSERT INTO sprint_retros (id, sprint_id) VALUES ($1, $2)
            ON CONFLICT (sprint_id) DO NOTHING"#,
     )
-    .bind(Uuid::now_v7()).bind(sid).execute(&pool).await.unwrap();
+    .bind(Uuid::now_v7())
+    .bind(sid)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // Exactly one retro per sprint (UNIQUE).
-    let retro_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sprint_retros WHERE sprint_id = $1",
-    )
-    .bind(sid).fetch_one(&pool).await.unwrap();
+    let retro_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sprint_retros WHERE sprint_id = $1")
+            .bind(sid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(retro_count, 1);
 }
 
@@ -154,14 +207,17 @@ async fn retro_one_per_sprint(pool: PgPool) {
     let owner = make_user(&pool).await;
     let (pid, _, _) = make_project(&pool, "ONE", owner).await;
     let sid = make_sprint(&pool, pid, "completed").await;
-    sqlx::query(
-        r#"INSERT INTO sprint_retros (id, sprint_id) VALUES ($1, $2)"#,
-    )
-    .bind(Uuid::now_v7()).bind(sid).execute(&pool).await.unwrap();
-    let dup = sqlx::query(
-        r#"INSERT INTO sprint_retros (id, sprint_id) VALUES ($1, $2)"#,
-    )
-    .bind(Uuid::now_v7()).bind(sid).execute(&pool).await;
+    sqlx::query(r#"INSERT INTO sprint_retros (id, sprint_id) VALUES ($1, $2)"#)
+        .bind(Uuid::now_v7())
+        .bind(sid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let dup = sqlx::query(r#"INSERT INTO sprint_retros (id, sprint_id) VALUES ($1, $2)"#)
+        .bind(Uuid::now_v7())
+        .bind(sid)
+        .execute(&pool)
+        .await;
     assert!(dup.is_err(), "UNIQUE(sprint_id) on sprint_retros must hold");
 }
 
@@ -171,18 +227,28 @@ async fn anonymous_note_drops_author_id(pool: PgPool) {
     let (pid, _, _) = make_project(&pool, "ANON", owner).await;
     let sid = make_sprint(&pool, pid, "completed").await;
     let retro = Uuid::now_v7();
-    sqlx::query(
-        r#"INSERT INTO sprint_retros (id, sprint_id) VALUES ($1, $2)"#,
-    )
-    .bind(retro).bind(sid).execute(&pool).await.unwrap();
+    sqlx::query(r#"INSERT INTO sprint_retros (id, sprint_id) VALUES ($1, $2)"#)
+        .bind(retro)
+        .bind(sid)
+        .execute(&pool)
+        .await
+        .unwrap();
     // Insert an "anonymous" note with author_id explicitly NULL.
     sqlx::query(
         r#"INSERT INTO retro_notes (id, retro_id, column_kind, body, anonymous)
            VALUES ($1, $2, 'went_well', 'great pairing', true)"#,
-    ).bind(Uuid::now_v7()).bind(retro).execute(&pool).await.unwrap();
+    )
+    .bind(Uuid::now_v7())
+    .bind(retro)
+    .execute(&pool)
+    .await
+    .unwrap();
     let author: Option<Uuid> =
         sqlx::query_scalar("SELECT author_id FROM retro_notes WHERE retro_id = $1")
-            .bind(retro).fetch_one(&pool).await.unwrap();
+            .bind(retro)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert!(author.is_none(), "anonymous note must not carry author_id");
 }
 
@@ -193,17 +259,36 @@ async fn vote_unique_per_user_per_note(pool: PgPool) {
     let sid = make_sprint(&pool, pid, "completed").await;
     let retro = Uuid::now_v7();
     sqlx::query(r#"INSERT INTO sprint_retros (id, sprint_id) VALUES ($1, $2)"#)
-        .bind(retro).bind(sid).execute(&pool).await.unwrap();
+        .bind(retro)
+        .bind(sid)
+        .execute(&pool)
+        .await
+        .unwrap();
     let nid = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO retro_notes (id, retro_id, column_kind, body)
            VALUES ($1, $2, 'kudos', 'cheers')"#,
-    ).bind(nid).bind(retro).execute(&pool).await.unwrap();
+    )
+    .bind(nid)
+    .bind(retro)
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(r#"INSERT INTO retro_votes (retro_note_id, user_id) VALUES ($1, $2)"#)
-        .bind(nid).bind(owner).execute(&pool).await.unwrap();
+        .bind(nid)
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
     let dup = sqlx::query(r#"INSERT INTO retro_votes (retro_note_id, user_id) VALUES ($1, $2)"#)
-        .bind(nid).bind(owner).execute(&pool).await;
-    assert!(dup.is_err(), "(retro_note_id, user_id) PK must reject dup votes");
+        .bind(nid)
+        .bind(owner)
+        .execute(&pool)
+        .await;
+    assert!(
+        dup.is_err(),
+        "(retro_note_id, user_id) PK must reject dup votes"
+    );
 }
 
 #[sqlx::test(migrations = "./migrations")]

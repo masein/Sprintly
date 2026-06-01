@@ -251,11 +251,10 @@ pub async fn revoke(pool: &PgPool, session_id: Uuid, reason: &str) -> AppResult<
 /// Look up the user_id+role tied to a still-live session. Used by the
 /// middleware to enforce session revocation independently of JWT expiry.
 pub async fn session_is_live(pool: &PgPool, session_id: Uuid) -> AppResult<bool> {
-    let live: Option<bool> = sqlx::query_scalar(
-        r#"SELECT revoked_at IS NULL FROM sessions WHERE id = $1"#,
-    )
-    .bind(session_id)
-    .fetch_optional(pool)
-    .await?;
+    let live: Option<bool> =
+        sqlx::query_scalar(r#"SELECT revoked_at IS NULL FROM sessions WHERE id = $1"#)
+            .bind(session_id)
+            .fetch_optional(pool)
+            .await?;
     Ok(live.unwrap_or(false))
 }

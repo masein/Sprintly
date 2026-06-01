@@ -27,8 +27,7 @@ use validator::Validate;
 use crate::{
     domain::{
         permissions::{can, Action, Role as GlobalRole},
-        projects as project_ctx, tasks as task_domain,
-        timesheets as ts,
+        projects as project_ctx, tasks as task_domain, timesheets as ts,
     },
     infra::AppState,
     middleware::CurrentUser,
@@ -461,4 +460,3 @@ async fn ensure_week_open(db: &PgPool, user_id: Uuid, started_at: DateTime<Utc>)
         _ => Ok(()),
     }
 }
-

@@ -20,8 +20,17 @@ pub const CHANNEL: &str = "sprintly:events";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", content = "data", rename_all = "snake_case")]
 pub enum Event {
-    TaskCreated { project_id: Uuid, board_id: Uuid, task_id: Uuid, key: String },
-    TaskUpdated { project_id: Uuid, task_id: Uuid, key: String },
+    TaskCreated {
+        project_id: Uuid,
+        board_id: Uuid,
+        task_id: Uuid,
+        key: String,
+    },
+    TaskUpdated {
+        project_id: Uuid,
+        task_id: Uuid,
+        key: String,
+    },
     TaskMoved {
         project_id: Uuid,
         board_id: Uuid,
@@ -30,11 +39,27 @@ pub enum Event {
         from_column_id: Uuid,
         to_column_id: Uuid,
     },
-    TaskDeleted { project_id: Uuid, task_id: Uuid, key: String },
+    TaskDeleted {
+        project_id: Uuid,
+        task_id: Uuid,
+        key: String,
+    },
     // Reserved for later phases:
-    CommentCreated { project_id: Uuid, task_id: Uuid, comment_id: Uuid },
-    PresenceUpdate { project_id: Uuid, task_id: Option<Uuid>, user_id: Uuid, active: bool },
-    NotificationCreated { user_id: Uuid, notification_id: Uuid },
+    CommentCreated {
+        project_id: Uuid,
+        task_id: Uuid,
+        comment_id: Uuid,
+    },
+    PresenceUpdate {
+        project_id: Uuid,
+        task_id: Option<Uuid>,
+        user_id: Uuid,
+        active: bool,
+    },
+    NotificationCreated {
+        user_id: Uuid,
+        notification_id: Uuid,
+    },
 }
 
 impl Event {

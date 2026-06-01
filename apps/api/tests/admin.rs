@@ -1,13 +1,9 @@
 //! M10 integration tests — admin guards, audit immutability, backups,
 //! and the XFF helper from `middleware::client_ip`.
 
-use sprintly_api::{
-    config::AuthConfig,
-    domain::password,
-    middleware::client_ip,
-};
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, HeaderValue};
+use sprintly_api::{config::AuthConfig, domain::password, middleware::client_ip};
 use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -74,14 +70,12 @@ async fn admin_audit_log_is_append_only(pool: PgPool) {
 async fn backup_status_transitions(pool: PgPool) {
     let admin = make_user(&pool, "admin").await;
     let id = Uuid::now_v7();
-    sqlx::query(
-        r#"INSERT INTO backups (id, requested_by, status) VALUES ($1, $2, 'pending')"#,
-    )
-    .bind(id)
-    .bind(admin)
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query(r#"INSERT INTO backups (id, requested_by, status) VALUES ($1, $2, 'pending')"#)
+        .bind(id)
+        .bind(admin)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     sqlx::query("UPDATE backups SET status = 'running', started_at = now() WHERE id = $1")
         .bind(id)
@@ -98,13 +92,12 @@ async fn backup_status_transitions(pool: PgPool) {
     .await
     .unwrap();
 
-    let (status, size, key): (String, Option<i64>, Option<String>) = sqlx::query_as(
-        "SELECT status, size_bytes, storage_key FROM backups WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (status, size, key): (String, Option<i64>, Option<String>) =
+        sqlx::query_as("SELECT status, size_bytes, storage_key FROM backups WHERE id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(status, "done");
     assert_eq!(size, Some(12345));
     assert_eq!(key.as_deref(), Some("backups/2026-05-25/x.dump"));
@@ -120,13 +113,12 @@ async fn backup_status_transitions(pool: PgPool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn backup_status_check_rejects_arbitrary(pool: PgPool) {
     let admin = make_user(&pool, "admin").await;
-    let res = sqlx::query(
-        r#"INSERT INTO backups (id, requested_by, status) VALUES ($1, $2, 'unknown')"#,
-    )
-    .bind(Uuid::now_v7())
-    .bind(admin)
-    .execute(&pool)
-    .await;
+    let res =
+        sqlx::query(r#"INSERT INTO backups (id, requested_by, status) VALUES ($1, $2, 'unknown')"#)
+            .bind(Uuid::now_v7())
+            .bind(admin)
+            .execute(&pool)
+            .await;
     assert!(res.is_err(), "CHECK rejects out-of-enum status");
 }
 
@@ -136,9 +128,17 @@ async fn webhooks_per_project_isolation(pool: PgPool) {
     let p1 = Uuid::now_v7();
     let p2 = Uuid::now_v7();
     sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, 'W1', 'W1', $2)"#)
-        .bind(p1).bind(owner).execute(&pool).await.unwrap();
+        .bind(p1)
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
     sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, 'W2', 'W2', $2)"#)
-        .bind(p2).bind(owner).execute(&pool).await.unwrap();
+        .bind(p2)
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     for pid in [p1, p2] {
         sqlx::query(

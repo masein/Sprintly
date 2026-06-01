@@ -27,15 +27,20 @@ use crate::{config::AuthConfig, AppError, AppResult};
 /// JWT claims for the access token.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccessClaims {
-    pub sub: Uuid,       // user_id
-    pub sid: Uuid,       // session_id
-    pub role: String,    // 'admin' | 'member' | 'viewer'
+    pub sub: Uuid,    // user_id
+    pub sid: Uuid,    // session_id
+    pub role: String, // 'admin' | 'member' | 'viewer'
     pub iat: i64,
     pub exp: i64,
 }
 
 /// Mint a fresh access token.
-pub fn mint_access(cfg: &AuthConfig, user_id: Uuid, session_id: Uuid, role: &str) -> AppResult<String> {
+pub fn mint_access(
+    cfg: &AuthConfig,
+    user_id: Uuid,
+    session_id: Uuid,
+    role: &str,
+) -> AppResult<String> {
     let now = Utc::now();
     let claims = AccessClaims {
         sub: user_id,
@@ -58,9 +63,13 @@ pub fn verify_access(cfg: &AuthConfig, token: &str) -> AppResult<AccessClaims> {
     let mut validation = Validation::default();
     // 60s leeway is industry-standard and handles minor clock skew.
     validation.leeway = 60;
-    decode::<AccessClaims>(token, &DecodingKey::from_secret(&cfg.jwt_secret), &validation)
-        .map(|d| d.claims)
-        .map_err(|_| AppError::Unauthorized)
+    decode::<AccessClaims>(
+        token,
+        &DecodingKey::from_secret(&cfg.jwt_secret),
+        &validation,
+    )
+    .map(|d| d.claims)
+    .map_err(|_| AppError::Unauthorized)
 }
 
 /// A freshly minted refresh token: the plaintext to hand the client, and the

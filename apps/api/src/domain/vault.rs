@@ -80,7 +80,13 @@ pub fn encrypt(key: &ProjectKey, plaintext: &[u8], aad: &[u8]) -> AppResult<(Vec
     let nonce = XNonce::from_slice(&nonce_bytes);
     let ciphertext = key
         .cipher()
-        .encrypt(nonce, Payload { msg: plaintext, aad })
+        .encrypt(
+            nonce,
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
         .map_err(|_| AppError::Crypto("vault encrypt failed"))?;
     Ok((ciphertext, nonce_bytes))
 }
@@ -97,7 +103,13 @@ pub fn decrypt(
     }
     let nonce = XNonce::from_slice(nonce);
     key.cipher()
-        .decrypt(nonce, Payload { msg: ciphertext, aad })
+        .decrypt(
+            nonce,
+            Payload {
+                msg: ciphertext,
+                aad,
+            },
+        )
         .map_err(|_| AppError::Crypto("vault decrypt failed (key, nonce, or ciphertext invalid)"))
 }
 
