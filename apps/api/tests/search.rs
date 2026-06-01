@@ -43,22 +43,42 @@ async fn make_project_with_task(
     title: &str,
 ) -> (Uuid, Uuid, String) {
     let pid = Uuid::now_v7();
-    sqlx::query(
-        r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, $2, $3, $4)"#,
-    ).bind(pid).bind(key).bind(key).bind(owner).execute(pool).await.unwrap();
+    sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, $2, $3, $4)"#)
+        .bind(pid)
+        .bind(key)
+        .bind(key)
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query(
         r#"INSERT INTO project_members (project_id, user_id, role, added_by)
            VALUES ($1, $2, 'lead', $2)"#,
-    ).bind(pid).bind(owner).execute(pool).await.unwrap();
+    )
+    .bind(pid)
+    .bind(owner)
+    .execute(pool)
+    .await
+    .unwrap();
     let board = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO boards (id, project_id, name, is_default) VALUES ($1, $2, 'B', true)"#,
-    ).bind(board).bind(pid).execute(pool).await.unwrap();
+    )
+    .bind(board)
+    .bind(pid)
+    .execute(pool)
+    .await
+    .unwrap();
     let col = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO board_columns (id, board_id, name, category, sort_order)
            VALUES ($1, $2, 'C', 'todo', 1024.0)"#,
-    ).bind(col).bind(board).execute(pool).await.unwrap();
+    )
+    .bind(col)
+    .bind(board)
+    .execute(pool)
+    .await
+    .unwrap();
 
     let mut tx = pool.begin().await.unwrap();
     let (task_key, _) = task_domain::next_key(&mut tx, pid).await.unwrap();
@@ -67,8 +87,15 @@ async fn make_project_with_task(
         r#"INSERT INTO tasks (id, project_id, board_id, column_id, key, title, order_in_column)
            VALUES ($1, $2, $3, $4, $5, $6, 1024.0)"#,
     )
-    .bind(tid).bind(pid).bind(board).bind(col).bind(&task_key).bind(title)
-    .execute(&mut *tx).await.unwrap();
+    .bind(tid)
+    .bind(pid)
+    .bind(board)
+    .bind(col)
+    .bind(&task_key)
+    .bind(title)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
     (pid, tid, task_key)
 }
@@ -77,10 +104,8 @@ async fn make_project_with_task(
 async fn search_returns_member_tasks_only(pool: PgPool) {
     let alice = make_user(&pool).await;
     let bob = make_user(&pool).await;
-    let (_, _, akey) =
-        make_project_with_task(&pool, "ALPHA", alice, "fix flaky build").await;
-    let (_, _, bkey) =
-        make_project_with_task(&pool, "BETA", bob, "fix flaky build").await;
+    let (_, _, akey) = make_project_with_task(&pool, "ALPHA", alice, "fix flaky build").await;
+    let (_, _, bkey) = make_project_with_task(&pool, "BETA", bob, "fix flaky build").await;
 
     // Verify the data invariant: each task is in its own project, and the
     // accessibility join (the same SQL used by `accessible_project_ids`)
@@ -104,15 +129,18 @@ async fn search_returns_member_tasks_only(pool: PgPool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn search_ranks_tsvector_then_trigram(pool: PgPool) {
     let owner = make_user(&pool).await;
-    let (pid, _, _) =
-        make_project_with_task(&pool, "RANK", owner, "fix the build pipeline").await;
+    let (pid, _, _) = make_project_with_task(&pool, "RANK", owner, "fix the build pipeline").await;
     // Add a "typo" task. tsvector won't hit; pg_trgm should.
-    let board: Uuid =
-        sqlx::query_scalar("SELECT id FROM boards WHERE project_id = $1")
-            .bind(pid).fetch_one(&pool).await.unwrap();
-    let col: Uuid =
-        sqlx::query_scalar("SELECT id FROM board_columns WHERE board_id = $1")
-            .bind(board).fetch_one(&pool).await.unwrap();
+    let board: Uuid = sqlx::query_scalar("SELECT id FROM boards WHERE project_id = $1")
+        .bind(pid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let col: Uuid = sqlx::query_scalar("SELECT id FROM board_columns WHERE board_id = $1")
+        .bind(board)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     let mut tx = pool.begin().await.unwrap();
     let (typo_key, _) = task_domain::next_key(&mut tx, pid).await.unwrap();
     let tid = Uuid::now_v7();
@@ -120,8 +148,14 @@ async fn search_ranks_tsvector_then_trigram(pool: PgPool) {
         r#"INSERT INTO tasks (id, project_id, board_id, column_id, key, title, order_in_column)
            VALUES ($1, $2, $3, $4, $5, 'fxi the buld', 2048.0)"#,
     )
-    .bind(tid).bind(pid).bind(board).bind(col).bind(&typo_key)
-    .execute(&mut *tx).await.unwrap();
+    .bind(tid)
+    .bind(pid)
+    .bind(board)
+    .bind(col)
+    .bind(&typo_key)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
 
     // Exact-ish query should hit at least the well-titled row.
@@ -143,14 +177,17 @@ async fn search_ranks_tsvector_then_trigram(pool: PgPool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn subtasks_returns_only_children(pool: PgPool) {
     let owner = make_user(&pool).await;
-    let (pid, parent_id, _) =
-        make_project_with_task(&pool, "SUB", owner, "parent").await;
-    let board: Uuid =
-        sqlx::query_scalar("SELECT id FROM boards WHERE project_id = $1")
-            .bind(pid).fetch_one(&pool).await.unwrap();
-    let col: Uuid =
-        sqlx::query_scalar("SELECT id FROM board_columns WHERE board_id = $1")
-            .bind(board).fetch_one(&pool).await.unwrap();
+    let (pid, parent_id, _) = make_project_with_task(&pool, "SUB", owner, "parent").await;
+    let board: Uuid = sqlx::query_scalar("SELECT id FROM boards WHERE project_id = $1")
+        .bind(pid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let col: Uuid = sqlx::query_scalar("SELECT id FROM board_columns WHERE board_id = $1")
+        .bind(board)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     // Two children + one unrelated.
     for (i, parent) in [(1, Some(parent_id)), (2, Some(parent_id)), (3, None)] {
         let mut tx = pool.begin().await.unwrap();
@@ -191,7 +228,11 @@ async fn links_directed_and_self_link_blocked(pool: PgPool) {
         r#"INSERT INTO task_links (from_task_id, to_task_id, kind)
            VALUES ($1, $2, 'blocks')"#,
     )
-    .bind(t1).bind(t2).execute(&pool).await.unwrap();
+    .bind(t1)
+    .bind(t2)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // Self-link: CHECK blocks at the SQL layer.
     let res = sqlx::query(

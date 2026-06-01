@@ -80,11 +80,14 @@ pub async fn csrf_guard(req: Request, next: Next) -> Response {
 }
 
 fn is_write(method: &Method) -> bool {
-    matches!(*method, Method::POST | Method::PATCH | Method::PUT | Method::DELETE)
+    matches!(
+        *method,
+        Method::POST | Method::PATCH | Method::PUT | Method::DELETE
+    )
 }
 
 fn is_exempt(path: &str) -> bool {
-    EXEMPT_PATHS.iter().any(|p| *p == path)
+    EXEMPT_PATHS.contains(&path)
 }
 
 fn is_bearer(req: &Request) -> bool {

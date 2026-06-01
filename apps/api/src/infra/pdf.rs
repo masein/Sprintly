@@ -24,9 +24,17 @@ struct Line {
 const PAGE_W: f32 = 612.0;
 const PAGE_H: f32 = 792.0;
 
+impl Default for PdfBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PdfBuilder {
     pub fn new() -> Self {
-        Self { page_lines: Vec::new() }
+        Self {
+            page_lines: Vec::new(),
+        }
     }
 
     /// Place text at `(x, y)` measured in PDF points from the bottom-left.
@@ -93,14 +101,12 @@ impl PdfBuilder {
         out.extend_from_slice(b"xref\n0 6\n");
         out.extend_from_slice(b"0000000000 65535 f \n");
         for off in &offsets {
-            out.extend_from_slice(format!("{:010} 00000 n \n", off).as_bytes());
+            out.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
         }
 
         // Trailer.
-        let trailer = format!(
-            "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
-            xref_start
-        );
+        let trailer =
+            format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_start}\n%%EOF\n");
         out.extend_from_slice(trailer.as_bytes());
         out
     }

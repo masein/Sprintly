@@ -230,10 +230,7 @@ async fn login(
     issue_session_response(&state, user.id, &user.role, &headers).await
 }
 
-async fn logout(
-    State(state): State<AppState>,
-    user: CurrentUser,
-) -> AppResult<impl IntoResponse> {
+async fn logout(State(state): State<AppState>, user: CurrentUser) -> AppResult<impl IntoResponse> {
     sessions::revoke(&state.db, user.session_id, "logout").await?;
     let headers = clear_auth_cookies(&state.cfg);
     Ok((StatusCode::NO_CONTENT, headers))
@@ -278,12 +275,11 @@ async fn password_reset_request(
     // We always respond 200 with a generic body — never reveal whether the
     // email exists. In v1 the actual token URL is rendered in the admin UI;
     // email delivery is out of scope.
-    let user_id: Option<Uuid> = sqlx::query_scalar(
-        r#"SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL"#,
-    )
-    .bind(&req.email)
-    .fetch_optional(&state.db)
-    .await?;
+    let user_id: Option<Uuid> =
+        sqlx::query_scalar(r#"SELECT id FROM users WHERE email = $1 AND deleted_at IS NULL"#)
+            .bind(&req.email)
+            .fetch_optional(&state.db)
+            .await?;
 
     let mut payload = serde_json::json!({
         "message": "If that account exists, a reset link has been generated."
@@ -301,6 +297,7 @@ async fn password_reset_request(
         .bind(Uuid::now_v7())
         .bind(uid)
         .bind(hash.as_slice())
+        .bind(expires_at)
         .execute(&state.db)
         .await?;
 
@@ -359,10 +356,12 @@ async fn password_reset_confirm(
         .bind(row.user_id)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL")
-        .bind(row.user_id)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(row.user_id)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -381,8 +380,7 @@ async fn issue_session_response(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let issued =
-        sessions::create(&state.db, &state.cfg.auth, user_id, ua.as_deref(), None).await?;
+    let issued = sessions::create(&state.db, &state.cfg.auth, user_id, ua.as_deref(), None).await?;
     let access = tokens::mint_access(&state.cfg.auth, user_id, issued.session_id, role)?;
     // Stamp last_seen so the user list shows "active now".
     sqlx::query("UPDATE users SET last_seen_at = now() WHERE id = $1")
@@ -454,7 +452,10 @@ fn random_token_pair() -> (String, [u8; 32]) {
     rand::thread_rng().fill_bytes(&mut raw);
     let mut h = Sha256::new();
     h.update(raw);
-    (base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw), h.finalize().into())
+    (
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw),
+        h.finalize().into(),
+    )
 }
 
 fn hash_token(plain: &str) -> [u8; 32] {

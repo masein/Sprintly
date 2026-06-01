@@ -86,13 +86,17 @@ async fn context_resolves_member_role(pool: PgPool) {
     let owner = make_user(&pool, "member").await;
     make_project(&pool, "TEST", owner).await;
 
-    let ctx = project_ctx::load_by_key(&pool, "TEST", owner).await.unwrap();
+    let ctx = project_ctx::load_by_key(&pool, "TEST", owner)
+        .await
+        .unwrap();
     assert_eq!(ctx.actor_role, Some(ProjectRole::Lead));
     assert!(!ctx.archived);
 
     // A different user, no membership, sees actor_role = None.
     let outsider = make_user(&pool, "member").await;
-    let ctx2 = project_ctx::load_by_key(&pool, "TEST", outsider).await.unwrap();
+    let ctx2 = project_ctx::load_by_key(&pool, "TEST", outsider)
+        .await
+        .unwrap();
     assert_eq!(ctx2.actor_role, None);
 }
 
@@ -107,9 +111,15 @@ async fn permissions_match_role_table(pool: PgPool) {
     };
 
     // Lead can edit while project is active.
-    let active = project_ctx::load_by_key(&pool, "PERM", owner).await.unwrap();
+    let active = project_ctx::load_by_key(&pool, "PERM", owner)
+        .await
+        .unwrap();
     assert!(can(&lead_actor, Action::EditProject, active.as_resource()));
-    assert!(can(&lead_actor, Action::ManageColumns, active.as_resource()));
+    assert!(can(
+        &lead_actor,
+        Action::ManageColumns,
+        active.as_resource()
+    ));
 
     // Archive it; same actor now blocked on edit/manage, still allowed to view.
     sqlx::query("UPDATE projects SET archived_at = now() WHERE id = $1")
@@ -117,11 +127,25 @@ async fn permissions_match_role_table(pool: PgPool) {
         .execute(&pool)
         .await
         .unwrap();
-    let archived = project_ctx::load_by_key(&pool, "PERM", owner).await.unwrap();
+    let archived = project_ctx::load_by_key(&pool, "PERM", owner)
+        .await
+        .unwrap();
     assert!(archived.archived);
-    assert!(!can(&lead_actor, Action::EditProject, archived.as_resource()));
-    assert!(!can(&lead_actor, Action::ManageColumns, archived.as_resource()));
-    assert!(can(&lead_actor, Action::ViewProject, archived.as_resource()));
+    assert!(!can(
+        &lead_actor,
+        Action::EditProject,
+        archived.as_resource()
+    ));
+    assert!(!can(
+        &lead_actor,
+        Action::ManageColumns,
+        archived.as_resource()
+    ));
+    assert!(can(
+        &lead_actor,
+        Action::ViewProject,
+        archived.as_resource()
+    ));
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -134,8 +158,14 @@ async fn non_member_cannot_view_project(pool: PgPool) {
         role: Role::Member,
     };
 
-    let ctx = project_ctx::load_by_key(&pool, "PRIV", outsider).await.unwrap();
-    assert!(!can(&outsider_actor, Action::ViewProject, ctx.as_resource()));
+    let ctx = project_ctx::load_by_key(&pool, "PRIV", outsider)
+        .await
+        .unwrap();
+    assert!(!can(
+        &outsider_actor,
+        Action::ViewProject,
+        ctx.as_resource()
+    ));
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -147,7 +177,9 @@ async fn admin_bypasses_membership(pool: PgPool) {
         id: admin,
         role: Role::Admin,
     };
-    let ctx = project_ctx::load_by_key(&pool, "ADMN", admin).await.unwrap();
+    let ctx = project_ctx::load_by_key(&pool, "ADMN", admin)
+        .await
+        .unwrap();
     assert_eq!(ctx.actor_role, None, "admin not auto-added to project");
     // ...but can still edit because of the global Admin bypass in can().
     assert!(can(&admin_actor, Action::EditProject, ctx.as_resource()));

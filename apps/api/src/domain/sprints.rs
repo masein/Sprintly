@@ -15,7 +15,7 @@
 //! into `sprints.velocity_points` at completion so the metric doesn't drift
 //! when historical tasks get edited.
 
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SprintState {
@@ -134,7 +134,7 @@ pub fn retro_summary_markdown(i: &RetroSummaryInput<'_>) -> String {
         (i.ends - i.starts).num_days() + 1
     ));
     if let Some(v) = i.velocity_points {
-        out.push_str(&format!("**Velocity:** {} pts\n\n", v));
+        out.push_str(&format!("**Velocity:** {v} pts\n\n"));
     }
     out.push_str(&format!(
         "**Tasks:** {} completed · {} carried\n\n",
@@ -166,7 +166,7 @@ fn section(buf: &mut String, heading: &str, items: &[&str]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+    use chrono::{Datelike, TimeZone};
 
     #[test]
     fn transitions_legal_path() {
@@ -205,9 +205,7 @@ mod tests {
     fn burndown_subtracts_completions_by_day() {
         let start = Utc.with_ymd_and_hms(2026, 5, 25, 0, 0, 0).unwrap();
         let end = Utc.with_ymd_and_hms(2026, 5, 27, 0, 0, 0).unwrap();
-        let comps = [
-            (Utc.with_ymd_and_hms(2026, 5, 26, 10, 0, 0).unwrap(), 5),
-        ];
+        let comps = [(Utc.with_ymd_and_hms(2026, 5, 26, 10, 0, 0).unwrap(), 5)];
         let series = burndown(start, end, 10, &comps);
         assert_eq!(series.len(), 3);
         // Day 0: nothing burned yet.

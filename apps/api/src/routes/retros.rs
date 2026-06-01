@@ -31,9 +31,7 @@ use validator::Validate;
 use crate::{
     domain::{
         permissions::{can, Action, Role as GlobalRole},
-        projects as project_ctx,
-        sprints as sprint_domain,
-        tasks as task_domain,
+        projects as project_ctx, sprints as sprint_domain, tasks as task_domain,
     },
     infra::AppState,
     middleware::CurrentUser,
@@ -48,10 +46,7 @@ pub fn router() -> Router<AppState> {
             "/retro-notes/:id",
             axum::routing::patch(edit_note).delete(delete_note),
         )
-        .route(
-            "/retro-notes/:id/vote",
-            post(vote).delete(unvote),
-        )
+        .route("/retro-notes/:id/vote", post(vote).delete(unvote))
         .route("/retro-notes/:id/promote", post(promote))
         .route("/retros/:id/close", post(close_retro))
 }
@@ -150,9 +145,7 @@ async fn get_retro(
         buckets.insert(k.into(), Vec::new());
     }
     for r in rows {
-        let bucket = buckets
-            .entry(r.column_kind.clone())
-            .or_insert_with(Vec::new);
+        let bucket = buckets.entry(r.column_kind.clone()).or_default();
         let anon = r.anonymous;
         bucket.push(NoteDto {
             id: r.id,
@@ -578,4 +571,6 @@ fn first_line(s: &str, max: usize) -> String {
 // downstream; some readers prefer it imported alongside the other chrono
 // types they use.
 #[allow(dead_code)]
-fn _datelike_marker(d: NaiveDate) -> u32 { d.year() as u32 }
+fn _datelike_marker(d: NaiveDate) -> u32 {
+    d.year() as u32
+}

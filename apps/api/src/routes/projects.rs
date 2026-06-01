@@ -18,7 +18,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use chrono::{DateTime, Utc};
@@ -81,7 +81,9 @@ fn validate_project_key(s: &str) -> AppResult<()> {
     let bytes = s.as_bytes();
     let ok = (2..=10).contains(&bytes.len())
         && bytes[0].is_ascii_uppercase()
-        && bytes.iter().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+        && bytes
+            .iter()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
     if !ok {
         return Err(AppError::Validation(
             "project key must be 2-10 uppercase letters/digits starting with a letter".into(),
@@ -92,9 +94,8 @@ fn validate_project_key(s: &str) -> AppResult<()> {
 
 fn validate_hex_color(s: &str) -> AppResult<()> {
     let bytes = s.as_bytes();
-    let ok = bytes.len() == 7
-        && bytes[0] == b'#'
-        && bytes[1..].iter().all(|c| c.is_ascii_hexdigit());
+    let ok =
+        bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|c| c.is_ascii_hexdigit());
     if !ok {
         return Err(AppError::Validation("color must be #rrggbb".into()));
     }
@@ -247,10 +248,7 @@ async fn create(
     Ok((StatusCode::CREATED, Json(dto)))
 }
 
-async fn list(
-    State(state): State<AppState>,
-    user: CurrentUser,
-) -> AppResult<impl IntoResponse> {
+async fn list(State(state): State<AppState>, user: CurrentUser) -> AppResult<impl IntoResponse> {
     // Admins see everything; everyone else sees what they're a member of.
     let is_admin = user.role == GlobalRole::Admin;
 
@@ -432,20 +430,27 @@ async fn add_member(
     Json(req): Json<AddMemberReq>,
 ) -> AppResult<impl IntoResponse> {
     let ctx = project_ctx::load_by_key(&state.db, &key, user.id).await?;
-    if !can(&user.as_actor(), Action::AddProjectMember, ctx.as_resource()) {
+    if !can(
+        &user.as_actor(),
+        Action::AddProjectMember,
+        ctx.as_resource(),
+    ) {
         return Err(AppError::Forbidden);
     }
     let role = req.role.as_deref().unwrap_or("contributor");
     if ProjectRole::parse(role).is_none() {
-        return Err(AppError::BadRequest("role must be lead/contributor/watcher".into()));
+        return Err(AppError::BadRequest(
+            "role must be lead/contributor/watcher".into(),
+        ));
     }
 
     // Confirm the target user exists & isn't soft-deleted.
-    let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)")
-            .bind(req.user_id)
-            .fetch_one(&state.db)
-            .await?;
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND deleted_at IS NULL)",
+    )
+    .bind(req.user_id)
+    .fetch_one(&state.db)
+    .await?;
     if !exists {
         return Err(AppError::NotFound);
     }
@@ -472,7 +477,11 @@ async fn remove_member(
     Path((key, target)): Path<(String, Uuid)>,
 ) -> AppResult<impl IntoResponse> {
     let ctx = project_ctx::load_by_key(&state.db, &key, user.id).await?;
-    if !can(&user.as_actor(), Action::RemoveProjectMember, ctx.as_resource()) {
+    if !can(
+        &user.as_actor(),
+        Action::RemoveProjectMember,
+        ctx.as_resource(),
+    ) {
         return Err(AppError::Forbidden);
     }
     ensure_not_last_lead(&state.db, ctx.id, target).await?;
@@ -491,11 +500,17 @@ async fn change_member_role(
     Json(req): Json<ChangeRoleReq>,
 ) -> AppResult<impl IntoResponse> {
     let ctx = project_ctx::load_by_key(&state.db, &key, user.id).await?;
-    if !can(&user.as_actor(), Action::ChangeProjectMemberRole, ctx.as_resource()) {
+    if !can(
+        &user.as_actor(),
+        Action::ChangeProjectMemberRole,
+        ctx.as_resource(),
+    ) {
         return Err(AppError::Forbidden);
     }
     if ProjectRole::parse(&req.role).is_none() {
-        return Err(AppError::BadRequest("role must be lead/contributor/watcher".into()));
+        return Err(AppError::BadRequest(
+            "role must be lead/contributor/watcher".into(),
+        ));
     }
     if req.role != "lead" {
         ensure_not_last_lead(&state.db, ctx.id, target).await?;
@@ -587,4 +602,3 @@ async fn fetch_project_dto(db: &PgPool, project_id: Uuid, user_id: Uuid) -> AppR
         created_at: r.created_at,
     })
 }
-

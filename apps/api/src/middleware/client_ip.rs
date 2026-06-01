@@ -74,7 +74,10 @@ mod tests {
 
     #[test]
     fn picks_first_public_hop() {
-        let ip = client_ip(&xff("203.0.113.5, 10.0.0.1, 172.16.0.2"), ci("127.0.0.1:80"));
+        let ip = client_ip(
+            &xff("203.0.113.5, 10.0.0.1, 172.16.0.2"),
+            ci("127.0.0.1:80"),
+        );
         // 203.0.113.0/24 is TEST-NET-3 (documentation) — our public check
         // rejects it. Verify by using a real public-shaped address.
         // Use 198.51.100.0/24 which is also TEST-NET-2 — same. So just check

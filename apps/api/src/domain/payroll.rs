@@ -83,7 +83,9 @@ pub fn burn_status(
     budget_cents: Option<i64>,
     fraction_elapsed: f64,
 ) -> BurnStatus {
-    let Some(budget) = budget_cents else { return BurnStatus::None; };
+    let Some(budget) = budget_cents else {
+        return BurnStatus::None;
+    };
     if budget <= 0 || spent_cents <= 0 {
         return BurnStatus::Ok;
     }

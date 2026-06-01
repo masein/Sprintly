@@ -144,7 +144,9 @@ async fn month_overview(
     let stamped = decorate_with_period_status(&state.db, year, month, users).await?;
 
     if want_csv {
-        let mut csv = String::from("handle,display_name,total_minutes,billable_minutes,total_pay_cents,currency,status\n");
+        let mut csv = String::from(
+            "handle,display_name,total_minutes,billable_minutes,total_pay_cents,currency,status\n",
+        );
         for u in &stamped {
             csv.push_str(&format!(
                 "{},{},{},{},{},{},{}\n",
@@ -191,7 +193,12 @@ async fn user_month(
     // Hand-rolled PDF. Header + per-project table + total.
     let mut pdf = PdfBuilder::new();
     pdf.text_top(50.0, 60.0, 18.0, "Sprintly — Payroll Report");
-    pdf.text_top(50.0, 84.0, 11.0, &format!("User: {} (@{})", d.display_name, d.handle));
+    pdf.text_top(
+        50.0,
+        84.0,
+        11.0,
+        &format!("User: {} (@{})", d.display_name, d.handle),
+    );
     pdf.text_top(50.0, 100.0, 11.0, &format!("Period: {year}-{month:02}"));
     pdf.text_top(50.0, 116.0, 11.0, &format!("Status: {}", d.status));
 
@@ -201,15 +208,33 @@ async fn user_month(
 
     let mut y = 176.0;
     for line in &d.by_project {
-        pdf.text_top(50.0, y, 11.0, &format!("{} — {}", line.project_key, line.project_name));
+        pdf.text_top(
+            50.0,
+            y,
+            11.0,
+            &format!("{} — {}", line.project_key, line.project_name),
+        );
         pdf.text_top(280.0, y, 11.0, &fmt_minutes(line.total_minutes));
         pdf.text_top(380.0, y, 11.0, &fmt_minutes(line.billable_minutes));
         y += 18.0;
     }
     y += 12.0;
-    pdf.text_top(50.0, y, 12.0, &format!("Total: {}", fmt_minutes(d.total_minutes)));
-    pdf.text_top(50.0, y + 18.0, 12.0,
-        &format!("Pay: {} {:.2}", d.currency, (d.total_pay_cents as f64) / 100.0));
+    pdf.text_top(
+        50.0,
+        y,
+        12.0,
+        &format!("Total: {}", fmt_minutes(d.total_minutes)),
+    );
+    pdf.text_top(
+        50.0,
+        y + 18.0,
+        12.0,
+        &format!(
+            "Pay: {} {:.2}",
+            d.currency,
+            (d.total_pay_cents as f64) / 100.0
+        ),
+    );
     pdf.text_top(
         50.0,
         PAGE_H_FROM_TOP_FOOTER,
@@ -219,7 +244,10 @@ async fn user_month(
 
     let bytes = pdf.finish();
     let mut h = HeaderMap::new();
-    h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/pdf"));
+    h.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/pdf"),
+    );
     h.insert(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_str(&format!(
@@ -372,8 +400,7 @@ async fn burn(
     .await?;
 
     let elapsed = payroll_math::month_elapsed_fraction(today);
-    let status =
-        payroll_math::burn_status(spent_cents, proj.budget_cents, elapsed).as_str();
+    let status = payroll_math::burn_status(spent_cents, proj.budget_cents, elapsed).as_str();
     Ok(Json(BurnDto {
         spent_cents,
         budget_cents: proj.budget_cents,
@@ -615,4 +642,3 @@ fn fmt_minutes(m: i64) -> String {
         }
     }
 }
-

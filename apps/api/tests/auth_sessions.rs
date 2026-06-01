@@ -59,7 +59,9 @@ async fn refresh_rotates_and_invalidates_old(pool: PgPool) {
     };
 
     // The new token rotates again (still valid).
-    sessions::rotate(&pool, &cfg, &new_one.plaintext).await.unwrap();
+    sessions::rotate(&pool, &cfg, &new_one.plaintext)
+        .await
+        .unwrap();
 
     // The original cannot be used a second time — that's reuse.
     let reused = sessions::rotate(&pool, &cfg, &original).await;
@@ -90,9 +92,7 @@ async fn reuse_revokes_entire_session_family(pool: PgPool) {
     let replay = sessions::rotate(&pool, &cfg, &original).await;
     assert!(replay.is_err(), "stale token must be rejected");
 
-    let session_still_live = sessions::session_is_live(&pool, session_id)
-        .await
-        .unwrap();
+    let session_still_live = sessions::session_is_live(&pool, session_id).await.unwrap();
     assert!(
         !session_still_live,
         "session must be revoked once reuse is detected"

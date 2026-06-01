@@ -36,8 +36,8 @@ pub enum Action {
 
     // boards & columns
     ViewBoard,
-    ManageBoards,   // create/edit/delete boards
-    ManageColumns,  // create/edit/delete/reorder columns
+    ManageBoards,  // create/edit/delete boards
+    ManageColumns, // create/edit/delete/reorder columns
 }
 
 /// What's being acted upon.
@@ -129,21 +129,50 @@ pub fn can(actor: &Actor, action: Action, resource: Resource) -> bool {
         (Member, A::CreateProject, _) => true,
 
         // View: any project role can view; archived doesn't block reads.
-        (Member | Viewer, A::ViewProject, R::Project { actor_role: Some(_), .. }) => true,
+        (
+            Member | Viewer,
+            A::ViewProject,
+            R::Project {
+                actor_role: Some(_),
+                ..
+            },
+        ) => true,
 
-        (Member | Viewer, A::ViewBoard, R::Project { actor_role: Some(_), .. }) => true,
+        (
+            Member | Viewer,
+            A::ViewBoard,
+            R::Project {
+                actor_role: Some(_),
+                ..
+            },
+        ) => true,
 
         // Project edit / archive / member management: project leads only,
         // and never on an archived project (un-archive first).
         (
             Member,
-            A::EditProject | A::AddProjectMember | A::RemoveProjectMember
-            | A::ChangeProjectMemberRole | A::ManageBoards | A::ManageColumns,
-            R::Project { actor_role: Some(PR::Lead), archived: false, .. },
+            A::EditProject
+            | A::AddProjectMember
+            | A::RemoveProjectMember
+            | A::ChangeProjectMemberRole
+            | A::ManageBoards
+            | A::ManageColumns,
+            R::Project {
+                actor_role: Some(PR::Lead),
+                archived: false,
+                ..
+            },
         ) => true,
 
         // Archive / unarchive: lead can flip in either direction.
-        (Member, A::ArchiveProject, R::Project { actor_role: Some(PR::Lead), .. }) => true,
+        (
+            Member,
+            A::ArchiveProject,
+            R::Project {
+                actor_role: Some(PR::Lead),
+                ..
+            },
+        ) => true,
 
         _ => false,
     }
@@ -153,12 +182,31 @@ pub fn can(actor: &Actor, action: Action, resource: Resource) -> bool {
 mod tests {
     use super::*;
 
-    fn admin() -> Actor { Actor { id: Uuid::now_v7(), role: Role::Admin } }
-    fn member() -> Actor { Actor { id: Uuid::now_v7(), role: Role::Member } }
-    fn viewer() -> Actor { Actor { id: Uuid::now_v7(), role: Role::Viewer } }
+    fn admin() -> Actor {
+        Actor {
+            id: Uuid::now_v7(),
+            role: Role::Admin,
+        }
+    }
+    fn member() -> Actor {
+        Actor {
+            id: Uuid::now_v7(),
+            role: Role::Member,
+        }
+    }
+    fn viewer() -> Actor {
+        Actor {
+            id: Uuid::now_v7(),
+            role: Role::Viewer,
+        }
+    }
 
     fn project(role: Option<ProjectRole>, archived: bool) -> Resource {
-        Resource::Project { id: Uuid::now_v7(), actor_role: role, archived }
+        Resource::Project {
+            id: Uuid::now_v7(),
+            actor_role: role,
+            archived,
+        }
     }
 
     #[test]
@@ -174,25 +222,57 @@ mod tests {
 
     #[test]
     fn member_with_any_project_role_can_view() {
-        for r in [ProjectRole::Lead, ProjectRole::Contributor, ProjectRole::Watcher] {
+        for r in [
+            ProjectRole::Lead,
+            ProjectRole::Contributor,
+            ProjectRole::Watcher,
+        ] {
             assert!(can(&member(), Action::ViewProject, project(Some(r), false)));
         }
     }
 
     #[test]
     fn only_lead_can_edit_project() {
-        assert!(can(&member(), Action::EditProject, project(Some(ProjectRole::Lead), false)));
-        assert!(!can(&member(), Action::EditProject, project(Some(ProjectRole::Contributor), false)));
-        assert!(!can(&member(), Action::EditProject, project(Some(ProjectRole::Watcher), false)));
+        assert!(can(
+            &member(),
+            Action::EditProject,
+            project(Some(ProjectRole::Lead), false)
+        ));
+        assert!(!can(
+            &member(),
+            Action::EditProject,
+            project(Some(ProjectRole::Contributor), false)
+        ));
+        assert!(!can(
+            &member(),
+            Action::EditProject,
+            project(Some(ProjectRole::Watcher), false)
+        ));
     }
 
     #[test]
     fn archived_project_blocks_edits_even_for_lead() {
-        assert!(!can(&member(), Action::EditProject, project(Some(ProjectRole::Lead), true)));
-        assert!(!can(&member(), Action::ManageColumns, project(Some(ProjectRole::Lead), true)));
+        assert!(!can(
+            &member(),
+            Action::EditProject,
+            project(Some(ProjectRole::Lead), true)
+        ));
+        assert!(!can(
+            &member(),
+            Action::ManageColumns,
+            project(Some(ProjectRole::Lead), true)
+        ));
         // But lead can still archive/unarchive (toggle) and view.
-        assert!(can(&member(), Action::ArchiveProject, project(Some(ProjectRole::Lead), true)));
-        assert!(can(&member(), Action::ViewProject, project(Some(ProjectRole::Lead), true)));
+        assert!(can(
+            &member(),
+            Action::ArchiveProject,
+            project(Some(ProjectRole::Lead), true)
+        ));
+        assert!(can(
+            &member(),
+            Action::ViewProject,
+            project(Some(ProjectRole::Lead), true)
+        ));
     }
 
     #[test]

@@ -1,9 +1,13 @@
 //! M8 integration tests — payroll aggregation + burn-rate math.
 
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{Duration, Utc};
 use sprintly_api::{
     config::AuthConfig,
-    domain::{password, payroll::{self, BurnStatus}, tasks as task_domain},
+    domain::{
+        password,
+        payroll::{self, BurnStatus},
+        tasks as task_domain,
+    },
 };
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -41,28 +45,55 @@ async fn make_user(pool: &PgPool, rate: i64) -> Uuid {
 async fn make_project_with_task(pool: &PgPool, key: &str, owner: Uuid) -> Uuid {
     let pid = Uuid::now_v7();
     sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, $2, $3, $4)"#)
-        .bind(pid).bind(key).bind(key).bind(owner).execute(pool).await.unwrap();
+        .bind(pid)
+        .bind(key)
+        .bind(key)
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query(
         r#"INSERT INTO project_members (project_id, user_id, role, added_by)
            VALUES ($1, $2, 'lead', $2)"#,
-    ).bind(pid).bind(owner).execute(pool).await.unwrap();
+    )
+    .bind(pid)
+    .bind(owner)
+    .execute(pool)
+    .await
+    .unwrap();
     let board = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO boards (id, project_id, name, is_default) VALUES ($1, $2, 'B', true)"#,
-    ).bind(board).bind(pid).execute(pool).await.unwrap();
+    )
+    .bind(board)
+    .bind(pid)
+    .execute(pool)
+    .await
+    .unwrap();
     let col = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO board_columns (id, board_id, name, category, sort_order)
            VALUES ($1, $2, 'C', 'todo', 1024.0)"#,
-    ).bind(col).bind(board).execute(pool).await.unwrap();
+    )
+    .bind(col)
+    .bind(board)
+    .execute(pool)
+    .await
+    .unwrap();
     let mut tx = pool.begin().await.unwrap();
     let (k, _) = task_domain::next_key(&mut tx, pid).await.unwrap();
     sqlx::query(
         r#"INSERT INTO tasks (id, project_id, board_id, column_id, key, title, order_in_column)
            VALUES ($1, $2, $3, $4, $5, 't', 1024.0)"#,
     )
-    .bind(Uuid::now_v7()).bind(pid).bind(board).bind(col).bind(&k)
-    .execute(&mut *tx).await.unwrap();
+    .bind(Uuid::now_v7())
+    .bind(pid)
+    .bind(board)
+    .bind(col)
+    .bind(&k)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
     pid
 }
@@ -72,7 +103,13 @@ async fn project_budget_check_rejects_negative(pool: PgPool) {
     let owner = make_user(&pool, 5000).await;
     let pid = Uuid::now_v7();
     sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, $2, $3, $4)"#)
-        .bind(pid).bind("BUD").bind("BUD").bind(owner).execute(&pool).await.unwrap();
+        .bind(pid)
+        .bind("BUD")
+        .bind("BUD")
+        .bind(owner)
+        .execute(&pool)
+        .await
+        .unwrap();
     let res = sqlx::query("UPDATE projects SET budget_cents = -100 WHERE id = $1")
         .bind(pid)
         .execute(&pool)
@@ -105,9 +142,11 @@ async fn payroll_period_unique_per_user_per_month(pool: PgPool) {
 async fn time_in_month_sums_billable_only_when_filtered(pool: PgPool) {
     let owner = make_user(&pool, 6000).await; // $60/hr
     let pid = make_project_with_task(&pool, "TIM", owner).await;
-    let task_id: Uuid =
-        sqlx::query_scalar("SELECT id FROM tasks WHERE project_id = $1")
-            .bind(pid).fetch_one(&pool).await.unwrap();
+    let task_id: Uuid = sqlx::query_scalar("SELECT id FROM tasks WHERE project_id = $1")
+        .bind(pid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
     // Pick a fixed Wednesday in May 2026.
     use chrono::TimeZone;
@@ -117,26 +156,41 @@ async fn time_in_month_sums_billable_only_when_filtered(pool: PgPool) {
         r#"INSERT INTO time_logs (id, task_id, user_id, started_at, ended_at, billable)
            VALUES ($1, $2, $3, $4, $5, true)"#,
     )
-    .bind(Uuid::now_v7()).bind(task_id).bind(owner)
-    .bind(in_month).bind(in_month + Duration::minutes(60))
-    .execute(&pool).await.unwrap();
+    .bind(Uuid::now_v7())
+    .bind(task_id)
+    .bind(owner)
+    .bind(in_month)
+    .bind(in_month + Duration::minutes(60))
+    .execute(&pool)
+    .await
+    .unwrap();
     // 30 min non-billable.
     sqlx::query(
         r#"INSERT INTO time_logs (id, task_id, user_id, started_at, ended_at, billable)
            VALUES ($1, $2, $3, $4, $5, false)"#,
     )
-    .bind(Uuid::now_v7()).bind(task_id).bind(owner)
-    .bind(in_month + Duration::hours(2)).bind(in_month + Duration::hours(2) + Duration::minutes(30))
-    .execute(&pool).await.unwrap();
+    .bind(Uuid::now_v7())
+    .bind(task_id)
+    .bind(owner)
+    .bind(in_month + Duration::hours(2))
+    .bind(in_month + Duration::hours(2) + Duration::minutes(30))
+    .execute(&pool)
+    .await
+    .unwrap();
     // 45 min in a different month (April).
     let out = Utc.with_ymd_and_hms(2026, 4, 13, 9, 0, 0).unwrap();
     sqlx::query(
         r#"INSERT INTO time_logs (id, task_id, user_id, started_at, ended_at, billable)
            VALUES ($1, $2, $3, $4, $5, true)"#,
     )
-    .bind(Uuid::now_v7()).bind(task_id).bind(owner)
-    .bind(out).bind(out + Duration::minutes(45))
-    .execute(&pool).await.unwrap();
+    .bind(Uuid::now_v7())
+    .bind(task_id)
+    .bind(owner)
+    .bind(out)
+    .bind(out + Duration::minutes(45))
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (first, last) = payroll::month_bounds(2026, 5).unwrap();
     use chrono::{NaiveDateTime, NaiveTime};
