@@ -53,8 +53,8 @@ An item is `[x]` only when **all** of these hold:
 
 > Stabilize security, reproducibility, and CI before building new surface area.
 
-### `[ ]` H1 — Auth rate limiting
-**PR:** _none yet_ · **Depends on:** none · **Size:** S
+### `[x]` H1 — Auth rate limiting
+**PR:** #4 · **Depends on:** none · **Size:** S
 
 **Goal:** Throttle credential-guessing on `POST /auth/login` and reset abuse on
 `POST /auth/password/reset/request`.

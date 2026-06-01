@@ -13,8 +13,10 @@
 //!
 //! Both are marked Secure when SPRINTLY_PUBLIC_URL starts with https://.
 
+use std::net::SocketAddr;
+
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
     routing::post,
@@ -33,7 +35,7 @@ use crate::{
     config::Config,
     domain::{password, sessions, tokens},
     infra::AppState,
-    middleware::{csrf, CurrentUser},
+    middleware::{client_ip, csrf, rate_limit, CurrentUser},
     AppError, AppResult,
 };
 
@@ -181,10 +183,28 @@ async fn register(
 async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
+    info: ConnectInfo<SocketAddr>,
     Json(req): Json<LoginReq>,
 ) -> AppResult<impl IntoResponse> {
     req.validate()
         .map_err(|e| AppError::Validation(e.to_string()))?;
+
+    // Throttle credential guessing — by source IP and by target email.
+    let ip = client_ip(&headers, info);
+    rate_limit::hit(
+        &state,
+        &format!("sprintly:rl:login:ip:{ip}"),
+        rate_limit::login_ip_per_min(),
+        60,
+    )
+    .await?;
+    rate_limit::hit(
+        &state,
+        &format!("sprintly:rl:login:email:{}", req.email.to_lowercase()),
+        rate_limit::login_email_per_min(),
+        60,
+    )
+    .await?;
 
     let row = sqlx::query!(
         r#"
@@ -270,8 +290,28 @@ async fn refresh(
 
 async fn password_reset_request(
     State(state): State<AppState>,
+    headers: HeaderMap,
+    info: ConnectInfo<SocketAddr>,
     Json(req): Json<PasswordResetRequestReq>,
 ) -> AppResult<impl IntoResponse> {
+    // Throttle reset-spam by source IP and by target email. 429 reveals nothing
+    // about account existence (same for any email).
+    let ip = client_ip(&headers, info);
+    rate_limit::hit(
+        &state,
+        &format!("sprintly:rl:reset:ip:{ip}"),
+        rate_limit::reset_ip_per_hour(),
+        3600,
+    )
+    .await?;
+    rate_limit::hit(
+        &state,
+        &format!("sprintly:rl:reset:email:{}", req.email.to_lowercase()),
+        rate_limit::reset_email_per_hour(),
+        3600,
+    )
+    .await?;
+
     // We always respond 200 with a generic body — never reveal whether the
     // email exists. In v1 the actual token URL is rendered in the admin UI;
     // email delivery is out of scope.

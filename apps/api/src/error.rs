@@ -11,7 +11,7 @@
 //! variant here instead.
 
 use axum::{
-    http::StatusCode,
+    http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -41,7 +41,7 @@ pub enum AppError {
     Conflict(String),
 
     #[error("rate limited")]
-    RateLimited,
+    RateLimited { retry_after: u64 },
 
     // ─── 5xx ─────────────────────────────────────────────────────────────
     #[error("database error")]
@@ -66,7 +66,7 @@ impl AppError {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             Self::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
-            Self::RateLimited => (StatusCode::TOO_MANY_REQUESTS, "rate_limited"),
+            Self::RateLimited { .. } => (StatusCode::TOO_MANY_REQUESTS, "rate_limited"),
             Self::Database(_) | Self::Redis(_) | Self::Crypto(_) | Self::Internal(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal")
             }
@@ -97,7 +97,14 @@ impl IntoResponse for AppError {
             }
         }));
 
-        (status, body).into_response()
+        let mut resp = (status, body).into_response();
+        // Tell well-behaved clients when to come back.
+        if let Self::RateLimited { retry_after } = &self {
+            if let Ok(v) = HeaderValue::from_str(&retry_after.to_string()) {
+                resp.headers_mut().insert(header::RETRY_AFTER, v);
+            }
+        }
+        resp
     }
 }
 
@@ -106,7 +113,7 @@ fn other_public_message(err: &AppError) -> &'static str {
         AppError::NotFound => "Not found. This page is in a different branch.",
         AppError::Unauthorized => "Sign in to continue.",
         AppError::Forbidden => "You don't have access to this.",
-        AppError::RateLimited => "Slow down. Try again in a moment.",
+        AppError::RateLimited { .. } => "Slow down. Try again in a bit.",
         AppError::Validation(_) => "Some fields look off. Check the form.",
         AppError::BadRequest(_) => "That request didn't parse.",
         AppError::Conflict(_) => "That already exists.",

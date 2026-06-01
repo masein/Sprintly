@@ -43,7 +43,7 @@ use crate::{
         projects as project_ctx, vault as vault_crypto,
     },
     infra::AppState,
-    middleware::CurrentUser,
+    middleware::{rate_limit, CurrentUser},
     AppError, AppResult,
 };
 
@@ -363,9 +363,13 @@ async fn reveal_item(
     }
 
     // Rate limit BEFORE any DB / crypto work.
-    if !rate_limit_ok(&state, user.id).await? {
-        return Err(AppError::RateLimited);
-    }
+    rate_limit::hit(
+        &state,
+        &format!("sprintly:vault:reveal:{}", user.id),
+        REVEAL_LIMIT_PER_HOUR,
+        3600,
+    )
+    .await?;
 
     let (ctx, _) = require_access(&state.db, &user, id, AccessNeed::View).await?;
 
@@ -667,25 +671,4 @@ async fn write_audit(
     .execute(&mut **tx)
     .await?;
     Ok(())
-}
-
-/// Redis token bucket: per-user counter that expires after the window.
-/// Cheap and good enough for "10 reveals per hour".
-async fn rate_limit_ok(state: &AppState, user_id: Uuid) -> AppResult<bool> {
-    let key = format!("sprintly:vault:reveal:{user_id}");
-    let mut conn = state
-        .redis
-        .get()
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("redis: {e}")))?;
-    let n: i64 = redis::cmd("INCR").arg(&key).query_async(&mut conn).await?;
-    if n == 1 {
-        // First call in window → set TTL.
-        let _: () = redis::cmd("EXPIRE")
-            .arg(&key)
-            .arg(3600)
-            .query_async(&mut conn)
-            .await?;
-    }
-    Ok((n as u32) <= REVEAL_LIMIT_PER_HOUR)
 }
