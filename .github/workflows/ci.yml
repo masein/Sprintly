@@ -72,7 +72,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with: { version: 9.12.0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
@@ -102,7 +102,7 @@ jobs:
           cargo audit
       - uses: pnpm/action-setup@v4
         with: { version: 9.12.0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with: { node-version: 20 }
       - name: pnpm audit
         run: pnpm install --frozen-lockfile --ignore-scripts && pnpm audit || true
