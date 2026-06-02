@@ -189,8 +189,8 @@ from the `dev` target with the source mounted and a Postgres test DB) and point
 
 ---
 
-### `[ ]` H6 — Correct the Rust MSRV
-**PR:** _none yet_ · **Depends on:** none · **Size:** S
+### `[x]` H6 — Correct the Rust MSRV
+**PR:** #9 · **Depends on:** none · **Size:** S
 
 **Goal:** Declared `rust-version` matches reality.
 
