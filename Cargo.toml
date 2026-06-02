@@ -6,9 +6,9 @@ members = [
 
 [workspace.package]
 edition = "2021"
-# 1.85 floor — some transitive crates (base64ct ≥1.8) require edition 2024
-# in their own manifests, which only landed stable in 1.85.
-rust-version = "1.85"
+# 1.88 floor — locked transitive crates require it (e.g. time ≥0.3.47 needs
+# rustc 1.88; icu/idna need 1.86). Docker and CI build on 1.88 to match.
+rust-version = "1.88"
 license = "UNLICENSED"
 publish = false
 
