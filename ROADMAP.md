@@ -123,8 +123,8 @@ time). Base64 decode is also strict about surrounding whitespace.
 
 ---
 
-### `[ ]` H3 — Commit `pnpm-lock.yaml`
-**PR:** _none yet_ · **Depends on:** none · **Size:** S
+### `[x]` H3 — Commit `pnpm-lock.yaml`
+**PR:** #6 · **Depends on:** none · **Size:** S
 
 **Goal:** Reproducible web builds and cacheable CI installs.
 
