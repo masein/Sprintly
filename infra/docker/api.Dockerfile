@@ -48,6 +48,18 @@ COPY apps/api ./apps/api
 EXPOSE 8081
 CMD ["cargo", "run", "--bin", "sprintly-api"]
 
+# ─── Tools image: cargo + sqlx-cli, no app build ─────────────────────────
+# Backs `just test` / `just lint` / `just sqlx-prepare` against a running
+# stack. Lean on purpose (no cargo-watch); source + target are mounted at run
+# time, so this layer rebuilds only when the toolchain pins change.
+FROM rust:1.88-slim-bookworm AS tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN rustup component add rustfmt clippy
+RUN cargo install sqlx-cli --locked --version 0.8.2 --no-default-features --features rustls,postgres
+WORKDIR /app/apps/api
+
 # ─── Runtime image: tiny, no toolchain ───────────────────────────────────
 # postgresql-client gives us pg_dump for the M10 backup job; curl uploads
 # the dump to MinIO via the presigner. Adds ~30MB; acceptable.
