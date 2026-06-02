@@ -166,8 +166,8 @@ from the `dev` target with the source mounted and a Postgres test DB) and point
 
 ---
 
-### `[ ]` H5 — CI hardening
-**PR:** _none yet_ · **Depends on:** H3 · **Size:** M
+### `[x]` H5 — CI hardening
+**PR:** #8 · **Depends on:** H3 · **Size:** M
 
 **Goal:** Catch regressions the current CI can't.
 

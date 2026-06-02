@@ -39,7 +39,7 @@ jobs:
       SPRINTLY_ARGON2_M_COST_KIB: "8192"
       SPRINTLY_ARGON2_T_COST: "2"
       SPRINTLY_ARGON2_P_COST: "1"
-      SPRINTLY_VAULT_MASTER_KEY: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+      SPRINTLY_VAULT_MASTER_KEY: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
       SPRINTLY_VAULT_KEY_VERSION: "1"
       MINIO_ENDPOINT: http://localhost:9000
       MINIO_PUBLIC_ENDPOINT: http://localhost:9000
@@ -58,6 +58,9 @@ jobs:
       - name: Run migrations
         working-directory: apps/api
         run: sqlx migrate run
+      - name: Verify .sqlx cache is current
+        working-directory: apps/api
+        run: cargo sqlx prepare --check -- --lib --bins
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --locked
@@ -82,3 +85,24 @@ jobs:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8080/api/v1
           NEXT_PUBLIC_WS_URL: ws://localhost:8080/ws
           NEXT_PUBLIC_APP_NAME: Sprintly
+
+  # Dependency advisories. Non-blocking for now (warn, don't gate) — flip to
+  # required once the backlog is clean.
+  audit:
+    name: audit (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: pnpm audit
+        run: pnpm install --frozen-lockfile --ignore-scripts && pnpm audit || true

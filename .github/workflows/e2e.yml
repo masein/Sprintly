@@ -1,0 +1,58 @@
+name: e2e
+
+# Boots the full Docker stack and runs the Playwright smoke against it.
+# Kept in its own workflow and OUT of the required status checks — it's slower
+# and heavier than unit/integration CI, so it informs without gating merges.
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: e2e · smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write a CI .env
+        run: |
+          cp .env.example .env
+          # .env.example ships placeholder secrets; substitute valid CI values.
+          sed -i 's#^SPRINTLY_JWT_SECRET=.*#SPRINTLY_JWT_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#' .env
+          sed -i 's#^SPRINTLY_VAULT_MASTER_KEY=.*#SPRINTLY_VAULT_MASTER_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=#' .env
+
+      - name: Boot the stack
+        run: docker compose -f infra/compose/docker-compose.yml --env-file .env up -d --build
+
+      - name: Wait for the stack to be healthy
+        run: |
+          for i in $(seq 1 90); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/v1/healthz || true)
+            web=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/login || true)
+            if [ "$code" = "200" ] && [ "$web" = "200" ]; then echo "stack up"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::stack did not become healthy"
+          docker compose -f infra/compose/docker-compose.yml logs --tail=80
+          exit 1
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.12.0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @sprintly/e2e exec playwright install --with-deps chromium
+
+      - name: Run Playwright smoke
+        run: pnpm --filter @sprintly/e2e test
+        env:
+          CI: "true"
+          SPRINTLY_E2E_BASE_URL: http://localhost:8080
+
+      - name: Dump stack logs on failure
+        if: failure()
+        run: docker compose -f infra/compose/docker-compose.yml logs --tail=120
