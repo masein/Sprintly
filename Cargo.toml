@@ -71,7 +71,7 @@ dotenvy = "0.15"
 envy = "0.4"
 
 # Validation
-validator = { version = "0.18", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 
 # Misc
 async-trait = "0.1"
