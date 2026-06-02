@@ -89,10 +89,13 @@ async fn cmd_serve() -> anyhow::Result<()> {
 }
 
 async fn cmd_migrate() -> anyhow::Result<()> {
-    let cfg = Config::from_env()?;
-    sprintly_api::logging::init(&cfg);
+    // Migrations only need the database — not the full app config (JWT/vault/
+    // MinIO secrets). Keeps the compose `migrate` one-shot env minimal.
+    sprintly_api::logging::init_basic();
+    let database_url = std::env::var("DATABASE_URL")
+        .map_err(|_| anyhow::anyhow!("missing required env var: DATABASE_URL"))?;
     info!("running migrations");
-    let pool = infra::db::connect(&cfg).await?;
+    let pool = infra::db::connect_url(&database_url).await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
     info!("migrations applied");
     Ok(())
