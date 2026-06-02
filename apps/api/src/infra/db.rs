@@ -12,7 +12,13 @@ use std::time::Duration;
 use crate::config::Config;
 
 pub async fn connect(cfg: &Config) -> Result<PgPool> {
-    let opts = PgConnectOptions::from_str(&cfg.database_url)?.application_name("sprintly-api");
+    connect_url(&cfg.database_url).await
+}
+
+/// Connect from a bare URL — used by the `migrate` subcommand, which doesn't
+/// build the full `Config`.
+pub async fn connect_url(database_url: &str) -> Result<PgPool> {
+    let opts = PgConnectOptions::from_str(database_url)?.application_name("sprintly-api");
 
     let pool = PgPoolOptions::new()
         .max_connections(20)

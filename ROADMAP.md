@@ -205,8 +205,8 @@ from the `dev` target with the source mounted and a Postgres test DB) and point
 
 ---
 
-### `[ ]` H7 — Slim the `migrate` subcommand
-**PR:** _none yet_ · **Depends on:** none · **Size:** S
+### `[x]` H7 — Slim the `migrate` subcommand
+**PR:** #23 · **Depends on:** none · **Size:** S
 
 **Goal:** `migrate` should need only `DATABASE_URL`.
 
