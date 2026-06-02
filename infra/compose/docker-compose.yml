@@ -216,9 +216,48 @@ services:
       timeout: 3s
       retries: 5
 
+  # ─── Dev tooling (profile: tools) ────────────────────────────────────────
+  # Not started by `just up`. `just test` / `just lint` / `just sqlx-prepare`
+  # use `compose --profile tools run --rm` to get a one-shot toolchain wired to
+  # the running Postgres/Redis, with the source and build cache mounted.
+  api-tools:
+    profiles: ["tools"]
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+      target: tools
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      SQLX_OFFLINE: "false"
+      CARGO_TERM_COLOR: always
+    working_dir: /app/apps/api
+    volumes:
+      - ../../apps/api:/app/apps/api
+      - ../../Cargo.toml:/app/Cargo.toml
+      - ../../Cargo.lock:/app/Cargo.lock
+      - cargo_target:/app/target
+      - cargo_registry:/usr/local/cargo/registry
+
+  web-tools:
+    profiles: ["tools"]
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ../../:/app
+      - web_tools_modules:/app/apps/web/node_modules
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
   caddy_data:
   caddy_config:
+  cargo_target:
+  cargo_registry:
+  web_tools_modules:

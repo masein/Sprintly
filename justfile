@@ -46,9 +46,10 @@ logs:
 log service:
     {{compose}} logs -f --tail=200 {{service}}
 
-# Apply migrations against the running dev DB.
+# Apply migrations against the running dev DB. The running API image has the
+# binary (and full env), so use its `migrate` subcommand — no toolchain needed.
 migrate:
-    {{compose}} exec api sqlx migrate run
+    {{compose}} exec api /usr/local/bin/sprintly-api migrate
 
 # Create a new migration: `just migrate-new add_users_table`
 migrate-new name:
@@ -56,21 +57,21 @@ migrate-new name:
 
 # Regenerate the SQLx offline query cache. Run this whenever you change a
 # query! macro. Commits to apps/api/.sqlx/ and lets prod docker builds run
-# without a live DB.
+# without a live DB. Runs in the one-shot `tools` container against the live DB.
 sqlx-prepare:
-    {{compose}} exec api cargo sqlx prepare --workspace -- --bin sprintly-api
+    {{compose}} --profile tools run --rm -T api-tools cargo sqlx prepare --workspace -- --bin sprintly-api
 
 # Seed the database with demo data (M1 stub; fleshed out in later milestones).
 seed:
     {{compose}} exec api /usr/local/bin/sprintly-seed
 
-# Run all backend tests inside the container.
+# Run all backend tests against the running stack (one-shot toolchain container).
 test:
-    {{compose}} exec api cargo test --workspace --locked
+    {{compose}} --profile tools run --rm -T api-tools cargo test --workspace --locked
 
-# Run frontend tests.
+# Typecheck the web app (one-shot node container).
 test-web:
-    {{compose}} exec web pnpm test
+    {{compose}} --profile tools run --rm -T web-tools sh -c "corepack enable && corepack prepare pnpm@9.12.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @sprintly/web typecheck"
 
 # Run the Playwright smoke against a running stack. First time only:
 #   pnpm i && pnpm e2e:install
@@ -81,11 +82,11 @@ e2e:
 e2e-spec spec:
     pnpm --filter @sprintly/e2e test {{spec}}
 
-# Lint everything.
+# Lint everything (one-shot toolchain containers against the running stack).
 lint:
-    {{compose}} exec api cargo clippy --workspace --all-targets -- -D warnings
-    {{compose}} exec api cargo fmt --all -- --check
-    {{compose}} exec web pnpm lint
+    {{compose}} --profile tools run --rm -T api-tools cargo clippy --workspace --all-targets -- -D warnings
+    {{compose}} --profile tools run --rm -T api-tools cargo fmt --all -- --check
+    {{compose}} --profile tools run --rm -T web-tools sh -c "corepack enable && corepack prepare pnpm@9.12.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @sprintly/web lint"
 
 # Format everything.
 fmt:

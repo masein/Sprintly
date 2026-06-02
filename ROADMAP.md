@@ -144,8 +144,8 @@ in `.gitignore` if needed.
 
 ---
 
-### `[ ]` H4 — `just test` / `just lint` work against the running stack
-**PR:** _none yet_ · **Depends on:** none · **Size:** S
+### `[x]` H4 — `just test` / `just lint` work against the running stack
+**PR:** #7 · **Depends on:** none · **Size:** S
 
 **Goal:** The documented test/lint recipes actually run.
 

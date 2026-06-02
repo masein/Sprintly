@@ -47,6 +47,21 @@ If the API container exits immediately, the env is usually the culprit. Run
 check-config` locally) to validate every variable and print a redacted summary
 — it names the offending variable instead of failing silently.
 
+### Tests & lint
+
+With the stack up (`just up`), run the suites against it — no host toolchain
+needed. These spin up one-shot `tools`/`node` containers wired to the running
+Postgres/Redis (the `runtime` images ship no compiler):
+
+```bash
+just test          # full backend suite (cargo test --workspace)
+just lint          # cargo clippy -D warnings + cargo fmt --check + web eslint
+just test-web      # web typecheck
+just sqlx-prepare  # regenerate apps/api/.sqlx after changing a query! macro
+```
+
+CI runs the same checks on every PR.
+
 ---
 
 ## Repo layout
