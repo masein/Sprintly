@@ -54,12 +54,12 @@ ENV HOSTNAME=0.0.0.0
 RUN apk add --no-cache wget && \
     addgroup -S sprintly && adduser -S sprintly -G sprintly
 WORKDIR /app
-# `next build` with output:"standalone" (no outputFileTracingRoot) roots the
-# traced bundle at the app, so server.js sits at the standalone root and the
-# server serves ./.next/static and ./public relative to it.
+# With outputFileTracingRoot pinned to the monorepo root, the standalone bundle
+# mirrors the repo: apps/web/server.js + hoisted node_modules at the root. Copy
+# the traced static/public next to the server.
 COPY --from=builder --chown=sprintly:sprintly /app/apps/web/.next/standalone ./
-COPY --from=builder --chown=sprintly:sprintly /app/apps/web/.next/static ./.next/static
-COPY --from=builder --chown=sprintly:sprintly /app/apps/web/public ./public
+COPY --from=builder --chown=sprintly:sprintly /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder --chown=sprintly:sprintly /app/apps/web/public ./apps/web/public
 USER sprintly
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["node", "apps/web/server.js"]
