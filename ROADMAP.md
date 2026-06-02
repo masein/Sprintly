@@ -91,8 +91,8 @@ and a `Retry-After` header.
 
 ---
 
-### `[ ]` H2 — Fail-loud config + secret hygiene
-**PR:** _none yet_ · **Depends on:** none · **Size:** S
+### `[x]` H2 — Fail-loud config + secret hygiene
+**PR:** #5 · **Depends on:** none · **Size:** S
 
 **Goal:** Make `Config::from_env()` failures visible and inputs forgiving.
 
