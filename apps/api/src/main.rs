@@ -5,6 +5,7 @@
 //!   sprintly-api migrate      — run SQLx migrations, exit 0 on success
 //!   sprintly-api healthcheck  — used by Docker HEALTHCHECK; hits /readyz on
 //!                                the configured bind address
+//!   sprintly-api check-config — validate env + print a redacted summary
 //!
 //! The point of bundling these into one binary is that the runtime image only
 //! needs to ship one thing.
@@ -25,8 +26,9 @@ async fn main() -> ExitCode {
     match arg.as_deref() {
         Some("migrate") => run(cmd_migrate()).await,
         Some("healthcheck") => run(cmd_healthcheck()).await,
+        Some("check-config") => run(cmd_check_config()).await,
         Some("--help") | Some("-h") => {
-            println!("usage: sprintly-api [migrate|healthcheck]");
+            println!("usage: sprintly-api [migrate|healthcheck|check-config]");
             ExitCode::SUCCESS
         }
         _ => run(cmd_serve()).await,
@@ -37,10 +39,20 @@ async fn run<F: std::future::Future<Output = anyhow::Result<()>>>(f: F) -> ExitC
     match f.await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
+            // Print to stderr unconditionally: config errors happen before the
+            // tracing subscriber is initialised, so `error!` alone is silent.
+            // `{e:#}` includes the anyhow cause chain (which names the bad var).
+            eprintln!("sprintly-api: fatal: {e:#}");
             error!(error = %e, "fatal");
             ExitCode::from(1)
         }
     }
+}
+
+async fn cmd_check_config() -> anyhow::Result<()> {
+    let cfg = Config::from_env()?;
+    println!("config OK:\n{}", cfg.redacted_summary());
+    Ok(())
 }
 
 async fn cmd_serve() -> anyhow::Result<()> {

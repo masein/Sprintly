@@ -42,6 +42,11 @@ Within a minute or two:
 
 Tail logs with `just logs`. See everything `just` can do with `just`.
 
+If the API container exits immediately, the env is usually the culprit. Run
+`docker compose ... exec api sprintly-api check-config` (or `sprintly-api
+check-config` locally) to validate every variable and print a redacted summary
+— it names the offending variable instead of failing silently.
+
 ---
 
 ## Repo layout
