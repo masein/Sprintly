@@ -17,10 +17,13 @@ WORKDIR /app
 
 # ─── Deps: install once, cached on lockfile + manifests ──────────────────
 FROM base AS deps
-COPY package.json pnpm-workspace.yaml ./
+# All workspace manifests + the committed lockfile so --frozen-lockfile can
+# validate; --filter installs only web and its workspace deps (not e2e/playwright).
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY apps/web/package.json apps/web/
+COPY apps/e2e/package.json apps/e2e/
 COPY packages ./packages
-RUN pnpm install --frozen-lockfile=false
+RUN pnpm install --frozen-lockfile --filter "@sprintly/web..."
 
 # ─── Dev image ───────────────────────────────────────────────────────────
 FROM base AS dev

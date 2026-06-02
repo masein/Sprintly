@@ -72,10 +72,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      # No `cache: pnpm` — the repo intentionally ships no pnpm-lock.yaml
-      # (Docker installs with --frozen-lockfile=false), and the cache action
-      # errors out when it can't find a lockfile to hash.
-      - run: pnpm install --frozen-lockfile=false
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @sprintly/web lint
       - run: pnpm --filter @sprintly/web typecheck
       - run: pnpm --filter @sprintly/web build
