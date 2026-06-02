@@ -20,7 +20,7 @@ jobs:
           cp .env.example .env
           # .env.example ships placeholder secrets; substitute valid CI values.
           sed -i 's#^SPRINTLY_JWT_SECRET=.*#SPRINTLY_JWT_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#' .env
-          sed -i 's#^SPRINTLY_VAULT_MASTER_KEY=.*#SPRINTLY_VAULT_MASTER_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=#' .env
+          sed -i 's#^SPRINTLY_VAULT_MASTER_KEY=.*#SPRINTLY_VAULT_MASTER_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=#' .env
 
       - name: Boot the stack
         run: docker compose -f infra/compose/docker-compose.yml --env-file .env up -d --build
