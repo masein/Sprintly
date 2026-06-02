@@ -8,6 +8,6 @@
     "generate": "openapi-typescript ../../apps/api/openapi.json -o ./src/generated.ts"
   },
   "devDependencies": {
-    "openapi-typescript": "7.4.1"
+    "openapi-typescript": "7.13.0"
   }
 }
