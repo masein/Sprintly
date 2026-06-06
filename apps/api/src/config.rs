@@ -25,6 +25,7 @@ pub struct Config {
     pub minio: MinioConfig,
     pub auth: AuthConfig,
     pub vault: VaultConfig,
+    pub email: EmailConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +69,15 @@ pub struct VaultConfig {
     /// 32-byte master key.
     pub master_key: [u8; 32],
     pub key_version: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmailConfig {
+    /// SMTP connection URL (e.g. `smtps://user:pass@host:465`). When unset, the
+    /// app logs outbound mail instead of sending it.
+    pub smtp_url: Option<String>,
+    /// `From` header, e.g. `Sprintly <noreply@example.com>`.
+    pub mail_from: String,
 }
 
 impl Config {
@@ -143,6 +153,12 @@ impl Config {
                 master_key,
                 key_version: required_parse(&get, "SPRINTLY_VAULT_KEY_VERSION")?,
             },
+
+            email: EmailConfig {
+                smtp_url: optional(&get, "SPRINTLY_SMTP_URL"),
+                mail_from: optional(&get, "SPRINTLY_MAIL_FROM")
+                    .unwrap_or_else(|| "Sprintly <noreply@localhost>".into()),
+            },
         })
     }
 
@@ -166,6 +182,15 @@ impl Config {
             format!(
                 "minio_bucket     = {} (region {})",
                 self.minio.bucket, self.minio.region
+            ),
+            format!(
+                "email            = {} (from {})",
+                if self.email.smtp_url.is_some() {
+                    "smtp"
+                } else {
+                    "log-only"
+                },
+                self.email.mail_from
             ),
         ]
         .join("\n")

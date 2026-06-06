@@ -123,6 +123,14 @@ async fn create_invite(
         base = state.cfg.public_url.trim_end_matches('/'),
     );
 
+    // If an email was supplied, send the invite (best-effort, non-blocking).
+    if let Some(email_to) = req.email_hint.as_deref() {
+        crate::infra::email::spawn_send(
+            state.mailer.clone(),
+            crate::infra::email::invite(&state.cfg.public_url, &token, role, email_to),
+        );
+    }
+
     Ok((
         StatusCode::CREATED,
         Json(CreateInviteResp {

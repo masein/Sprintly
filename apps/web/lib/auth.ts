@@ -50,3 +50,15 @@ export const register = (p: RegisterPayload) =>
 export const logout = () => api<void>("/auth/logout", { method: "POST" });
 
 export const me = () => api<Me>("/users/me");
+
+export const requestPasswordReset = (email: string) =>
+  api<{ message: string; dev_token?: string }>(
+    "/auth/password/reset/request",
+    { method: "POST", body: { email } },
+  );
+
+export const confirmPasswordReset = (token: string, new_password: string) =>
+  api<void>("/auth/password/reset/confirm", {
+    method: "POST",
+    body: { token, new_password },
+  });

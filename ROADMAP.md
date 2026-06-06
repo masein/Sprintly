@@ -231,8 +231,8 @@ assert exit 0 and schema applied.
 
 > Reach users. Everything later (mentions, PR events, digests) rides this.
 
-### `[ ]` F4 — Transactional email
-**PR:** _none yet_ · **Depends on:** none · **Size:** M
+### `[x]` F4 — Transactional email
+**PR:** #24 · **Depends on:** none · **Size:** M
 
 **Goal:** Send real email for password reset, invites, and (later) notifications.
 

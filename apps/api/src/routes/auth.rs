@@ -341,8 +341,15 @@ async fn password_reset_request(
         .execute(&state.db)
         .await?;
 
-        // v1: no email. Return the token in the response only in dev. In prod
-        // an admin would surface it via the admin UI.
+        // Email the reset link (best-effort; spawned so it never blocks the
+        // response, and a down mail server can't 500 the request).
+        crate::infra::email::spawn_send(
+            state.mailer.clone(),
+            crate::infra::email::password_reset(&state.cfg.public_url, &plain, &req.email),
+        );
+
+        // Also return the token in the response in dev — handy when no SMTP is
+        // configured. In prod an admin can still surface it via the admin UI.
         if state.cfg.is_dev() {
             payload["dev_token"] = serde_json::Value::String(plain);
         }
