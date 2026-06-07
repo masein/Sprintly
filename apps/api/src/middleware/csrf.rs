@@ -33,6 +33,8 @@ const EXEMPT_PATHS: &[&str] = &[
     "/api/v1/auth/refresh",
     "/api/v1/auth/password/reset/request",
     "/api/v1/auth/password/reset/confirm",
+    // Inbound webhook authenticates via HMAC signature, not a cookie.
+    "/api/v1/integrations/github/webhook",
     // probes are GETs, but defense in depth:
     "/api/v1/healthz",
     "/api/v1/readyz",
