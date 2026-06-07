@@ -15,6 +15,7 @@ import { listProjects, type Project } from "@/lib/projects";
 import { SessionBadge } from "./SessionBadge";
 import { RunningTimerChip } from "./RunningTimerChip";
 import { CoffeeMeter } from "./CoffeeMeter";
+import { NotificationBell } from "./NotificationBell";
 
 export function AppShell({
   currentProjectKey,
@@ -45,6 +46,7 @@ function TopBar({ currentProjectKey }: { currentProjectKey?: string }) {
         <div className="ml-auto flex items-center gap-3">
           <CoffeeMeter />
           <RunningTimerChip />
+          <NotificationBell />
           <SessionBadge />
         </div>
       </div>

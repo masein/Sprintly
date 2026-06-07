@@ -318,6 +318,55 @@ async fn create_comment(
     )
     .await;
 
+    // Fan-out notifications: @mentions first, then watchers (minus anyone
+    // already mentioned). All best-effort; notify() skips the author.
+    {
+        use crate::domain::notifications as notif;
+        let link = format!("/tasks/{task_key}");
+        let snippet: String = req.body.chars().take(140).collect();
+
+        let mentioned = notif::resolve_handles(&state.db, &notif::parse_mentions(&req.body))
+            .await
+            .unwrap_or_default();
+        for uid in &mentioned {
+            let _ = notif::notify(
+                &state.db,
+                &state.redis,
+                *uid,
+                user.id,
+                "mention",
+                &format!("You were mentioned on {task_key}"),
+                Some(&snippet),
+                Some(&link),
+                Some(task.id),
+            )
+            .await;
+        }
+
+        let watchers: Vec<Uuid> =
+            sqlx::query_scalar(r#"SELECT user_id FROM task_watchers WHERE task_id = $1"#)
+                .bind(task.id)
+                .fetch_all(&state.db)
+                .await
+                .unwrap_or_default();
+        for uid in watchers {
+            if !mentioned.contains(&uid) {
+                let _ = notif::notify(
+                    &state.db,
+                    &state.redis,
+                    uid,
+                    user.id,
+                    "comment",
+                    &format!("New comment on {task_key}"),
+                    Some(&snippet),
+                    Some(&link),
+                    Some(task.id),
+                )
+                .await;
+            }
+        }
+    }
+
     let dto = fetch_one_comment(&state.db, id, user.id).await?;
     Ok((StatusCode::CREATED, Json(dto)))
 }
