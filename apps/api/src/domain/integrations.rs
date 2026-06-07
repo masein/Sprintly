@@ -144,7 +144,63 @@ pub async fn link(
         .await?;
     }
 
+    // A merged PR moves its task to the board's done column.
+    if pr_state == Some("merged") {
+        transition_to_done(db, task_id).await?;
+    }
+
     Ok(inserted)
+}
+
+/// Move a task into its board's `done` column (status = done), appended to the
+/// bottom. No-op if the board has no done column or the task is already there.
+async fn transition_to_done(db: &PgPool, task_id: Uuid) -> AppResult<()> {
+    let done_col: Option<Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT bc.id
+        FROM   board_columns bc
+        JOIN   tasks t ON t.board_id = bc.board_id
+        WHERE  t.id = $1 AND bc.category = 'done' AND bc.deleted_at IS NULL
+        ORDER  BY bc.sort_order ASC
+        LIMIT  1
+        "#,
+    )
+    .bind(task_id)
+    .fetch_optional(db)
+    .await?;
+    let Some(col) = done_col else {
+        return Ok(());
+    };
+
+    let moved = sqlx::query(
+        r#"
+        UPDATE tasks
+        SET    column_id = $2,
+               status = 'done',
+               completed_at = COALESCE(completed_at, now()),
+               order_in_column = COALESCE(
+                   (SELECT MAX(order_in_column) + 1024
+                    FROM tasks WHERE column_id = $2 AND deleted_at IS NULL),
+                   1024)
+        WHERE  id = $1 AND (status <> 'done' OR column_id <> $2)
+        "#,
+    )
+    .bind(task_id)
+    .bind(col)
+    .execute(db)
+    .await?;
+
+    if moved.rows_affected() > 0 {
+        sqlx::query(
+            r#"INSERT INTO task_activity (id, task_id, actor_id, kind, payload)
+               VALUES ($1, $2, NULL, 'completed', '{"via":"pr_merge"}'::jsonb)"#,
+        )
+        .bind(Uuid::now_v7())
+        .bind(task_id)
+        .execute(db)
+        .await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
