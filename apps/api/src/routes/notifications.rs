@@ -81,7 +81,10 @@ async fn read_one(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn read_all(State(state): State<AppState>, user: CurrentUser) -> AppResult<impl IntoResponse> {
+async fn read_all(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> AppResult<impl IntoResponse> {
     sqlx::query(
         r#"UPDATE notifications SET read_at = now()
            WHERE user_id = $1 AND read_at IS NULL"#,

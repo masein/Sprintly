@@ -25,9 +25,10 @@ async fn resolve_handles_matches_case_insensitively(pool: PgPool) {
     let a = make_user(&pool, "alice").await;
     let b = make_user(&pool, "bob_2").await;
     // Inputs arrive lowercased from parse_mentions; unknown handles drop out.
-    let ids = notifications::resolve_handles(&pool, &["alice".into(), "bob_2".into(), "nope".into()])
-        .await
-        .unwrap();
+    let ids =
+        notifications::resolve_handles(&pool, &["alice".into(), "bob_2".into(), "nope".into()])
+            .await
+            .unwrap();
     assert_eq!(ids.len(), 2);
     assert!(ids.contains(&a) && ids.contains(&b));
 }
@@ -50,11 +51,12 @@ async fn unread_count_excludes_read(pool: PgPool) {
         .await
         .unwrap();
     }
-    let unread: i64 =
-        sqlx::query_scalar(r#"SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND read_at IS NULL"#)
-            .bind(u)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let unread: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND read_at IS NULL"#,
+    )
+    .bind(u)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(unread, 2);
 }

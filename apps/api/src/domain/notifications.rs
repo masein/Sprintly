@@ -114,18 +114,27 @@ mod tests {
 
     #[test]
     fn extracts_simple_mentions() {
-        assert_eq!(parse_mentions("hey @alice and @bob_2"), vec!["alice", "bob_2"]);
+        assert_eq!(
+            parse_mentions("hey @alice and @bob_2"),
+            vec!["alice", "bob_2"]
+        );
     }
 
     #[test]
     fn dedupes_case_insensitively_keeps_order() {
-        assert_eq!(parse_mentions("@Alice @alice @ALICE @carol"), vec!["alice", "carol"]);
+        assert_eq!(
+            parse_mentions("@Alice @alice @ALICE @carol"),
+            vec!["alice", "carol"]
+        );
     }
 
     #[test]
     fn ignores_emails_and_short_handles() {
         // glued to a word char (email) → ignored; "@ab" too short.
-        assert_eq!(parse_mentions("mail me@example.com or @ab"), Vec::<String>::new());
+        assert_eq!(
+            parse_mentions("mail me@example.com or @ab"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
