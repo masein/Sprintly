@@ -317,6 +317,15 @@ async fn create_task(
         )
         .await;
     }
+
+    // Outbound webhooks (best-effort).
+    let _ = crate::domain::webhooks::dispatch(
+        &state.db,
+        ctx.id,
+        "task.created",
+        serde_json::json!({ "task_id": task_id, "key": task_key, "board_id": board_id }),
+    )
+    .await;
     Ok((StatusCode::CREATED, Json(dto)))
 }
 
@@ -525,6 +534,15 @@ async fn edit_task(
             .await;
         }
     }
+
+    // Outbound webhooks (best-effort).
+    let _ = crate::domain::webhooks::dispatch(
+        &state.db,
+        project_id,
+        "task.updated",
+        serde_json::json!({ "task_id": task_id, "key": task_key }),
+    )
+    .await;
 
     let dto = fetch_task(&state.db, &task_key, project_id).await?;
     crate::infra::events::publish(

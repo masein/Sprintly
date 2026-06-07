@@ -25,14 +25,15 @@ const POLL_INTERVAL: Duration = Duration::from_secs(15);
 const ACHIEVEMENT_SCAN_EVERY_SECS: i64 = 300;
 
 /// Spawn the worker on the runtime. Returns immediately. The task runs for
-/// the lifetime of the process; on shutdown the runtime cancels it.
-pub fn spawn(pool: PgPool) {
+/// the lifetime of the process; on shutdown the runtime cancels it. The vault
+/// master key is needed to decrypt webhook signing secrets at delivery time.
+pub fn spawn(pool: PgPool, vault_master_key: [u8; 32]) {
     tokio::spawn(async move {
         if let Err(e) = ensure_seed_jobs(&pool).await {
             warn!(error = %e, "jobs: seed failed");
         }
         loop {
-            match run_one(&pool).await {
+            match run_one(&pool, &vault_master_key).await {
                 Ok(ran) => {
                     if !ran {
                         // No runnable job — sleep before polling again.
@@ -70,7 +71,7 @@ async fn ensure_seed_jobs(pool: &PgPool) -> anyhow::Result<()> {
 }
 
 /// Claim + run one job. Returns true if a job was processed.
-async fn run_one(pool: &PgPool) -> anyhow::Result<bool> {
+async fn run_one(pool: &PgPool, vault_master_key: &[u8; 32]) -> anyhow::Result<bool> {
     let mut tx = pool.begin().await?;
 
     // Claim a single runnable job. SKIP LOCKED so concurrent workers don't
@@ -103,6 +104,7 @@ async fn run_one(pool: &PgPool) -> anyhow::Result<bool> {
     let result = match kind.as_str() {
         "scan_achievements" => run_scan_achievements(pool).await,
         "create_backup" => run_create_backup(pool, id).await,
+        "deliver_webhook" => run_deliver_webhook(pool, id, vault_master_key).await,
         other => Err(anyhow::anyhow!("unknown job kind: {other}")),
     };
 
@@ -285,6 +287,116 @@ async fn run_scan_achievements(pool: &PgPool) -> anyhow::Result<()> {
         info!(total = inserted_total, "achievement scan: done");
     }
     Ok(())
+}
+
+/// Deliver one webhook: decrypt its signing secret, HMAC-sign the body, POST it
+/// via curl, and record the attempt. Returns `Err` on a non-2xx / transport
+/// failure so the worker retries it with backoff (up to `max_attempts`).
+async fn run_deliver_webhook(
+    pool: &PgPool,
+    job_id: Uuid,
+    vault_master_key: &[u8; 32],
+) -> anyhow::Result<()> {
+    use crate::domain::vault::{decrypt, ProjectKey};
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let payload: serde_json::Value = sqlx::query_scalar("SELECT payload FROM jobs WHERE id = $1")
+        .bind(job_id)
+        .fetch_one(pool)
+        .await?;
+    let webhook_id: Uuid = payload
+        .get("webhook_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("deliver_webhook: bad webhook_id in payload"))?;
+    let event = payload.get("event").and_then(|v| v.as_str()).unwrap_or("");
+    let body = payload.get("body").and_then(|v| v.as_str()).unwrap_or("");
+    let attempt: i32 = sqlx::query_scalar("SELECT attempts + 1 FROM jobs WHERE id = $1")
+        .bind(job_id)
+        .fetch_one(pool)
+        .await?;
+
+    // (url, project_id, secret_ciphertext, secret_nonce)
+    type HookRow = (String, Uuid, Option<Vec<u8>>, Option<Vec<u8>>);
+    let hook: Option<HookRow> = sqlx::query_as(
+        r#"SELECT url, project_id, secret_ciphertext, secret_nonce
+           FROM webhooks WHERE id = $1 AND deleted_at IS NULL AND active = true"#,
+    )
+    .bind(webhook_id)
+    .fetch_optional(pool)
+    .await?;
+    // Webhook deleted/deactivated/unconfigured since enqueue — drop the job.
+    let Some((url, project_id, Some(ct), Some(nonce))) = hook else {
+        return Ok(());
+    };
+
+    let key = ProjectKey::derive(vault_master_key, project_id, 1);
+    let secret =
+        decrypt(&key, &ct, &nonce, webhook_id.as_bytes()).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(&secret).map_err(|e| anyhow::anyhow!("hmac key: {e}"))?;
+    mac.update(body.as_bytes());
+    let sig = hex_encode(&mac.finalize().into_bytes());
+
+    let out = tokio::process::Command::new("curl")
+        .args(["-sS", "-X", "POST", &url])
+        .args(["-H", "Content-Type: application/json"])
+        .args(["-H", &format!("X-Sprintly-Event: {event}")])
+        .args(["-H", &format!("X-Sprintly-Signature: sha256={sig}")])
+        .args(["--data-binary", body])
+        .args(["--max-time", "10"])
+        .args(["-o", "/dev/null", "-w", "%{http_code}"])
+        .output()
+        .await?;
+    let code: i32 = String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    let ok = (200..300).contains(&code);
+    let err = (!ok).then(|| {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if stderr.trim().is_empty() {
+            format!("HTTP {code}")
+        } else {
+            format!("HTTP {code}: {}", stderr.trim())
+        }
+    });
+
+    sqlx::query(
+        r#"INSERT INTO webhook_deliveries (id, webhook_id, event, status_code, ok, error, attempt)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
+    )
+    .bind(Uuid::now_v7())
+    .bind(webhook_id)
+    .bind(event)
+    .bind(code)
+    .bind(ok)
+    .bind(err.as_deref())
+    .bind(attempt)
+    .execute(pool)
+    .await?;
+    sqlx::query("UPDATE webhooks SET last_delivery_at = now(), last_status = $2 WHERE id = $1")
+        .bind(webhook_id)
+        .bind(code)
+        .execute(pool)
+        .await?;
+
+    if ok {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("webhook {webhook_id} POST returned {code}"))
+    }
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
 }
 
 async fn finish_ok(pool: &PgPool, id: Uuid, kind: &str) -> anyhow::Result<()> {
