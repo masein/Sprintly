@@ -258,8 +258,8 @@ assert exit 0 and schema applied.
 
 ---
 
-### `[ ]` F5 — In-app notifications + `@mentions` + watcher fan-out
-**PR:** _none yet_ · **Depends on:** F4 · **Size:** L
+### `[x]` F5 — In-app notifications + `@mentions` + watcher fan-out
+**PR:** #25 · **Depends on:** F4 · **Size:** L
 
 **Goal:** Users get notified of mentions, assignments, and watched-task changes.
 
