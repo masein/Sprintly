@@ -26,6 +26,9 @@ pub struct Config {
     pub auth: AuthConfig,
     pub vault: VaultConfig,
     pub email: EmailConfig,
+    /// HMAC secret for verifying inbound GitHub webhooks. None disables the
+    /// `/integrations/github/webhook` endpoint.
+    pub github_webhook_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +162,8 @@ impl Config {
                 mail_from: optional(&get, "SPRINTLY_MAIL_FROM")
                     .unwrap_or_else(|| "Sprintly <noreply@localhost>".into()),
             },
+
+            github_webhook_secret: optional(&get, "SPRINTLY_GITHUB_WEBHOOK_SECRET"),
         })
     }
 
@@ -191,6 +196,14 @@ impl Config {
                     "log-only"
                 },
                 self.email.mail_from
+            ),
+            format!(
+                "github_webhook   = {}",
+                if self.github_webhook_secret.is_some() {
+                    "configured"
+                } else {
+                    "disabled"
+                }
             ),
         ]
         .join("\n")

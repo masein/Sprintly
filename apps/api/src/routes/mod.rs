@@ -8,6 +8,7 @@ pub mod backups;
 pub mod boards;
 pub mod dashboards;
 pub mod health;
+pub mod integrations;
 pub mod notifications;
 pub mod payroll;
 pub mod projects;
