@@ -41,6 +41,7 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::dashboards::router())
         .merge(routes::vault::router())
         .merge(routes::payroll::router())
+        .merge(routes::notifications::router())
         .merge(routes::achievements::router())
         .merge(routes::admin_panel::router())
         .merge(routes::backups::router())

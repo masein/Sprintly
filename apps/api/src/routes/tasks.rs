@@ -301,6 +301,22 @@ async fn create_task(
         },
     )
     .await;
+
+    // Notify the assignee (notify() skips self).
+    if let Some(assignee) = req.assignee_id {
+        let _ = crate::domain::notifications::notify(
+            &state.db,
+            &state.redis,
+            assignee,
+            user.id,
+            "assigned",
+            &format!("You were assigned {task_key}"),
+            None,
+            Some(&format!("/tasks/{task_key}")),
+            Some(task_id),
+        )
+        .await;
+    }
     Ok((StatusCode::CREATED, Json(dto)))
 }
 
@@ -445,6 +461,13 @@ async fn edit_task(
     .await?
     .ok_or(AppError::NotFound)?;
 
+    // Current assignee, so we only notify on an actual re-assignment.
+    let old_assignee: Option<Uuid> =
+        sqlx::query_scalar(r#"SELECT assignee_id FROM tasks WHERE id = $1"#)
+            .bind(task_id)
+            .fetch_one(&state.db)
+            .await?;
+
     let mut tx = state.db.begin().await?;
     sqlx::query(
         r#"
@@ -484,6 +507,24 @@ async fn edit_task(
     )
     .await?;
     tx.commit().await?;
+
+    // Notify on re-assignment to a new person (notify() skips self).
+    if let Some(new_assignee) = req.assignee_id {
+        if Some(new_assignee) != old_assignee {
+            let _ = crate::domain::notifications::notify(
+                &state.db,
+                &state.redis,
+                new_assignee,
+                user.id,
+                "assigned",
+                &format!("You were assigned {task_key}"),
+                None,
+                Some(&format!("/tasks/{task_key}")),
+                Some(task_id),
+            )
+            .await;
+        }
+    }
 
     let dto = fetch_task(&state.db, &task_key, project_id).await?;
     crate::infra::events::publish(
