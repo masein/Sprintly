@@ -13,3 +13,4 @@ pub mod tasks;
 pub mod timesheets;
 pub mod tokens;
 pub mod vault;
+pub mod webhooks;

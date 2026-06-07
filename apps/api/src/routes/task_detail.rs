@@ -367,6 +367,15 @@ async fn create_comment(
         }
     }
 
+    // Outbound webhooks (best-effort).
+    let _ = crate::domain::webhooks::dispatch(
+        &state.db,
+        task.project_id,
+        "comment.created",
+        serde_json::json!({ "task_id": task.id, "comment_id": id, "task_key": task_key }),
+    )
+    .await;
+
     let dto = fetch_one_comment(&state.db, id, user.id).await?;
     Ok((StatusCode::CREATED, Json(dto)))
 }

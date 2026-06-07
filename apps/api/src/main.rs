@@ -66,9 +66,9 @@ async fn cmd_serve() -> anyhow::Result<()> {
     );
 
     let state = infra::AppState::connect(&cfg).await?;
-    // Background worker: scans for achievement-eligibility every few minutes
-    // plus anything else we drop into the `jobs` table later.
-    sprintly_api::jobs::spawn(state.db.clone());
+    // Background worker: achievement scans, backups, and webhook delivery. The
+    // vault master key lets it decrypt webhook signing secrets.
+    sprintly_api::jobs::spawn(state.db.clone(), cfg.vault.master_key);
     let router = app::router(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.api_bind).await?;
