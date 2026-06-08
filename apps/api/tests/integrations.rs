@@ -46,6 +46,16 @@ async fn make_task(pool: &PgPool, key: &str) -> Uuid {
     .execute(pool)
     .await
     .unwrap();
+    // A done column so merge auto-transition has somewhere to land.
+    sqlx::query(
+        r#"INSERT INTO board_columns (id, board_id, name, category, sort_order)
+           VALUES ($1, $2, 'Done', 'done', 4096.0)"#,
+    )
+    .bind(Uuid::now_v7())
+    .bind(board)
+    .execute(pool)
+    .await
+    .unwrap();
     let task = Uuid::now_v7();
     sqlx::query(
         r#"INSERT INTO tasks (id, project_id, board_id, column_id, key, title, status, order_in_column)
@@ -173,4 +183,16 @@ async fn pr_merge_updates_state_and_logs(pool: PgPool) {
     .await
     .unwrap();
     assert_eq!(state, "merged");
+
+    // The merge auto-transitioned the task into the done column.
+    let (status, category): (String, String) = sqlx::query_as(
+        "SELECT t.status, bc.category FROM tasks t
+         JOIN board_columns bc ON bc.id = t.column_id WHERE t.id = $1",
+    )
+    .bind(task)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "done");
+    assert_eq!(category, "done");
 }

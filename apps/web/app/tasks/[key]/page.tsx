@@ -16,6 +16,7 @@ import { ActivityFeed } from "@/components/ActivityFeed";
 import { Attachments } from "@/components/Attachments";
 import { Watchers } from "@/components/Watchers";
 import { SubtasksPanel, LinksPanel } from "@/components/Relations";
+import { GitLinksPanel } from "@/components/GitLinksPanel";
 import { TaskTimer } from "@/components/TaskTimer";
 import { deleteTask, editTask, getTask, type Task } from "@/lib/tasks";
 import { me } from "@/lib/auth-bundle";
@@ -111,6 +112,7 @@ export default function TaskPage() {
             canManage={canManage}
           />
           <LinksPanel taskKey={task.key} canManage={canManage} />
+          <GitLinksPanel taskKey={task.key} />
           <Watchers taskKey={task.key} />
           <Attachments taskKey={task.key} canManage={canManage} />
         </aside>

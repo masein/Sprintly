@@ -9,18 +9,71 @@
 
 use axum::{
     body::Bytes,
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
+use chrono::{DateTime, Utc};
+use serde::Serialize;
 use serde_json::{json, Value};
+use sqlx::FromRow;
+use uuid::Uuid;
 
-use crate::{domain::integrations, infra::AppState, AppError, AppResult};
+use crate::{
+    domain::{
+        integrations,
+        permissions::{can, Action},
+        projects as project_ctx,
+    },
+    infra::AppState,
+    middleware::CurrentUser,
+    AppError, AppResult,
+};
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/integrations/github/webhook", post(github_webhook))
+    Router::new()
+        .route("/integrations/github/webhook", post(github_webhook))
+        .route("/tasks/:task_key/git-links", get(list_git_links))
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct GitLinkDto {
+    pub id: Uuid,
+    pub kind: String,
+    pub external_ref: String,
+    pub url: Option<String>,
+    pub title: Option<String>,
+    pub state: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+async fn list_git_links(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(task_key): Path<String>,
+) -> AppResult<impl IntoResponse> {
+    let row: Option<(Uuid, Uuid)> =
+        sqlx::query_as(r#"SELECT id, project_id FROM tasks WHERE key = $1 AND deleted_at IS NULL"#)
+            .bind(&task_key)
+            .fetch_optional(&state.db)
+            .await?;
+    let Some((task_id, project_id)) = row else {
+        return Err(AppError::NotFound);
+    };
+    let ctx = project_ctx::load_by_id(&state.db, project_id, user.id).await?;
+    if !can(&user.as_actor(), Action::ViewBoard, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+    let links: Vec<GitLinkDto> = sqlx::query_as(
+        r#"SELECT id, kind, external_ref, url, title, state, created_at
+           FROM git_links WHERE task_id = $1 ORDER BY created_at DESC"#,
+    )
+    .bind(task_id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(links))
 }
 
 async fn github_webhook(
