@@ -3,6 +3,7 @@
 // /projects/[key]/dashboard — single-pane overview for a project.
 
 import { useQuery } from "@tanstack/react-query";
+import type { Route } from "next";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -81,6 +82,12 @@ export default function ProjectDashboardPage() {
           <h1 className="text-3xl font-semibold">At a glance.</h1>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href={`/projects/${projectKey}/metrics` as Route}
+            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          >
+            flow metrics →
+          </Link>
           <Link
             href={`/projects/${projectKey}`}
             className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
