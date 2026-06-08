@@ -516,8 +516,8 @@ Integration: login requires second factor when enabled; recovery path.
 
 # M16 — Analytics, data & billing
 
-### `[ ]` F13 — Flow metrics
-**PR:** _none yet_ · **Depends on:** none · **Size:** M
+### `[x]` F13 — Flow metrics
+**PR:** #29 (lead time + throughput + WIP; cycle-time = follow-up) · **Depends on:** none · **Size:** M
 
 **Goal:** Cycle time, lead time, throughput, cumulative-flow diagram.
 
