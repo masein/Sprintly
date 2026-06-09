@@ -3,6 +3,7 @@
 
 pub mod achievements;
 pub mod integrations;
+pub mod labels;
 pub mod metrics;
 pub mod notifications;
 pub mod password;
