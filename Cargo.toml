@@ -44,7 +44,7 @@ redis = { version = "0.27", features = ["tokio-comp", "aio"] }
 
 # Auth / crypto
 argon2 = "0.5"
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 rand = "0.8"
 base64 = "0.22"
 hmac = "0.12"
