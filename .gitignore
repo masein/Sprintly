@@ -26,6 +26,7 @@ playwright-report/
 # Editors
 .vscode/
 .idea/
+.claude/settings.local.json
 *.swp
 .DS_Store
 

@@ -9,6 +9,17 @@ updates:
     groups:
       cargo-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Hold all major bumps for a planned upgrade slot (handled manually).
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # hmac/hkdf are 0.x crates: dependabot classifies 0.12 -> 0.13 as a
+      # semver-MINOR bump, so the wildcard above won't catch it. These releases
+      # are breaking, so pin them explicitly until we do the upgrade slot.
+      - dependency-name: "hmac"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "hkdf"
+        update-types: ["version-update:semver-minor"]
 
   # Node / pnpm workspace (single pnpm-lock.yaml at the root covers all members).
   - package-ecosystem: npm
@@ -19,6 +30,10 @@ updates:
     groups:
       npm-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Hold all major bumps for a planned upgrade slot (handled manually).
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions used by the workflows.
   - package-ecosystem: github-actions

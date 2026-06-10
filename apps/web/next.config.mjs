@@ -7,13 +7,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
-  // Pin the standalone tracing root to the monorepo root so the output layout
-  // is deterministic (apps/web/server.js + hoisted node_modules) regardless of
-  // whether a workspace lockfile is present. The Dockerfile relies on this.
-  outputFileTracingRoot: path.join(__dirname, "../../"),
   // Anything heavier (image domains, redirects, headers) lands when we need it.
   experimental: {
     typedRoutes: true,
+    // Pin the standalone tracing root to the monorepo root so the output layout
+    // is deterministic (apps/web/server.js + hoisted node_modules) regardless of
+    // whether a workspace lockfile is present. The Dockerfile relies on this.
+    // In Next 14.2 this is an `experimental` option; top-level placement is
+    // rejected ("Invalid next.config.mjs options") and silently ignored.
+    outputFileTracingRoot: path.join(__dirname, "../../"),
   },
   async rewrites() {
     // In dev (running `pnpm dev` outside the Caddy stack), proxy API calls to
