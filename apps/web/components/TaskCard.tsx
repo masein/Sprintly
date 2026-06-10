@@ -5,9 +5,11 @@
 
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Bug, Sparkles, Wrench, Beaker, Flame } from "lucide-react";
 import type { Task } from "@/lib/tasks";
+import { labelColorMap, listProjectLabels } from "@/lib/labels";
 
 const TYPE_ICON = {
   feature: Sparkles,
@@ -37,6 +39,15 @@ export function TaskCard({
     disabled: !canManage,
   });
   const Icon = TYPE_ICON[task.type] ?? Sparkles;
+
+  // Tint label chips from the project's label registry (cached per project).
+  const labelsQ = useQuery({
+    queryKey: ["project-labels", task.project_key],
+    queryFn: () => listProjectLabels(task.project_key),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const colors = labelColorMap(labelsQ.data ?? []);
 
   const style = {
     transform: CSS.Transform.toString(sortable.transform),
@@ -74,14 +85,18 @@ export function TaskCard({
       </div>
       {task.labels.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
-          {task.labels.slice(0, 3).map((l) => (
-            <span
-              key={l}
-              className="mono rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-chrome-dim"
-            >
-              {l}
-            </span>
-          ))}
+          {task.labels.slice(0, 3).map((l) => {
+            const c = colors[l.toLowerCase()];
+            return (
+              <span
+                key={l}
+                className="mono rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-chrome-dim"
+                style={c ? { borderColor: `${c}66`, color: c, background: `${c}14` } : undefined}
+              >
+                {l}
+              </span>
+            );
+          })}
           {task.labels.length > 3 && (
             <span className="mono text-[9px] text-chrome-dim">
               +{task.labels.length - 3}

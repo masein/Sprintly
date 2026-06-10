@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { Archive, ArchiveRestore, Pencil } from "lucide-react";
+import { Archive, ArchiveRestore, Pencil, Tags } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Board } from "@/components/Board";
+import { LabelsManager } from "@/components/LabelsManager";
 import { projectIcon } from "@/components/CreateProjectModal";
 import {
   archiveProject,
@@ -27,6 +28,7 @@ export default function ProjectPage() {
   const [boards, setBoards] = useState<BoardModel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingName, setEditingName] = useState(false);
+  const [showLabels, setShowLabels] = useState(false);
 
   async function reload() {
     try {
@@ -151,6 +153,16 @@ export default function ProjectPage() {
         {canManage && (
           <button
             type="button"
+            onClick={() => setShowLabels(true)}
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          >
+            <Tags size={14} /> labels
+          </button>
+        )}
+
+        {canManage && (
+          <button
+            type="button"
             onClick={async () => {
               try {
                 if (project.archived_at) await unarchiveProject(project.key);
@@ -170,6 +182,10 @@ export default function ProjectPage() {
           </button>
         )}
       </header>
+
+      {showLabels && (
+        <LabelsManager projectKey={project.key} onClose={() => setShowLabels(false)} />
+      )}
 
       {defaultBoard ? (
         <Board
