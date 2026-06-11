@@ -703,6 +703,10 @@ async fn move_task(
     .await?;
     tx.commit().await?;
 
+    // Reflect the new state on linked commits/PRs (no-op without an
+    // enabled provider connection).
+    crate::domain::integrations::queue_status_updates(&state.db, task.id).await?;
+
     crate::infra::events::publish(
         &state.redis,
         &Event::TaskMoved {
