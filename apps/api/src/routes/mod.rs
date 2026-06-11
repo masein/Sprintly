@@ -7,6 +7,7 @@ pub mod auth;
 pub mod backups;
 pub mod boards;
 pub mod dashboards;
+pub mod fields;
 pub mod health;
 pub mod integrations;
 pub mod labels;

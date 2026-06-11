@@ -345,8 +345,17 @@ async fn list_tasks(
     //   status:<todo|in_progress|review|done>
     //   priority:<p0|p1|p2|p3>
     //   type:<feature|bug|chore|spike|incident>
-    //   label:<text>     (multiple allowed; all must match)
+    //   label:<text>           (multiple allowed; all must match)
+    //   field:<name>=<value>   (custom field; multiple allowed; all must match)
     let filter = parse_filter(q.filter.as_deref(), user.id);
+
+    // Custom-field predicates resolve to a task-id set up front (values live
+    // in task_field_values, not on the task row).
+    let field_match = if filter.fields.is_empty() {
+        None
+    } else {
+        Some(crate::domain::fields::matching_task_ids(&state.db, ctx.id, &filter.fields).await?)
+    };
 
     let rows = sqlx::query!(
         r#"
@@ -395,6 +404,7 @@ async fn list_tasks(
 
     let items: Vec<TaskDto> = rows
         .into_iter()
+        .filter(|r| field_match.as_ref().is_none_or(|ids| ids.contains(&r.id)))
         .map(|r| TaskDto {
             id: r.id,
             key: r.key,
@@ -711,7 +721,10 @@ async fn move_task(
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-async fn resolve_project_from_task_key(db: &PgPool, task_key: &str) -> AppResult<(Uuid, String)> {
+pub(crate) async fn resolve_project_from_task_key(
+    db: &PgPool,
+    task_key: &str,
+) -> AppResult<(Uuid, String)> {
     // Task key is "PROJ-N". Look up project by prefix; tasks.key is unique per
     // project so we can also just JOIN.
     let row = sqlx::query!(
@@ -797,6 +810,8 @@ struct ParsedFilter {
     priority: Option<String>,
     r#type: Option<String>,
     labels: Option<Vec<String>>,
+    /// Custom-field predicates as (field name, raw value); all must match.
+    fields: Vec<(String, String)>,
 }
 
 fn parse_filter(raw: Option<&str>, current_user: Uuid) -> ParsedFilter {
@@ -819,6 +834,14 @@ fn parse_filter(raw: Option<&str>, current_user: Uuid) -> ParsedFilter {
             "priority" => out.priority = Some(v.to_string()),
             "type" => out.r#type = Some(v.to_string()),
             "label" => labels.push(v.to_string()),
+            // field:<name>=<value> — e.g. "field:severity=high".
+            "field" => {
+                if let Some((name, value)) = v.split_once('=') {
+                    if !name.is_empty() && !value.is_empty() {
+                        out.fields.push((name.to_string(), value.to_string()));
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -826,4 +849,35 @@ fn parse_filter(raw: Option<&str>, current_user: Uuid) -> ParsedFilter {
         out.labels = Some(labels);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_dsl_parses_fields_alongside_labels() {
+        let me = Uuid::now_v7();
+        let f = parse_filter(
+            Some("assignee:me+label:backend+field:severity=high+field:budget=3.5"),
+            me,
+        );
+        assert_eq!(f.assignee, Some(me));
+        assert_eq!(f.labels.as_deref(), Some(&["backend".to_string()][..]));
+        assert_eq!(
+            f.fields,
+            vec![
+                ("severity".to_string(), "high".to_string()),
+                ("budget".to_string(), "3.5".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn filter_dsl_ignores_malformed_field_tokens() {
+        let me = Uuid::now_v7();
+        // No '=', empty name, empty value — all skipped, not errors.
+        let f = parse_filter(Some("field:severity+field:=x+field:name=+junk"), me);
+        assert!(f.fields.is_empty());
+    }
 }

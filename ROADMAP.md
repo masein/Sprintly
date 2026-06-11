@@ -374,8 +374,8 @@ unit: status→chip mapping.
 
 > Scale beyond a single board.
 
-### `[~]` F7 — Labels / tags + custom fields
-**PR:** #40 (labels registry + colors) · follow-up: custom fields · **Depends on:** none · **Size:** M
+### `[x]` F7 — Labels / tags + custom fields
+**PR:** #40 (labels registry + colors) + #44 (custom fields) · **Depends on:** none · **Size:** M
 
 **Goal:** Flexible categorisation and per-project custom fields on tasks.
 

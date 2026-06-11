@@ -2,21 +2,27 @@
 
 // Chip row above the board. Builds the existing filter DSL the API already
 // understands: tokens joined by '+', e.g.
-//   assignee:me+status:in_progress+priority:p0+label:backend
+//   assignee:me+status:in_progress+priority:p0+label:backend+field:severity=high
 //
 // Each chip is a (key, value) pair. The "+ filter" picker offers known keys;
-// each key has a curated value list except "label" which is a free text input.
+// each key has a curated value list except "label" and "field" which take
+// free text ("field" expects name=value).
 
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
 
 export type Chip = {
-  key: "assignee" | "status" | "priority" | "type" | "label";
+  key: "assignee" | "status" | "priority" | "type" | "label" | "field";
   value: string;
 };
 
-const KEYS: Chip["key"][] = ["assignee", "status", "priority", "type", "label"];
-const VALUES: Record<Exclude<Chip["key"], "label">, string[]> = {
+const KEYS: Chip["key"][] = ["assignee", "status", "priority", "type", "label", "field"];
+type FreeTextKey = "label" | "field";
+const FREE_TEXT: Record<FreeTextKey, { placeholder: string; valid: (v: string) => boolean }> = {
+  label: { placeholder: "label", valid: (v) => v.length > 0 },
+  field: { placeholder: "name=value", valid: (v) => /^[^=]+=.+$/.test(v) },
+};
+const VALUES: Record<Exclude<Chip["key"], FreeTextKey>, string[]> = {
   assignee: ["me"],
   status: ["todo", "in_progress", "review", "done"],
   priority: ["p0", "p1", "p2", "p3"],
@@ -107,11 +113,14 @@ export function BoardFilters({
       {picking && picking !== "key" && (
         <div className="mono flex items-center gap-1 rounded border border-white/10 bg-ink-subtle px-1 py-0.5">
           <span className="px-1 text-[11px] text-chrome-dim">{picking.key}:</span>
-          {picking.key === "label" ? (
+          {picking.key === "label" || picking.key === "field" ? (
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (labelText.trim()) add({ key: "label", value: labelText.trim() });
+                const v = labelText.trim();
+                if (FREE_TEXT[picking.key as FreeTextKey].valid(v)) {
+                  add({ key: picking.key, value: v });
+                }
               }}
               className="flex items-center gap-1"
             >
@@ -119,12 +128,12 @@ export function BoardFilters({
                 autoFocus
                 value={labelText}
                 onChange={(e) => setLabelText(e.target.value)}
-                placeholder="label"
+                placeholder={FREE_TEXT[picking.key as FreeTextKey].placeholder}
                 className="rounded border border-white/10 bg-ink px-1.5 py-0.5 text-[11px] text-chrome focus:border-accent focus:outline-none"
               />
               <button
                 type="submit"
-                disabled={!labelText.trim()}
+                disabled={!FREE_TEXT[picking.key as FreeTextKey].valid(labelText.trim())}
                 className="rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-fg disabled:opacity-50"
               >
                 add
