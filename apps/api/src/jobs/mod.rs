@@ -105,6 +105,7 @@ async fn run_one(pool: &PgPool, vault_master_key: &[u8; 32]) -> anyhow::Result<b
         "scan_achievements" => run_scan_achievements(pool).await,
         "create_backup" => run_create_backup(pool, id).await,
         "deliver_webhook" => run_deliver_webhook(pool, id, vault_master_key).await,
+        "push_commit_status" => run_push_commit_status(pool, id, vault_master_key).await,
         other => Err(anyhow::anyhow!("unknown job kind: {other}")),
     };
 
@@ -387,6 +388,129 @@ async fn run_deliver_webhook(
         Ok(())
     } else {
         Err(anyhow::anyhow!("webhook {webhook_id} POST returned {code}"))
+    }
+}
+
+/// Push the task's state to every status-enabled provider connection of its
+/// project, as a commit status on each linked SHA (ADR 0001). The job
+/// payload is just the task id — state is read at run time, so a burst of
+/// moves collapses to the final truth. Any failed POST returns `Err` so the
+/// worker retries the batch; provider status APIs are idempotent.
+async fn run_push_commit_status(
+    pool: &PgPool,
+    job_id: Uuid,
+    vault_master_key: &[u8; 32],
+) -> anyhow::Result<()> {
+    use crate::domain::{
+        git_providers::{self, Provider},
+        integrations,
+    };
+
+    let payload: serde_json::Value = sqlx::query_scalar("SELECT payload FROM jobs WHERE id = $1")
+        .bind(job_id)
+        .fetch_one(pool)
+        .await?;
+    let task_id: Uuid = payload
+        .get("task_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("push_commit_status: bad task_id in payload"))?;
+
+    // Task vanished since enqueue — drop the job.
+    let task: Option<(String, String, Uuid)> = sqlx::query_as(
+        r#"SELECT key, status, project_id FROM tasks WHERE id = $1 AND deleted_at IS NULL"#,
+    )
+    .bind(task_id)
+    .fetch_optional(pool)
+    .await?;
+    let Some((task_key, task_status, project_id)) = task else {
+        return Ok(());
+    };
+
+    let state = git_providers::task_status_to_state(&task_status);
+    let public_url =
+        std::env::var("SPRINTLY_PUBLIC_URL").unwrap_or_else(|_| "http://localhost:8080".into());
+    let target_url = format!("{}/tasks/{task_key}", public_url.trim_end_matches('/'));
+    let context = format!("sprintly/{task_key}");
+    let human = match task_status.as_str() {
+        "done" => "done".to_string(),
+        s => s.replace('_', " "),
+    };
+    let description = format!("{task_key} is {human}");
+
+    // Cap the fan-out: the most recent SHAs are the ones anyone looks at.
+    let shas: Vec<String> = sqlx::query_scalar(
+        r#"SELECT DISTINCT ON (sha) sha FROM git_links
+           WHERE task_id = $1 AND sha IS NOT NULL
+           ORDER BY sha, created_at DESC
+           LIMIT 20"#,
+    )
+    .bind(task_id)
+    .fetch_all(pool)
+    .await?;
+
+    type IntegrationRow = (Uuid, String, String, Option<String>);
+    let connections: Vec<IntegrationRow> = sqlx::query_as(
+        r#"SELECT id, provider, repo, base_url FROM git_integrations
+           WHERE project_id = $1 AND status_enabled AND api_token_ct IS NOT NULL"#,
+    )
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut failures = Vec::new();
+    for (integration_id, provider_str, repo, base_url) in &connections {
+        let Some(provider) = Provider::parse(provider_str) else {
+            continue;
+        };
+        let Some(token) =
+            integrations::decrypt_api_token(pool, vault_master_key, *integration_id).await?
+        else {
+            continue;
+        };
+        for sha in &shas {
+            let req = git_providers::status_request(
+                provider,
+                base_url.as_deref(),
+                repo,
+                &token,
+                sha,
+                state,
+                &context,
+                &description,
+                &target_url,
+            )
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+            let mut cmd = tokio::process::Command::new("curl");
+            cmd.args(["-sS", "-X", req.method, &req.url]);
+            for (name, value) in &req.headers {
+                cmd.args(["-H", &format!("{name}: {value}")]);
+            }
+            let out = cmd
+                .args(["--data-binary", &req.body])
+                .args(["--max-time", "10"])
+                .args(["-o", "/dev/null", "-w", "%{http_code}"])
+                .output()
+                .await?;
+            let code: i32 = String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0);
+            if !(200..300).contains(&code) {
+                // Status code only — never echo the request (it carries the token).
+                failures.push(format!("{provider_str} {repo}@{sha}: HTTP {code}"));
+            }
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "commit status push failed: {}",
+            failures.join("; ")
+        ))
     }
 }
 

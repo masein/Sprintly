@@ -1,0 +1,2 @@
+ALTER TABLE git_links DROP COLUMN IF EXISTS sha;
+DROP TABLE IF EXISTS git_integrations;

@@ -123,7 +123,18 @@ async fn handle_push(state: &AppState, payload: &Value) -> AppResult<usize> {
         let short = id.get(..7).unwrap_or(id);
         let title = message.lines().next().unwrap_or("");
         for key in integrations::parse_task_keys(message) {
-            if integrations::link(&state.db, &key, "commit", short, url, Some(title), None).await? {
+            if integrations::link(
+                &state.db,
+                &key,
+                "commit",
+                short,
+                url,
+                Some(title),
+                None,
+                Some(id),
+            )
+            .await?
+            {
                 linked += 1;
             }
         }
@@ -139,6 +150,10 @@ async fn handle_pull_request(state: &AppState, payload: &Value) -> AppResult<usi
     let pr_body = pr.get("body").and_then(|v| v.as_str()).unwrap_or("");
     let url = pr.get("html_url").and_then(|v| v.as_str());
     let merged = pr.get("merged").and_then(|v| v.as_bool()).unwrap_or(false);
+    let head_sha = pr
+        .get("head")
+        .and_then(|h| h.get("sha"))
+        .and_then(|v| v.as_str());
 
     let state_str = if merged {
         "merged"
@@ -160,6 +175,7 @@ async fn handle_pull_request(state: &AppState, payload: &Value) -> AppResult<usi
             url,
             Some(title),
             Some(state_str),
+            head_sha,
         )
         .await?
         {
