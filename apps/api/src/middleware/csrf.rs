@@ -42,6 +42,19 @@ const EXEMPT_PATHS: &[&str] = &[
     "/readyz",
 ];
 
+/// Per-connection inbound git webhooks: `/api/v1/integrations/<provider>/webhook/<id>`.
+/// They authenticate via provider signatures against the connection's secret.
+fn is_provider_webhook(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("/api/v1/integrations/") else {
+        return false;
+    };
+    let mut parts = rest.split('/');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(_provider), Some("webhook"), Some(id), None) if !id.is_empty()
+    )
+}
+
 pub async fn csrf_guard(req: Request, next: Next) -> Response {
     if !is_write(req.method()) || is_exempt(req.uri().path()) || is_bearer(&req) {
         return next.run(req).await;
@@ -89,7 +102,7 @@ fn is_write(method: &Method) -> bool {
 }
 
 fn is_exempt(path: &str) -> bool {
-    EXEMPT_PATHS.contains(&path)
+    EXEMPT_PATHS.contains(&path) || is_provider_webhook(path)
 }
 
 fn is_bearer(req: &Request) -> bool {
@@ -107,4 +120,22 @@ pub fn fresh_nonce() -> String {
     let mut raw = [0u8; 24];
     rand::thread_rng().fill_bytes(&mut raw);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_webhook_paths_are_exempt() {
+        assert!(is_provider_webhook(
+            "/api/v1/integrations/gitlab/webhook/0190b50e-aaaa-bbbb-cccc-ddddeeeeffff"
+        ));
+        assert!(!is_provider_webhook("/api/v1/integrations/github/webhook")); // legacy: exact list
+        assert!(!is_provider_webhook("/api/v1/integrations/github/webhook/"));
+        assert!(!is_provider_webhook(
+            "/api/v1/integrations/github/webhook/x/extra"
+        ));
+        assert!(!is_provider_webhook("/api/v1/projects/x/integrations"));
+    }
 }

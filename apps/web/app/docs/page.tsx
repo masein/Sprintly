@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Book, KeyRound, ListChecks, TerminalSquare, Vault, Coffee, Sparkles } from "lucide-react";
+import { Book, GitBranch, KeyRound, ListChecks, TerminalSquare, Vault, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -80,6 +80,25 @@ export default function DocsPage() {
               approved week locks logs in its range. Monthly payroll
               aggregates billable minutes × your hourly rate (cents math, no
               floats). PDF + CSV exports.
+            </p>
+          </Section>
+
+          <Section icon={GitBranch} title="Git integration">
+            <p>
+              Connect a repo from the project header (<span className="mono">git</span>{" "}
+              button): pick GitHub, GitLab, or Gitea, get a webhook URL +
+              secret (shown once), paste both into the provider. From then on,
+              commits, branches and PRs that mention a task key —{" "}
+              <span className="mono">DEMO-1</span> in a commit message or PR
+              title — link themselves to the task, and merging a linked PR
+              moves it to done.
+            </p>
+            <p>
+              Add a provider API token and flip <span className="mono">status</span>{" "}
+              to push task state back as commit statuses: done is{" "}
+              <span className="mono">success</span>, everything else{" "}
+              <span className="mono">pending</span>. Tokens and secrets are
+              vault-encrypted; linking is scoped to the connected project.
             </p>
           </Section>
 

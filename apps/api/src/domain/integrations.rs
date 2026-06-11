@@ -91,9 +91,14 @@ pub fn verify_github_signature(secret: &str, body: &[u8], header: &str) -> bool 
 /// Resolve a task by key and upsert a git link to it, dropping an activity-feed
 /// entry when warranted. Returns whether a link was newly created. Unresolved
 /// task keys are silently skipped (return `false`).
+///
+/// `project_scope` restricts resolution to one project — per-integration
+/// webhooks pass their project so a connected repo can never link (or move)
+/// tasks elsewhere. The legacy global-secret route passes `None`.
 #[allow(clippy::too_many_arguments)]
 pub async fn link(
     db: &PgPool,
+    project_scope: Option<Uuid>,
     task_key: &str,
     kind: &str,
     ext_ref: &str,
@@ -102,11 +107,15 @@ pub async fn link(
     pr_state: Option<&str>,
     sha: Option<&str>,
 ) -> AppResult<bool> {
-    let task_id: Option<Uuid> =
-        sqlx::query_scalar(r#"SELECT id FROM tasks WHERE key = $1 AND deleted_at IS NULL"#)
-            .bind(task_key)
-            .fetch_optional(db)
-            .await?;
+    let task_id: Option<Uuid> = sqlx::query_scalar(
+        r#"SELECT id FROM tasks
+           WHERE key = $1 AND deleted_at IS NULL
+             AND ($2::uuid IS NULL OR project_id = $2)"#,
+    )
+    .bind(task_key)
+    .bind(project_scope)
+    .fetch_optional(db)
+    .await?;
     let Some(task_id) = task_id else {
         return Ok(false);
     };
@@ -321,6 +330,99 @@ pub async fn delete_integration(db: &PgPool, id: Uuid, project_id: Uuid) -> AppR
         return Err(AppError::NotFound);
     }
     Ok(())
+}
+
+/// Mint a fresh webhook secret: 32 random bytes, hex — easy to paste into a
+/// provider's webhook form.
+pub fn mint_webhook_secret() -> String {
+    use rand::RngCore;
+    let mut raw = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut raw);
+    let mut s = String::with_capacity(64);
+    for b in raw {
+        use std::fmt::Write;
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
+/// Update the mutable bits of a connection. `api_token: Some(None)` clears
+/// the token; `Some(Some(t))` re-encrypts; `None` leaves it alone.
+pub async fn update_integration(
+    db: &PgPool,
+    master_key: &[u8; 32],
+    id: Uuid,
+    project_id: Uuid,
+    api_token: Option<Option<&str>>,
+    status_enabled: Option<bool>,
+) -> AppResult<GitIntegration> {
+    if let Some(token) = api_token {
+        let enc = token
+            .map(|t| {
+                let key = ProjectKey::derive(master_key, project_id, KEY_VERSION);
+                encrypt(&key, t.as_bytes(), id.as_bytes())
+            })
+            .transpose()?;
+        sqlx::query(
+            r#"UPDATE git_integrations
+               SET api_token_ct = $3, api_token_nonce = $4, updated_at = now()
+               WHERE id = $1 AND project_id = $2"#,
+        )
+        .bind(id)
+        .bind(project_id)
+        .bind(enc.as_ref().map(|(ct, _)| ct.as_slice()))
+        .bind(enc.as_ref().map(|(_, n)| n.as_slice()))
+        .execute(db)
+        .await?;
+    }
+    if let Some(enabled) = status_enabled {
+        sqlx::query(
+            r#"UPDATE git_integrations SET status_enabled = $3, updated_at = now()
+               WHERE id = $1 AND project_id = $2"#,
+        )
+        .bind(id)
+        .bind(project_id)
+        .bind(enabled)
+        .execute(db)
+        .await?;
+    }
+    let row: Option<GitIntegration> = sqlx::query_as(&format!(
+        "SELECT {INTEGRATION_COLS} FROM git_integrations WHERE id = $1 AND project_id = $2"
+    ))
+    .bind(id)
+    .bind(project_id)
+    .fetch_optional(db)
+    .await?;
+    row.ok_or(AppError::NotFound)
+}
+
+/// Decrypt the webhook secret of an integration, with its project id.
+/// `None` secret if the row exists but has no secret stored.
+pub async fn decrypt_webhook_secret(
+    db: &PgPool,
+    master_key: &[u8; 32],
+    integration_id: Uuid,
+) -> AppResult<(Uuid, Option<String>)> {
+    // (project_id, webhook_secret_ct, webhook_secret_nonce)
+    type SecretRow = (Uuid, Option<Vec<u8>>, Option<Vec<u8>>);
+    let row: Option<SecretRow> = sqlx::query_as(
+        r#"SELECT project_id, webhook_secret_ct, webhook_secret_nonce
+           FROM git_integrations WHERE id = $1"#,
+    )
+    .bind(integration_id)
+    .fetch_optional(db)
+    .await?;
+    let Some((project_id, ct, nonce)) = row else {
+        return Err(AppError::NotFound);
+    };
+    let (Some(ct), Some(nonce)) = (ct, nonce) else {
+        return Ok((project_id, None));
+    };
+    let key = ProjectKey::derive(master_key, project_id, KEY_VERSION);
+    let plain = decrypt(&key, &ct, &nonce, integration_id.as_bytes())?;
+    let secret = String::from_utf8(plain)
+        .map_err(|_| AppError::Crypto("webhook secret is not valid utf-8"))?;
+    Ok((project_id, Some(secret)))
 }
 
 /// Decrypt the API token of an integration. `None` if no token is stored.
