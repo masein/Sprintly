@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Book, KeyRound, Vault, Coffee, Sparkles } from "lucide-react";
+import { Book, KeyRound, ListChecks, Vault, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -49,6 +49,27 @@ export default function DocsPage() {
               audit-logged. Clipboard copies auto-clear after 30 seconds. Don&apos;t
               put the actual secret in the description field — there&apos;s a field
               for that further down.
+            </p>
+          </Section>
+
+          <Section icon={ListChecks} title="Labels & custom fields">
+            <p>
+              Labels are free-form tags with a per-project palette (the{" "}
+              <span className="mono">labels</span> button on the project page
+              maps a name to a colour — the name is always shown, the colour is
+              decoration). Custom fields are typed:{" "}
+              <span className="mono">text · number · select · date</span>,
+              defined per project under <span className="mono">fields</span>,
+              set on each task&apos;s sidebar. Values are validated against the
+              type, so a date field won&apos;t quietly hold &quot;next sprint,
+              probably&quot;.
+            </p>
+            <p>
+              Both filter the board:{" "}
+              <span className="mono">label:backend</span> and{" "}
+              <span className="mono">field:severity=high</span> chips stack,
+              and every predicate must match. Field values also feed search
+              (<kbd>⌘K</kbd>).
             </p>
           </Section>
 

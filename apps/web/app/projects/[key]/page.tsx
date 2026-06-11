@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { Archive, ArchiveRestore, Pencil, Tags } from "lucide-react";
+import { Archive, ArchiveRestore, ListChecks, Pencil, Tags } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Board } from "@/components/Board";
+import { FieldsManager } from "@/components/FieldsManager";
 import { LabelsManager } from "@/components/LabelsManager";
 import { projectIcon } from "@/components/CreateProjectModal";
 import {
@@ -29,6 +30,7 @@ export default function ProjectPage() {
   const [error, setError] = useState<string | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [showLabels, setShowLabels] = useState(false);
+  const [showFields, setShowFields] = useState(false);
 
   async function reload() {
     try {
@@ -163,6 +165,16 @@ export default function ProjectPage() {
         {canManage && (
           <button
             type="button"
+            onClick={() => setShowFields(true)}
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          >
+            <ListChecks size={14} /> fields
+          </button>
+        )}
+
+        {canManage && (
+          <button
+            type="button"
             onClick={async () => {
               try {
                 if (project.archived_at) await unarchiveProject(project.key);
@@ -185,6 +197,10 @@ export default function ProjectPage() {
 
       {showLabels && (
         <LabelsManager projectKey={project.key} onClose={() => setShowLabels(false)} />
+      )}
+
+      {showFields && (
+        <FieldsManager projectKey={project.key} onClose={() => setShowFields(false)} />
       )}
 
       {defaultBoard ? (

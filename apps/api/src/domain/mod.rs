@@ -2,6 +2,7 @@
 //! Auth, permissions, vault crypto, estimation math, payroll math live here.
 
 pub mod achievements;
+pub mod fields;
 pub mod integrations;
 pub mod labels;
 pub mod metrics;

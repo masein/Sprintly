@@ -16,6 +16,7 @@ import { ActivityFeed } from "@/components/ActivityFeed";
 import { Attachments } from "@/components/Attachments";
 import { Watchers } from "@/components/Watchers";
 import { SubtasksPanel, LinksPanel } from "@/components/Relations";
+import { FieldValuesPanel } from "@/components/FieldValuesPanel";
 import { GitLinksPanel } from "@/components/GitLinksPanel";
 import { TaskTimer } from "@/components/TaskTimer";
 import { deleteTask, editTask, getTask, type Task } from "@/lib/tasks";
@@ -104,6 +105,7 @@ export default function TaskPage() {
         </div>
         <aside className="space-y-6">
           <Sidebar task={task} canEdit={canManage} />
+          <FieldValuesPanel taskKey={task.key} canEdit={canManage} />
           <TaskTimer taskKey={task.key} />
           <SubtasksPanel
             parentTaskKey={task.key}
