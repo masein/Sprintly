@@ -251,7 +251,11 @@ async fn login(
 }
 
 async fn logout(State(state): State<AppState>, user: CurrentUser) -> AppResult<impl IntoResponse> {
-    sessions::revoke(&state.db, user.session_id, "logout").await?;
+    // API tokens have no session to revoke; they're managed in settings.
+    let session_id = user.session_id.ok_or(AppError::BadRequest(
+        "nothing to log out — API tokens are revoked from settings".into(),
+    ))?;
+    sessions::revoke(&state.db, session_id, "logout").await?;
     let headers = clear_auth_cookies(&state.cfg);
     Ok((StatusCode::NO_CONTENT, headers))
 }

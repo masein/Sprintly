@@ -454,8 +454,8 @@ Backlog view (unscheduled/no-sprint tasks) with multi-select bulk actions
 
 > Enterprise-ready self-hosting.
 
-### `[ ]` F12 — Personal API tokens
-**PR:** _none yet_ · **Depends on:** none · **Size:** M
+### `[x]` F12 — Personal API tokens
+**PR:** #45 · **Depends on:** none · **Size:** M
 
 **Goal:** Scriptable, scoped access to the REST API (also enables F1/F2 automation).
 
