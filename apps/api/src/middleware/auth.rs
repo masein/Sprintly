@@ -4,19 +4,25 @@
 //! or the `sprintly_access` cookie (in that order), validates it, confirms
 //! the session is still live in the DB, and exposes the user to handlers.
 //!
+//! A bearer token starting with `slt_` is a personal API token (F12): it
+//! authenticates against `api_tokens` instead of the JWT/session machinery,
+//! enforces its scopes against the request method, and carries no session.
+//! Token requests send no cookies, so the CSRF guard already waves them
+//! through (`csrf::is_bearer`).
+//!
 //! The session-liveness check costs one cheap SELECT per authenticated
 //! request. It's the cost of being able to revoke a logged-out user
 //! immediately without waiting for their JWT to expire. Acceptable.
 
 use axum::{
     extract::{FromRef, FromRequestParts},
-    http::{header, request::Parts, StatusCode},
+    http::{header, request::Parts, Method, StatusCode},
 };
 use uuid::Uuid;
 
 use crate::{
     config::Config,
-    domain::{permissions::Role, sessions, tokens},
+    domain::{api_tokens, permissions::Role, sessions, tokens},
     infra::AppState,
     AppError,
 };
@@ -25,7 +31,9 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct CurrentUser {
     pub id: Uuid,
-    pub session_id: Uuid,
+    /// `None` when authenticated by a personal API token — there's no
+    /// session to revoke or refresh.
+    pub session_id: Option<Uuid>,
     pub role: Role,
 }
 
@@ -50,6 +58,19 @@ where
         let state = AppState::from_ref(state);
         let token = extract_access_token(parts).ok_or(AppError::Unauthorized)?;
 
+        // Personal API token path — `slt_…` never parses as a JWT, so the
+        // prefix check is just a fast lane, not a security boundary.
+        if token.starts_with(api_tokens::TOKEN_PREFIX) {
+            let is_write = !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS);
+            let identity = api_tokens::authenticate(&state.db, &token, is_write).await?;
+            let role = Role::parse(&identity.role).ok_or(AppError::Unauthorized)?;
+            return Ok(Self {
+                id: identity.user_id,
+                session_id: None,
+                role,
+            });
+        }
+
         let claims = tokens::verify_access(&state.cfg.auth, &token)?;
 
         // Session liveness — revoked sessions stop working before JWT expiry.
@@ -60,7 +81,7 @@ where
         let role = Role::parse(&claims.role).ok_or(AppError::Unauthorized)?;
         Ok(Self {
             id: claims.sub,
-            session_id: claims.sid,
+            session_id: Some(claims.sid),
             role,
         })
     }

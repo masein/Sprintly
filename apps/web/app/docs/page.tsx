@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Book, KeyRound, ListChecks, Vault, Coffee, Sparkles } from "lucide-react";
+import { Book, KeyRound, ListChecks, TerminalSquare, Vault, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -80,6 +80,17 @@ export default function DocsPage() {
               approved week locks logs in its range. Monthly payroll
               aggregates billable minutes × your hourly rate (cents math, no
               floats). PDF + CSV exports.
+            </p>
+          </Section>
+
+          <Section icon={TerminalSquare} title="API tokens">
+            <p>
+              Mint one in <span className="mono">/settings</span>, send{" "}
+              <span className="mono">Authorization: Bearer slt_…</span>, and
+              the REST API is yours — no cookies, no CSRF dance. Tokens are
+              read-only unless you grant write, the secret is shown exactly
+              once (we store a hash), and revoking kills it on the next
+              request. Optional expiry for the cautious.
             </p>
           </Section>
 

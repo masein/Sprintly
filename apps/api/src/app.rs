@@ -28,6 +28,7 @@ pub fn router(state: AppState) -> Router {
         .merge(probes.clone())
         .merge(routes::auth::router())
         .merge(routes::users::router())
+        .merge(routes::api_tokens::router())
         .merge(routes::admin::router())
         .merge(routes::projects::router())
         .merge(routes::boards::router())

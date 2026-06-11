@@ -3,6 +3,7 @@
 pub mod achievements;
 pub mod admin;
 pub mod admin_panel;
+pub mod api_tokens;
 pub mod auth;
 pub mod backups;
 pub mod boards;
