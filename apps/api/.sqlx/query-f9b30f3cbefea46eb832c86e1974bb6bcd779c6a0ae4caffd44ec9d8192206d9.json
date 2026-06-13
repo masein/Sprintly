@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id              AS \"id!: Uuid\",\n               project_id      AS \"project_id!: Uuid\",\n               url             AS \"url!: String\",\n               events          AS \"events!: Vec<String>\",\n               active          AS \"active!: bool\",\n               last_delivery_at,\n               last_status,\n               created_at      AS \"created_at!: DateTime<Utc>\"\n        FROM   webhooks WHERE id = $1\n        ",
+  "query": "\n        SELECT id              AS \"id!: Uuid\",\n               project_id      AS \"project_id!: Uuid\",\n               url             AS \"url!: String\",\n               target_type     AS \"target_type!: String\",\n               events          AS \"events!: Vec<String>\",\n               active          AS \"active!: bool\",\n               last_delivery_at,\n               last_status,\n               created_at      AS \"created_at!: DateTime<Utc>\"\n        FROM   webhooks\n        WHERE  project_id = $1 AND deleted_at IS NULL\n        ORDER  BY created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -20,26 +20,31 @@
       },
       {
         "ordinal": 3,
+        "name": "target_type!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "events!: Vec<String>",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "active!: bool",
         "type_info": "Bool"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "last_delivery_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "last_status",
         "type_info": "Int4"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created_at!: DateTime<Utc>",
         "type_info": "Timestamptz"
       }
@@ -55,10 +60,11 @@
       false,
       false,
       false,
+      false,
       true,
       true,
       false
     ]
   },
-  "hash": "35176a3c10c49a4727e4aa07bbb7abc5f7b16fc06a7f2b01e2d9a0addfc20677"
+  "hash": "f9b30f3cbefea46eb832c86e1974bb6bcd779c6a0ae4caffd44ec9d8192206d9"
 }

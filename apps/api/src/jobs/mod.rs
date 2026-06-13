@@ -290,15 +290,20 @@ async fn run_scan_achievements(pool: &PgPool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Deliver one webhook: decrypt its signing secret, HMAC-sign the body, POST it
-/// via curl, and record the attempt. Returns `Err` on a non-2xx / transport
+/// Deliver one webhook (ADR 0002). The body + headers depend on the row's
+/// `target_type`: `outbound` signs `{event,data}` with the stored secret;
+/// `slack`/`discord` POST a formatted message to the URL (no signature). POSTs
+/// via curl and records the attempt; returns `Err` on a non-2xx / transport
 /// failure so the worker retries it with backoff (up to `max_attempts`).
 async fn run_deliver_webhook(
     pool: &PgPool,
     job_id: Uuid,
     vault_master_key: &[u8; 32],
 ) -> anyhow::Result<()> {
-    use crate::domain::vault::{decrypt, ProjectKey};
+    use crate::domain::{
+        chat_adapters,
+        vault::{decrypt, ProjectKey},
+    };
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
 
@@ -312,41 +317,65 @@ async fn run_deliver_webhook(
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| anyhow::anyhow!("deliver_webhook: bad webhook_id in payload"))?;
     let event = payload.get("event").and_then(|v| v.as_str()).unwrap_or("");
-    let body = payload.get("body").and_then(|v| v.as_str()).unwrap_or("");
+    let data = payload
+        .get("data")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let attempt: i32 = sqlx::query_scalar("SELECT attempts + 1 FROM jobs WHERE id = $1")
         .bind(job_id)
         .fetch_one(pool)
         .await?;
 
-    // (url, project_id, secret_ciphertext, secret_nonce)
-    type HookRow = (String, Uuid, Option<Vec<u8>>, Option<Vec<u8>>);
+    // (url, project_id, secret_ciphertext, secret_nonce, target_type)
+    type HookRow = (String, Uuid, Option<Vec<u8>>, Option<Vec<u8>>, String);
     let hook: Option<HookRow> = sqlx::query_as(
-        r#"SELECT url, project_id, secret_ciphertext, secret_nonce
+        r#"SELECT url, project_id, secret_ciphertext, secret_nonce, target_type
            FROM webhooks WHERE id = $1 AND deleted_at IS NULL AND active = true"#,
     )
     .bind(webhook_id)
     .fetch_optional(pool)
     .await?;
-    // Webhook deleted/deactivated/unconfigured since enqueue — drop the job.
-    let Some((url, project_id, Some(ct), Some(nonce))) = hook else {
+    // Webhook deleted/deactivated since enqueue — drop the job.
+    let Some((url, project_id, ct, nonce, target_type)) = hook else {
         return Ok(());
     };
 
-    let key = ProjectKey::derive(vault_master_key, project_id, 1);
-    let secret =
-        decrypt(&key, &ct, &nonce, webhook_id.as_bytes()).map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Build (body, headers) per target type.
+    let mut headers: Vec<(String, String)> =
+        vec![("Content-Type".into(), "application/json".into())];
+    let body: String = if target_type == "outbound" {
+        // Generic signed delivery. Unconfigured (no secret) → drop.
+        let (Some(ct), Some(nonce)) = (ct, nonce) else {
+            return Ok(());
+        };
+        let key = ProjectKey::derive(vault_master_key, project_id, 1);
+        let secret = decrypt(&key, &ct, &nonce, webhook_id.as_bytes())
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let body = serde_json::json!({ "event": event, "data": data }).to_string();
+        let mut mac = Hmac::<Sha256>::new_from_slice(&secret)
+            .map_err(|e| anyhow::anyhow!("hmac key: {e}"))?;
+        mac.update(body.as_bytes());
+        let sig = hex_encode(&mac.finalize().into_bytes());
+        headers.push(("X-Sprintly-Event".into(), event.to_string()));
+        headers.push(("X-Sprintly-Signature".into(), format!("sha256={sig}")));
+        body
+    } else {
+        // Chat target: format the message; the URL is the credential.
+        let public_url =
+            std::env::var("SPRINTLY_PUBLIC_URL").unwrap_or_else(|_| "http://localhost:8080".into());
+        let link = chat_adapters::task_key(&data)
+            .map(|k| format!("{}/tasks/{k}", public_url.trim_end_matches('/')));
+        chat_adapters::format_message(&target_type, event, &data, link.as_deref())
+            .ok_or_else(|| anyhow::anyhow!("unknown webhook target_type: {target_type}"))?
+    };
 
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(&secret).map_err(|e| anyhow::anyhow!("hmac key: {e}"))?;
-    mac.update(body.as_bytes());
-    let sig = hex_encode(&mac.finalize().into_bytes());
-
-    let out = tokio::process::Command::new("curl")
-        .args(["-sS", "-X", "POST", &url])
-        .args(["-H", "Content-Type: application/json"])
-        .args(["-H", &format!("X-Sprintly-Event: {event}")])
-        .args(["-H", &format!("X-Sprintly-Signature: sha256={sig}")])
-        .args(["--data-binary", body])
+    let mut cmd = tokio::process::Command::new("curl");
+    cmd.args(["-sS", "-X", "POST", &url]);
+    for (name, value) in &headers {
+        cmd.args(["-H", &format!("{name}: {value}")]);
+    }
+    let out = cmd
+        .args(["--data-binary", &body])
         .args(["--max-time", "10"])
         .args(["-o", "/dev/null", "-w", "%{http_code}"])
         .output()

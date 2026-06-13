@@ -3,6 +3,7 @@
 
 pub mod achievements;
 pub mod api_tokens;
+pub mod chat_adapters;
 pub mod fields;
 pub mod git_providers;
 pub mod integrations;
