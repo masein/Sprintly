@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id              AS \"id!: Uuid\",\n               t.key             AS \"key!: String\",\n               t.project_id      AS \"project_id!: Uuid\",\n               p.key             AS \"project_key!: String\",\n               t.board_id        AS \"board_id!: Uuid\",\n               t.column_id       AS \"column_id!: Uuid\",\n               t.title           AS \"title!: String\",\n               t.description     AS \"description!: String\",\n               t.type            AS \"type!: String\",\n               t.priority        AS \"priority!: String\",\n               t.status          AS \"status!: String\",\n               t.assignee_id,\n               t.reporter_id,\n               t.parent_task_id,\n               t.estimate_minutes,\n               t.story_points,\n               t.due_date,\n               t.labels          AS \"labels!: Vec<String>\",\n               t.order_in_column AS \"order_in_column!: f64\",\n               t.created_at      AS \"created_at!: DateTime<Utc>\",\n               t.updated_at      AS \"updated_at!: DateTime<Utc>\",\n               t.completed_at\n        FROM   tasks t\n        JOIN   projects p ON p.id = t.project_id\n        WHERE  t.project_id = $1\n          AND  t.deleted_at IS NULL\n          AND  ($2::uuid  IS NULL OR t.assignee_id = $2)\n          AND  ($3::text  IS NULL OR t.status   = $3)\n          AND  ($4::text  IS NULL OR t.priority = $4)\n          AND  ($5::text  IS NULL OR t.type     = $5)\n          AND  ($6::text[] IS NULL OR t.labels @> $6)\n        ORDER  BY t.column_id, t.order_in_column ASC\n        ",
+  "query": "\n        SELECT t.id              AS \"id!: Uuid\",\n               t.key             AS \"key!: String\",\n               t.project_id      AS \"project_id!: Uuid\",\n               p.key             AS \"project_key!: String\",\n               t.board_id        AS \"board_id!: Uuid\",\n               t.column_id       AS \"column_id!: Uuid\",\n               t.title           AS \"title!: String\",\n               t.description     AS \"description!: String\",\n               t.type            AS \"type!: String\",\n               t.priority        AS \"priority!: String\",\n               t.status          AS \"status!: String\",\n               t.assignee_id,\n               t.reporter_id,\n               t.parent_task_id,\n               t.epic_id,\n               t.estimate_minutes,\n               t.story_points,\n               t.due_date,\n               t.labels          AS \"labels!: Vec<String>\",\n               t.order_in_column AS \"order_in_column!: f64\",\n               t.created_at      AS \"created_at!: DateTime<Utc>\",\n               t.updated_at      AS \"updated_at!: DateTime<Utc>\",\n               t.completed_at\n        FROM   tasks t\n        JOIN   projects p ON p.id = t.project_id\n        WHERE  t.key = $1 AND t.project_id = $2 AND t.deleted_at IS NULL\n        ",
   "describe": {
     "columns": [
       {
@@ -75,53 +75,54 @@
       },
       {
         "ordinal": 14,
+        "name": "epic_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 15,
         "name": "estimate_minutes",
         "type_info": "Int4"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "story_points",
         "type_info": "Int4"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "due_date",
         "type_info": "Date"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "labels!: Vec<String>",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "order_in_column!: f64",
         "type_info": "Float8"
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "created_at!: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "updated_at!: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "completed_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
         "Text",
-        "Text",
-        "Text",
-        "TextArray"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -142,6 +143,7 @@
       true,
       true,
       true,
+      true,
       false,
       false,
       false,
@@ -149,5 +151,5 @@
       true
     ]
   },
-  "hash": "13871e17decafb6106e5d7d2b80d37b1b51ca67ec9744bdb0515fd68f20afd47"
+  "hash": "df937e7ae3e4adbd6a2d8a2abe74bc88f368d242d26d90cf10435f47a9efdd12"
 }

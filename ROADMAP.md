@@ -411,8 +411,8 @@ board.
 
 ---
 
-### `[ ]` F6 — Roadmap / timeline
-**PR:** _none yet_ · **Depends on:** F7 · **Size:** L
+### `[x]` F6 — Roadmap / timeline
+**PR:** #54 · **Depends on:** F7 · **Size:** L
 
 **Goal:** Epics + milestones with a timeline (Gantt-lite) view.
 

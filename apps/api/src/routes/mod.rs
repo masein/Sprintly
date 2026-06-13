@@ -18,6 +18,7 @@ pub mod notifications;
 pub mod payroll;
 pub mod projects;
 pub mod retros;
+pub mod roadmap;
 pub mod search;
 pub mod sprints;
 pub mod task_detail;
