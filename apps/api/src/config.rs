@@ -21,6 +21,10 @@ pub struct Config {
     /// When true, the UI nudges every user to enrol in 2FA (F11). Enforcement
     /// is advisory — users still need access to reach settings and enrol.
     pub require_2fa: bool,
+    /// When true, password login is refused — SSO only (F10).
+    pub local_login_disabled: bool,
+    /// OIDC SSO settings; None when not configured.
+    pub oidc: Option<OidcConfig>,
 
     pub database_url: String,
     pub redis_url: String,
@@ -86,6 +90,23 @@ pub struct EmailConfig {
     pub mail_from: String,
 }
 
+/// OIDC single sign-on (F10). Present only when issuer + client id + client
+/// secret are all configured; otherwise SSO is off and the endpoints report
+/// "not configured".
+#[derive(Debug, Clone)]
+pub struct OidcConfig {
+    /// Issuer URL, e.g. `https://accounts.google.com`. Discovery is fetched
+    /// from `{issuer}/.well-known/openid-configuration`.
+    pub issuer: String,
+    pub client_id: String,
+    pub client_secret: String,
+    /// Redirect URI registered with the IdP. Defaults to
+    /// `{public_url}/api/v1/auth/oidc/callback`.
+    pub redirect_uri: String,
+    /// Lowercased email domains allowed to sign in / be created. Empty = any.
+    pub allowed_domains: Vec<String>,
+}
+
 impl Config {
     /// Load config from the process environment.
     pub fn from_env() -> Result<Self> {
@@ -126,9 +147,11 @@ impl Config {
         let mut master_key = [0u8; 32];
         master_key.copy_from_slice(&master);
 
+        let public_url = required(&get, "SPRINTLY_PUBLIC_URL")?;
+
         Ok(Self {
             env,
-            public_url: required(&get, "SPRINTLY_PUBLIC_URL")?,
+            public_url: public_url.clone(),
             api_bind,
             open_signup: optional(&get, "SPRINTLY_OPEN_SIGNUP")
                 .map(|v| v.eq_ignore_ascii_case("true"))
@@ -136,6 +159,10 @@ impl Config {
             require_2fa: optional(&get, "SPRINTLY_REQUIRE_2FA")
                 .map(|v| v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
+            local_login_disabled: optional(&get, "SPRINTLY_LOCAL_LOGIN_DISABLED")
+                .map(|v| v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
+            oidc: oidc_config(&get, &public_url),
 
             database_url: required(&get, "DATABASE_URL")?,
             redis_url: required(&get, "REDIS_URL")?,
@@ -212,9 +239,56 @@ impl Config {
                     "disabled"
                 }
             ),
+            format!(
+                "local_login      = {}",
+                if self.local_login_disabled {
+                    "disabled"
+                } else {
+                    "enabled"
+                }
+            ),
+            format!(
+                "oidc_sso         = {}",
+                match &self.oidc {
+                    Some(o) => format!("issuer {}", o.issuer),
+                    None => "disabled".into(),
+                }
+            ),
         ]
         .join("\n")
     }
+}
+
+/// Build the OIDC config from env, returning None unless issuer + client id +
+/// client secret are all set. The redirect URI defaults to the public origin.
+fn oidc_config<F>(get: &F, public_url: &str) -> Option<OidcConfig>
+where
+    F: Fn(&str) -> Option<String>,
+{
+    let issuer = optional(get, "SPRINTLY_OIDC_ISSUER")?;
+    let client_id = optional(get, "SPRINTLY_OIDC_CLIENT_ID")?;
+    let client_secret = optional(get, "SPRINTLY_OIDC_CLIENT_SECRET")?;
+    let redirect_uri = optional(get, "SPRINTLY_OIDC_REDIRECT_URI").unwrap_or_else(|| {
+        format!(
+            "{}/api/v1/auth/oidc/callback",
+            public_url.trim_end_matches('/')
+        )
+    });
+    let allowed_domains = optional(get, "SPRINTLY_OIDC_ALLOWED_DOMAINS")
+        .map(|s| {
+            s.split(',')
+                .map(|d| d.trim().to_lowercase())
+                .filter(|d| !d.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(OidcConfig {
+        issuer: issuer.trim_end_matches('/').to_string(),
+        client_id,
+        client_secret,
+        redirect_uri,
+        allowed_domains,
+    })
 }
 
 fn required<F>(get: &F, name: &str) -> Result<String>

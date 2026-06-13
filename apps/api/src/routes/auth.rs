@@ -16,10 +16,10 @@
 use std::net::SocketAddr;
 
 use axum::{
-    extract::{ConnectInfo, State},
+    extract::{ConnectInfo, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use base64::Engine as _;
@@ -34,7 +34,7 @@ use validator::Validate;
 
 use crate::{
     config::Config,
-    domain::{password, sessions, tokens, totp, two_factor},
+    domain::{oidc, password, sessions, tokens, totp, two_factor},
     infra::AppState,
     middleware::{client_ip, csrf, rate_limit, CurrentUser},
     AppError, AppResult,
@@ -49,6 +49,10 @@ pub fn router() -> Router<AppState> {
         .route("/auth/refresh", post(refresh))
         .route("/auth/password/reset/request", post(password_reset_request))
         .route("/auth/password/reset/confirm", post(password_reset_confirm))
+        // OIDC SSO (F10).
+        .route("/auth/oidc/status", get(oidc_status))
+        .route("/auth/oidc/start", get(oidc_start))
+        .route("/auth/oidc/callback", get(oidc_callback))
 }
 
 // ─── DTOs ────────────────────────────────────────────────────────────────────
@@ -190,6 +194,11 @@ async fn login(
 ) -> AppResult<Response> {
     req.validate()
         .map_err(|e| AppError::Validation(e.to_string()))?;
+
+    // When the org runs SSO-only, the password door is bolted shut (F10).
+    if state.cfg.local_login_disabled {
+        return Err(AppError::Forbidden);
+    }
 
     // Throttle credential guessing — by source IP and by target email.
     let ip = client_ip(&headers, info);
@@ -498,14 +507,181 @@ async fn password_reset_confirm(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// ─── OIDC SSO (F10) ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct OidcStatusDto {
+    enabled: bool,
+    local_login_disabled: bool,
+}
+
+/// Public: lets the login page decide whether to show the SSO button and hide
+/// the password form.
+async fn oidc_status(State(state): State<AppState>) -> impl IntoResponse {
+    Json(OidcStatusDto {
+        enabled: state.cfg.oidc.is_some(),
+        local_login_disabled: state.cfg.local_login_disabled,
+    })
+}
+
+/// Begin the auth-code+PKCE dance: stash state/nonce/verifier in a signed
+/// HttpOnly cookie and 302 to the IdP.
+async fn oidc_start(State(state): State<AppState>) -> AppResult<Response> {
+    let cfg = state
+        .cfg
+        .oidc
+        .as_ref()
+        .ok_or_else(|| AppError::BadRequest("single sign-on is not configured".into()))?;
+
+    let disco = oidc::fetch_discovery(&cfg.issuer).await?;
+    let flow = oidc::new_flow();
+    let url = oidc::authorize_url(&disco, &cfg.client_id, &cfg.redirect_uri, &flow);
+    let cookie_val = oidc::encode_flow(&state.cfg.auth.jwt_secret, &flow)?;
+
+    let mut headers = HeaderMap::new();
+    headers.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&flow_cookie(&state.cfg, &cookie_val)).expect("ascii"),
+    );
+    headers.append(
+        header::LOCATION,
+        HeaderValue::from_str(&url)
+            .map_err(|_| AppError::Internal(anyhow::anyhow!("bad authorize url")))?,
+    );
+    Ok((StatusCode::FOUND, headers).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct CallbackQuery {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+}
+
+/// Finish the dance. On any failure we bounce back to /login with a reason
+/// rather than dumping a JSON error on a top-level navigation.
+async fn oidc_callback(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<CallbackQuery>,
+) -> Response {
+    match oidc_callback_inner(&state, &headers, q).await {
+        Ok(resp) => resp,
+        Err(reason) => redirect_to_login(&state.cfg, reason),
+    }
+}
+
+async fn oidc_callback_inner(
+    state: &AppState,
+    headers: &HeaderMap,
+    q: CallbackQuery,
+) -> Result<Response, &'static str> {
+    if q.error.is_some() {
+        return Err("denied");
+    }
+    let cfg = state.cfg.oidc.as_ref().ok_or("failed")?;
+    let code = q.code.ok_or("failed")?;
+    let state_param = q.state.ok_or("failed")?;
+
+    // Recover the browser-bound flow state and bind the returned `state` to it.
+    let raw = read_cookie(headers, "sprintly_oidc_flow").ok_or("expired")?;
+    let flow = oidc::decode_flow(&state.cfg.auth.jwt_secret, &raw).map_err(|_| "expired")?;
+    if !ct_eq(&flow.state, &state_param) {
+        return Err("failed");
+    }
+
+    let disco = oidc::fetch_discovery(&cfg.issuer)
+        .await
+        .map_err(|_| "failed")?;
+    let id_token = oidc::exchange_code(
+        &disco.token_endpoint,
+        &cfg.client_id,
+        &cfg.client_secret,
+        &code,
+        &cfg.redirect_uri,
+        &flow.verifier,
+    )
+    .await
+    .map_err(|_| "failed")?;
+    let jwks = oidc::fetch_jwks(&disco.jwks_uri)
+        .await
+        .map_err(|_| "failed")?;
+    let claims =
+        oidc::validate_id_token(&jwks, &id_token, &cfg.issuer, &cfg.client_id, &flow.nonce)
+            .map_err(|_| "failed")?;
+
+    // Domain allowlist gates both linking and creation.
+    if let Some(email) = claims.email.as_deref() {
+        if !oidc::email_allowed(email, &cfg.allowed_domains) {
+            return Err("denied");
+        }
+    }
+
+    let (user_id, role) = oidc::upsert_user(&state.db, &state.cfg.auth, &cfg.issuer, &claims)
+        .await
+        .map_err(|_| "denied")?;
+
+    let (mut cookies, _access) = session_cookies(state, user_id, &role, headers)
+        .await
+        .map_err(|_| "failed")?;
+    cookies.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&clear_flow_cookie(&state.cfg)).expect("ascii"),
+    );
+    let dest = format!("{}/", state.cfg.public_url.trim_end_matches('/'));
+    cookies.append(
+        header::LOCATION,
+        HeaderValue::from_str(&dest).map_err(|_| "failed")?,
+    );
+    Ok((StatusCode::FOUND, cookies).into_response())
+}
+
+fn flow_cookie(cfg: &Config, token: &str) -> String {
+    format!(
+        "sprintly_oidc_flow={token}; Path=/api/v1/auth/oidc; HttpOnly; SameSite=Lax; Max-Age=600{}",
+        cookie_secure(cfg)
+    )
+}
+
+fn clear_flow_cookie(cfg: &Config) -> String {
+    format!(
+        "sprintly_oidc_flow=; Path=/api/v1/auth/oidc; HttpOnly; SameSite=Lax; Max-Age=0{}",
+        cookie_secure(cfg)
+    )
+}
+
+fn redirect_to_login(cfg: &Config, reason: &str) -> Response {
+    let dest = format!(
+        "{}/login?sso_error={reason}",
+        cfg.public_url.trim_end_matches('/')
+    );
+    let mut headers = HeaderMap::new();
+    if let Ok(v) = HeaderValue::from_str(&dest) {
+        headers.append(header::LOCATION, v);
+    }
+    // Clear any half-finished flow cookie on the way out.
+    if let Ok(v) = HeaderValue::from_str(&clear_flow_cookie(cfg)) {
+        headers.append(header::SET_COOKIE, v);
+    }
+    (StatusCode::FOUND, headers).into_response()
+}
+
+/// Constant-time string compare (lengths may differ → not equal).
+fn ct_eq(a: &str, b: &str) -> bool {
+    use subtle::ConstantTimeEq;
+    a.len() == b.len() && bool::from(a.as_bytes().ct_eq(b.as_bytes()))
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-async fn issue_session_response(
+/// Create a session and return the auth cookies plus the minted access token.
+/// Shared by password login, 2FA login, and the OIDC callback.
+async fn session_cookies(
     state: &AppState,
     user_id: Uuid,
     role: &str,
     headers: &HeaderMap,
-) -> AppResult<(StatusCode, HeaderMap, Json<AuthResponse>)> {
+) -> AppResult<(HeaderMap, String)> {
     let ua = headers
         .get(header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
@@ -519,7 +695,19 @@ async fn issue_session_response(
         .execute(&state.db)
         .await?;
 
-    let cookies = set_auth_cookies(&state.cfg, &access, &issued.refresh.plaintext);
+    Ok((
+        set_auth_cookies(&state.cfg, &access, &issued.refresh.plaintext),
+        access,
+    ))
+}
+
+async fn issue_session_response(
+    state: &AppState,
+    user_id: Uuid,
+    role: &str,
+    headers: &HeaderMap,
+) -> AppResult<(StatusCode, HeaderMap, Json<AuthResponse>)> {
+    let (cookies, access) = session_cookies(state, user_id, role, headers).await?;
     let user = load_user_dto(&state.db, user_id).await?;
 
     Ok((

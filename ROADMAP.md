@@ -475,8 +475,8 @@ Unit: token generation + hashing + scope check.
 
 ---
 
-### `[ ]` F10 — OIDC / SSO
-**PR:** _none yet_ · **Depends on:** none · **Size:** L
+### `[x]` F10 — OIDC / SSO
+**PR:** #57 · **Depends on:** none · **Size:** L
 
 **Goal:** Log in via an external OIDC provider (Authentik, Keycloak, Google…).
 

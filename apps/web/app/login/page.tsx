@@ -1,9 +1,14 @@
 import Link from "next/link";
-import { AuthForm } from "@/components/AuthForm";
+import { LoginPanel } from "@/components/LoginPanel";
 
 export const metadata = { title: "Sign in · Sprintly" };
 
-export default function LoginPage() {
+export default function LoginPage({
+  searchParams,
+}: {
+  searchParams?: { sso_error?: string };
+}) {
+  const ssoError = searchParams?.sso_error ?? null;
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-8 px-6 py-20">
       <header className="space-y-2">
@@ -16,7 +21,7 @@ export default function LoginPage() {
         </p>
       </header>
 
-      <AuthForm mode="login" />
+      <LoginPanel ssoError={ssoError} />
 
       <footer className="mono text-xs text-chrome-dim">
         no account?{" "}
