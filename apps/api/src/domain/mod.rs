@@ -19,6 +19,7 @@ pub mod roadmap;
 pub mod sessions;
 pub mod sprints;
 pub mod tasks;
+pub mod templates;
 pub mod timesheets;
 pub mod tokens;
 pub mod vault;

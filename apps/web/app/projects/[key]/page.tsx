@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { Archive, ArchiveRestore, GitBranch, ListChecks, Pencil, Tags, Webhook } from "lucide-react";
+import { Archive, ArchiveRestore, FileStack, GitBranch, ListChecks, Pencil, Tags, Webhook } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Board } from "@/components/Board";
 import { FieldsManager } from "@/components/FieldsManager";
 import { GitIntegrationsManager } from "@/components/GitIntegrationsManager";
 import { LabelsManager } from "@/components/LabelsManager";
+import { TemplatesManager } from "@/components/TemplatesManager";
 import { WebhooksManager } from "@/components/WebhooksManager";
 import { projectIcon } from "@/components/CreateProjectModal";
 import {
@@ -35,6 +36,7 @@ export default function ProjectPage() {
   const [showFields, setShowFields] = useState(false);
   const [showGit, setShowGit] = useState(false);
   const [showWebhooks, setShowWebhooks] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
 
   async function reload() {
     try {
@@ -156,6 +158,12 @@ export default function ProjectPage() {
           timeline →
         </Link>
         <Link
+          href={`/projects/${project.key}/backlog`}
+          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+        >
+          backlog →
+        </Link>
+        <Link
           href={`/projects/${project.key}/vault`}
           className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
         >
@@ -189,6 +197,16 @@ export default function ProjectPage() {
             className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             <GitBranch size={14} /> git
+          </button>
+        )}
+
+        {canManage && (
+          <button
+            type="button"
+            onClick={() => setShowTemplates(true)}
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          >
+            <FileStack size={14} /> templates
           </button>
         )}
 
@@ -239,6 +257,10 @@ export default function ProjectPage() {
 
       {showWebhooks && (
         <WebhooksManager projectKey={project.key} onClose={() => setShowWebhooks(false)} />
+      )}
+
+      {showTemplates && (
+        <TemplatesManager projectKey={project.key} onClose={() => setShowTemplates(false)} />
       )}
 
       {defaultBoard ? (
