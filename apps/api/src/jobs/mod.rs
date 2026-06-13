@@ -19,12 +19,14 @@ use sqlx::PgPool;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::domain::achievements;
+use crate::domain::{achievements, backups};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
 const ACHIEVEMENT_SCAN_EVERY_SECS: i64 = 300;
 /// How often the worker materialises due recurring templates (F9).
 const TEMPLATE_MATERIALIZE_EVERY_SECS: i64 = 300;
+/// How often the worker prunes old backups per the retention policy (F15).
+const BACKUP_RETENTION_EVERY_SECS: i64 = 21_600; // 6h
 
 /// Spawn the worker on the runtime. Returns immediately. The task runs for
 /// the lifetime of the process; on shutdown the runtime cancels it. The vault
@@ -52,8 +54,16 @@ pub fn spawn(pool: PgPool, vault_master_key: [u8; 32]) {
 }
 
 async fn ensure_seed_jobs(pool: &PgPool) -> anyhow::Result<()> {
-    // One self-re-enqueuing row per periodic kind.
-    for kind in ["scan_achievements", "materialize_templates"] {
+    // One self-re-enqueuing row per periodic kind. Backup scheduling and
+    // retention are opt-in via env, so they're only seeded when configured.
+    let mut periodic = vec!["scan_achievements", "materialize_templates"];
+    if backups::schedule_secs().is_some() {
+        periodic.push("scheduled_backup");
+    }
+    if backups::RetentionPolicy::from_env().is_active() {
+        periodic.push("backup_retention");
+    }
+    for kind in periodic {
         let n: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE kind = $1 AND finished_at IS NULL")
                 .bind(kind)
@@ -107,6 +117,8 @@ async fn run_one(pool: &PgPool, vault_master_key: &[u8; 32]) -> anyhow::Result<b
         "deliver_webhook" => run_deliver_webhook(pool, id, vault_master_key).await,
         "push_commit_status" => run_push_commit_status(pool, id, vault_master_key).await,
         "materialize_templates" => run_materialize_templates(pool).await,
+        "scheduled_backup" => run_scheduled_backup(pool).await,
+        "backup_retention" => run_backup_retention(pool).await,
         other => Err(anyhow::anyhow!("unknown job kind: {other}")),
     };
 
@@ -273,6 +285,80 @@ async fn mark_backup_failed(pool: &PgPool, id: Uuid, msg: &str) -> anyhow::Resul
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// Scheduled backup tick (F15): create a `backups` row and enqueue the same
+/// `create_backup` job a manual trigger would, so the two paths converge.
+async fn run_scheduled_backup(pool: &PgPool) -> anyhow::Result<()> {
+    let backup_id = Uuid::now_v7();
+    let mut tx = pool.begin().await?;
+    sqlx::query(r#"INSERT INTO backups (id, requested_by, status) VALUES ($1, NULL, 'pending')"#)
+        .bind(backup_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        r#"INSERT INTO jobs (id, kind, payload, run_at)
+           VALUES ($1, 'create_backup', jsonb_build_object('backup_id', $2::text), now())"#,
+    )
+    .bind(Uuid::now_v7())
+    .bind(backup_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    info!(%backup_id, "jobs: scheduled backup enqueued");
+    Ok(())
+}
+
+/// Retention prune (F15): delete completed backups beyond the configured policy
+/// — both the MinIO object and the row. Pruning is skipped entirely when no
+/// policy is configured (the historical keep-everything behaviour).
+async fn run_backup_retention(pool: &PgPool) -> anyhow::Result<()> {
+    let policy = backups::RetentionPolicy::from_env();
+    if !policy.is_active() {
+        return Ok(());
+    }
+    let done = backups::load_done_backups(pool).await?;
+    let prunable = backups::select_prunable(&done, &policy, chrono::Utc::now());
+    if prunable.is_empty() {
+        return Ok(());
+    }
+
+    let cfg = minio_cfg_from_env()?;
+    let signer = crate::infra::s3::Presigner::new(&cfg);
+    let mut pruned = 0u32;
+    for b in prunable {
+        if let Some(key) = &b.storage_key {
+            // Best-effort object delete; we drop the row regardless so a
+            // missing/half-deleted object can't wedge retention forever.
+            let url = signer.delete(key, 300);
+            let out = tokio::process::Command::new("curl")
+                .args(["-sS", "-X", "DELETE", "-o", "/dev/null", &url])
+                .output()
+                .await;
+            if let Err(e) = &out {
+                warn!(error = %e, key, "jobs: backup object delete failed");
+            }
+        }
+        backups::delete_backup_row(pool, b.id).await?;
+        pruned += 1;
+    }
+    info!(pruned, "jobs: backup retention pruned old backups");
+    Ok(())
+}
+
+/// MinIO config for server-side object access from the worker. Reads env (the
+/// worker has no Config handle) and points the presigner at the internal
+/// endpoint, mirroring `run_create_backup`.
+fn minio_cfg_from_env() -> anyhow::Result<crate::config::MinioConfig> {
+    let endpoint = std::env::var("MINIO_ENDPOINT")?;
+    Ok(crate::config::MinioConfig {
+        public_endpoint: endpoint.clone(),
+        endpoint,
+        access_key: std::env::var("MINIO_ROOT_USER")?,
+        secret_key: std::env::var("MINIO_ROOT_PASSWORD")?,
+        bucket: std::env::var("MINIO_BUCKET")?,
+        region: std::env::var("MINIO_REGION").unwrap_or_else(|_| "us-east-1".into()),
+    })
 }
 
 /// Spawn a task for every recurring template whose next run is due (F9).
@@ -574,6 +660,9 @@ async fn finish_ok(pool: &PgPool, id: Uuid, kind: &str) -> anyhow::Result<()> {
     let cooldown = match kind {
         "scan_achievements" => Some(ACHIEVEMENT_SCAN_EVERY_SECS),
         "materialize_templates" => Some(TEMPLATE_MATERIALIZE_EVERY_SECS),
+        "backup_retention" => Some(BACKUP_RETENTION_EVERY_SECS),
+        // Interval is operator-configured; if it was unset since boot, stop.
+        "scheduled_backup" => backups::schedule_secs(),
         _ => None,
     };
     if let Some(secs) = cooldown {

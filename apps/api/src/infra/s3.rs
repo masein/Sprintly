@@ -48,6 +48,11 @@ impl<'a> Presigner<'a> {
         self.sign("GET", key, expires_secs, None, disposition.as_deref())
     }
 
+    /// Presigned DELETE — used by backup retention to prune old objects (F15).
+    pub fn delete(&self, key: &str, expires_secs: u32) -> String {
+        self.sign("DELETE", key, expires_secs, None, None)
+    }
+
     fn sign(
         &self,
         method: &str,

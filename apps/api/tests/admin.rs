@@ -39,6 +39,53 @@ async fn make_user(pool: &PgPool, role: &str) -> Uuid {
     id
 }
 
+/// F15: retention selects the right rows over real data and pruning removes
+/// them. (MinIO object deletion is exercised in the running stack, not here.)
+#[sqlx::test(migrations = "./migrations")]
+async fn backup_retention_prunes_old_done_backups(pool: PgPool) {
+    use sprintly_api::domain::backups;
+
+    // Six completed backups, ages 0..5 days.
+    for d in 0..6 {
+        sqlx::query(
+            r#"INSERT INTO backups (id, status, storage_key, size_bytes, created_at, finished_at)
+               VALUES ($1, 'done', $2, 100, now() - ($3::int || ' days')::interval, now())"#,
+        )
+        .bind(Uuid::now_v7())
+        .bind(format!("backups/x/{d}.dump"))
+        .bind(d)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // A failed one must never be considered.
+    sqlx::query("INSERT INTO backups (id, status) VALUES ($1, 'failed')")
+        .bind(Uuid::now_v7())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let done = backups::load_done_backups(&pool).await.unwrap();
+    assert_eq!(done.len(), 6);
+
+    // Keep the 2 most recent → prune the other 4.
+    let policy = backups::RetentionPolicy {
+        keep_count: Some(2),
+        keep_days: None,
+    };
+    let prunable = backups::select_prunable(&done, &policy, chrono::Utc::now());
+    assert_eq!(prunable.len(), 4);
+    for b in prunable {
+        backups::delete_backup_row(&pool, b.id).await.unwrap();
+    }
+
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM backups WHERE status = 'done'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(remaining, 2, "only the 2 most recent survive");
+}
+
 #[sqlx::test(migrations = "./migrations")]
 async fn admin_audit_log_is_append_only(pool: PgPool) {
     let admin = make_user(&pool, "admin").await;
