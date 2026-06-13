@@ -222,6 +222,24 @@ pub struct Commit {
     pub url: Option<String>,
 }
 
+/// CI/CD outcome for a commit (F3). Neutral over provider vocabularies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckState {
+    Pending,
+    Passed,
+    Failed,
+}
+
+impl CheckState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 /// What a webhook tells us, stripped of provider specifics. The shared
 /// handler turns these into task links.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,6 +257,8 @@ pub enum GitEvent {
         state: PrState,
         head_sha: Option<String>,
     },
+    /// A CI check / pipeline result for a commit (F3).
+    CheckStatus { sha: String, state: CheckState },
 }
 
 fn hmac_hex(secret: &str, body: &[u8]) -> String {
@@ -281,18 +301,64 @@ pub fn parse_event(provider: Provider, event_type: &str, body: &[u8]) -> AppResu
     let json: Value = serde_json::from_slice(body)
         .map_err(|_| AppError::BadRequest("invalid JSON body".into()))?;
     Ok(match provider {
-        // Gitea mirrors GitHub's push/pull_request payloads.
+        // Gitea mirrors GitHub's push/pull_request/status payloads.
         Provider::Github | Provider::Gitea => match event_type {
             "push" => vec![parse_github_push(&json)],
             "pull_request" => parse_github_pr(&json).into_iter().collect(),
+            "status" => parse_github_status(&json).into_iter().collect(),
+            "check_suite" | "check_run" => {
+                parse_github_check(&json, event_type).into_iter().collect()
+            }
             _ => vec![],
         },
         Provider::Gitlab => match event_type {
             "Push Hook" => vec![parse_gitlab_push(&json)],
             "Merge Request Hook" => parse_gitlab_mr(&json).into_iter().collect(),
+            "Pipeline Hook" => parse_gitlab_pipeline(&json).into_iter().collect(),
             _ => vec![],
         },
     })
+}
+
+/// GitHub/Gitea commit-status event (`state`: success | pending | failure |
+/// error, at the top level alongside `sha`).
+fn parse_github_status(json: &Value) -> Option<GitEvent> {
+    let sha = json.get("sha").and_then(Value::as_str)?.to_string();
+    let state = match json.get("state").and_then(Value::as_str).unwrap_or("") {
+        "success" => CheckState::Passed,
+        "failure" | "error" => CheckState::Failed,
+        _ => CheckState::Pending,
+    };
+    Some(GitEvent::CheckStatus { sha, state })
+}
+
+/// GitHub check_suite/check_run event: `status` (queued | in_progress |
+/// completed) gates, then `conclusion` decides pass/fail.
+fn parse_github_check(json: &Value, event_type: &str) -> Option<GitEvent> {
+    let node = json.get(event_type)?; // "check_suite" or "check_run"
+    let sha = node.get("head_sha").and_then(Value::as_str)?.to_string();
+    let state = if node.get("status").and_then(Value::as_str) != Some("completed") {
+        CheckState::Pending
+    } else {
+        match node.get("conclusion").and_then(Value::as_str).unwrap_or("") {
+            "success" => CheckState::Passed,
+            _ => CheckState::Failed, // failure | timed_out | cancelled | …
+        }
+    };
+    Some(GitEvent::CheckStatus { sha, state })
+}
+
+/// GitLab Pipeline Hook: `object_attributes.{sha,status}` where status is
+/// created | pending | running | success | failed | canceled | skipped.
+fn parse_gitlab_pipeline(json: &Value) -> Option<GitEvent> {
+    let attrs = json.get("object_attributes")?;
+    let sha = attrs.get("sha").and_then(Value::as_str)?.to_string();
+    let state = match attrs.get("status").and_then(Value::as_str).unwrap_or("") {
+        "success" => CheckState::Passed,
+        "failed" | "canceled" => CheckState::Failed,
+        _ => CheckState::Pending, // created | pending | running | skipped
+    };
+    Some(GitEvent::CheckStatus { sha, state })
 }
 
 fn branch_from_ref(r: &str) -> Option<String> {
@@ -674,5 +740,110 @@ mod tests {
             parse_event(Provider::Github, "push", b"not json"),
             Err(AppError::BadRequest(_))
         ));
+    }
+
+    // ─── F3: check / pipeline status ────────────────────────────────────────
+
+    #[test]
+    fn github_status_event_maps_state() {
+        let mk = |s: &str| {
+            let body = format!(r#"{{"sha":"abc","state":"{s}","context":"ci/test"}}"#);
+            parse_event(Provider::Github, "status", body.as_bytes())
+                .unwrap()
+                .pop()
+                .unwrap()
+        };
+        assert_eq!(
+            mk("success"),
+            GitEvent::CheckStatus {
+                sha: "abc".into(),
+                state: CheckState::Passed
+            }
+        );
+        assert_eq!(
+            mk("failure"),
+            GitEvent::CheckStatus {
+                sha: "abc".into(),
+                state: CheckState::Failed
+            }
+        );
+        assert_eq!(
+            mk("error"),
+            GitEvent::CheckStatus {
+                sha: "abc".into(),
+                state: CheckState::Failed
+            }
+        );
+        assert_eq!(
+            mk("pending"),
+            GitEvent::CheckStatus {
+                sha: "abc".into(),
+                state: CheckState::Pending
+            }
+        );
+    }
+
+    #[test]
+    fn github_check_suite_gates_on_status_then_conclusion() {
+        // Still running → pending regardless of conclusion field.
+        let running =
+            br#"{"check_suite":{"head_sha":"hh","status":"in_progress","conclusion":null}}"#;
+        assert_eq!(
+            parse_event(Provider::Github, "check_suite", running).unwrap(),
+            vec![GitEvent::CheckStatus {
+                sha: "hh".into(),
+                state: CheckState::Pending
+            }]
+        );
+        let passed =
+            br#"{"check_suite":{"head_sha":"hh","status":"completed","conclusion":"success"}}"#;
+        assert_eq!(
+            parse_event(Provider::Github, "check_suite", passed).unwrap(),
+            vec![GitEvent::CheckStatus {
+                sha: "hh".into(),
+                state: CheckState::Passed
+            }]
+        );
+        let failed =
+            br#"{"check_suite":{"head_sha":"hh","status":"completed","conclusion":"timed_out"}}"#;
+        assert_eq!(
+            parse_event(Provider::Github, "check_suite", failed).unwrap(),
+            vec![GitEvent::CheckStatus {
+                sha: "hh".into(),
+                state: CheckState::Failed
+            }]
+        );
+    }
+
+    #[test]
+    fn gitlab_pipeline_hook_maps_status() {
+        let mk = |s: &str| {
+            let body = format!(r#"{{"object_attributes":{{"sha":"pp","status":"{s}"}}}}"#);
+            parse_event(Provider::Gitlab, "Pipeline Hook", body.as_bytes())
+                .unwrap()
+                .pop()
+                .unwrap()
+        };
+        assert_eq!(
+            mk("success"),
+            GitEvent::CheckStatus {
+                sha: "pp".into(),
+                state: CheckState::Passed
+            }
+        );
+        assert_eq!(
+            mk("failed"),
+            GitEvent::CheckStatus {
+                sha: "pp".into(),
+                state: CheckState::Failed
+            }
+        );
+        assert_eq!(
+            mk("running"),
+            GitEvent::CheckStatus {
+                sha: "pp".into(),
+                state: CheckState::Pending
+            }
+        );
     }
 }

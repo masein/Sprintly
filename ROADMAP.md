@@ -352,8 +352,8 @@ PR state on cards. Make `PR_WIZARD` mean something real.
 
 ---
 
-### `[ ]` F3 — CI/CD status on tasks & PRs
-**PR:** _none yet_ · **Depends on:** F1 · **Size:** M
+### `[x]` F3 — CI/CD status on tasks & PRs
+**PR:** #49 · **Depends on:** F1 · **Size:** M
 
 **Goal:** Show build/check status from the provider on linked PRs/cards.
 

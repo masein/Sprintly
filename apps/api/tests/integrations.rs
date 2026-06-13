@@ -598,3 +598,110 @@ async fn same_pr_number_distinct_per_provider(pool: PgPool) {
     .unwrap();
     assert_eq!(n, 2, "both providers' PR #5 coexist");
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn check_status_fixture_updates_linked_pr(pool: PgPool) {
+    // F3: a CI check event stamps the linked PR (and commit) sharing its SHA.
+    let task = make_task(&pool, "GH-1").await;
+    let pid: Uuid = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = $1")
+        .bind(task)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // Link a PR whose head SHA is the one CI will report on.
+    let pr = git_providers::parse_event(
+        Provider::Github,
+        "pull_request",
+        br#"{"action":"opened","pull_request":{"number":3,"title":"GH-1 ci","body":"","html_url":"http://gh/3","merged":false,"head":{"sha":"c0ffee1234"}}}"#,
+    )
+    .unwrap();
+    integrations::apply_events(&pool, "github", Some(pid), &pr)
+        .await
+        .unwrap();
+
+    // No status yet.
+    let before: Option<String> = sqlx::query_scalar(
+        "SELECT check_state FROM git_links WHERE task_id = $1 AND kind = 'pull_request'",
+    )
+    .bind(task)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(before, None);
+
+    // A GitHub status event for that SHA → 'failed'.
+    let status = git_providers::parse_event(
+        Provider::Github,
+        "status",
+        br#"{"sha":"c0ffee1234","state":"failure","context":"ci/build"}"#,
+    )
+    .unwrap();
+    let n = integrations::apply_events(&pool, "github", Some(pid), &status)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "check events don't create links");
+
+    let after: Option<String> = sqlx::query_scalar(
+        "SELECT check_state FROM git_links WHERE task_id = $1 AND kind = 'pull_request'",
+    )
+    .bind(task)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(after.as_deref(), Some("failed"));
+
+    // A later passing pipeline flips it to 'passed'.
+    let pass = git_providers::parse_event(
+        Provider::Gitlab,
+        "Pipeline Hook",
+        br#"{"object_attributes":{"sha":"c0ffee1234","status":"success"}}"#,
+    )
+    .unwrap();
+    integrations::apply_events(&pool, "gitlab", Some(pid), &pass)
+        .await
+        .unwrap();
+    let latest: Option<String> = sqlx::query_scalar(
+        "SELECT check_state FROM git_links WHERE task_id = $1 AND kind = 'pull_request'",
+    )
+    .bind(task)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(latest.as_deref(), Some("passed"));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn check_status_is_scoped_to_project(pool: PgPool) {
+    // A check event scoped to project B must not touch project A's links,
+    // even on a SHA collision.
+    let task = make_task(&pool, "GH-1").await;
+    let pid: Uuid = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = $1")
+        .bind(task)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let pr = git_providers::parse_event(
+        Provider::Github,
+        "pull_request",
+        br#"{"action":"opened","pull_request":{"number":1,"title":"GH-1","body":"","html_url":"http://x/1","merged":false,"head":{"sha":"deadbeef"}}}"#,
+    )
+    .unwrap();
+    integrations::apply_events(&pool, "github", Some(pid), &pr)
+        .await
+        .unwrap();
+
+    let other_project = Uuid::now_v7();
+    let n = integrations::set_check_state(&pool, Some(other_project), "deadbeef", "passed")
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "wrong project scope updates nothing");
+
+    let state: Option<String> =
+        sqlx::query_scalar("SELECT check_state FROM git_links WHERE task_id = $1")
+            .bind(task)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(state, None);
+}

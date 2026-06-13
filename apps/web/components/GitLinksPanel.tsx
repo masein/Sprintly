@@ -4,14 +4,47 @@
 // GitHub integration. Hidden when there's nothing linked.
 
 import { useQuery } from "@tanstack/react-query";
-import { GitBranch, GitCommit, GitPullRequest } from "lucide-react";
-import { listGitLinks, type GitLink } from "@/lib/integrations";
+import {
+  CircleDot,
+  CircleCheck,
+  CircleX,
+  GitBranch,
+  GitCommit,
+  GitPullRequest,
+} from "lucide-react";
+import {
+  listGitLinks,
+  type CheckState,
+  type GitLink,
+} from "@/lib/integrations";
 
 const ICON: Record<GitLink["kind"], React.ComponentType<{ size?: string | number }>> = {
   commit: GitCommit,
   pull_request: GitPullRequest,
   branch: GitBranch,
 };
+
+// CI status chip: icon + label + colour (never colour alone — PERSONALITY.md).
+const CHECK: Record<
+  CheckState,
+  { Icon: React.ComponentType<{ size?: string | number }>; label: string; cls: string }
+> = {
+  passed: { Icon: CircleCheck, label: "checks pass", cls: "border-emerald-500/30 text-emerald-300" },
+  failed: { Icon: CircleX, label: "checks fail", cls: "border-red-500/30 text-red-300" },
+  pending: { Icon: CircleDot, label: "checks pending", cls: "border-amber-500/30 text-amber-300" },
+};
+
+function CheckChip({ state }: { state: CheckState }) {
+  const { Icon, label, cls } = CHECK[state];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded border px-1 py-0.5 text-[10px] uppercase ${cls}`}
+    >
+      <Icon size={10} />
+      {label}
+    </span>
+  );
+}
 
 function stateClass(state: string | null): string {
   switch (state) {
@@ -63,6 +96,7 @@ export function GitLinksPanel({ taskKey }: { taskKey: string }) {
                   <span className="ml-1 truncate text-chrome-dim">{l.title}</span>
                 )}
               </span>
+              {l.check_state && <CheckChip state={l.check_state} />}
               {l.kind === "pull_request" && l.state && (
                 <span
                   className={`rounded border px-1 py-0.5 text-[10px] uppercase ${stateClass(l.state)}`}

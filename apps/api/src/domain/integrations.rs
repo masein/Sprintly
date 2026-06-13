@@ -287,9 +287,41 @@ pub async fn apply_events(
                     }
                 }
             }
+            // F3: a check/pipeline result stamps the matching links — it never
+            // creates one (the commit/PR must already be linked), so it
+            // doesn't count toward `linked`.
+            GitEvent::CheckStatus { sha, state } => {
+                set_check_state(db, scope, sha, state.as_str()).await?;
+            }
         }
     }
     Ok(linked)
+}
+
+/// Stamp the latest CI check state onto every link (PR head or commit) for a
+/// SHA, scoped to one project or all (F3). Returns rows updated.
+pub async fn set_check_state(
+    db: &PgPool,
+    scope: Option<Uuid>,
+    sha: &str,
+    check_state: &str,
+) -> AppResult<u64> {
+    let r = sqlx::query(
+        r#"
+        UPDATE git_links gl
+        SET    check_state = $1, updated_at = now()
+        FROM   tasks t
+        WHERE  gl.task_id = t.id
+          AND  gl.sha = $2
+          AND  ($3::uuid IS NULL OR t.project_id = $3)
+        "#,
+    )
+    .bind(check_state)
+    .bind(sha)
+    .bind(scope)
+    .execute(db)
+    .await?;
+    Ok(r.rows_affected())
 }
 
 // ─── per-project provider connections (ADR 0001) ────────────────────────────

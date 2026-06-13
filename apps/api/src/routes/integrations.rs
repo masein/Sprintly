@@ -64,6 +64,7 @@ pub struct GitLinkDto {
     pub url: Option<String>,
     pub title: Option<String>,
     pub state: Option<String>,
+    pub check_state: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -85,7 +86,7 @@ async fn list_git_links(
         return Err(AppError::Forbidden);
     }
     let links: Vec<GitLinkDto> = sqlx::query_as(
-        r#"SELECT id, kind, external_ref, url, title, state, created_at
+        r#"SELECT id, kind, external_ref, url, title, state, check_state, created_at
            FROM git_links WHERE task_id = $1 ORDER BY created_at DESC"#,
     )
     .bind(task_id)
