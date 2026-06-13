@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { Archive, ArchiveRestore, ListChecks, Pencil, Tags } from "lucide-react";
+import { Archive, ArchiveRestore, GitBranch, ListChecks, Pencil, Tags } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Board } from "@/components/Board";
 import { FieldsManager } from "@/components/FieldsManager";
+import { GitIntegrationsManager } from "@/components/GitIntegrationsManager";
 import { LabelsManager } from "@/components/LabelsManager";
 import { projectIcon } from "@/components/CreateProjectModal";
 import {
@@ -31,6 +32,7 @@ export default function ProjectPage() {
   const [editingName, setEditingName] = useState(false);
   const [showLabels, setShowLabels] = useState(false);
   const [showFields, setShowFields] = useState(false);
+  const [showGit, setShowGit] = useState(false);
 
   async function reload() {
     try {
@@ -175,6 +177,16 @@ export default function ProjectPage() {
         {canManage && (
           <button
             type="button"
+            onClick={() => setShowGit(true)}
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          >
+            <GitBranch size={14} /> git
+          </button>
+        )}
+
+        {canManage && (
+          <button
+            type="button"
             onClick={async () => {
               try {
                 if (project.archived_at) await unarchiveProject(project.key);
@@ -201,6 +213,10 @@ export default function ProjectPage() {
 
       {showFields && (
         <FieldsManager projectKey={project.key} onClose={() => setShowFields(false)} />
+      )}
+
+      {showGit && (
+        <GitIntegrationsManager projectKey={project.key} onClose={() => setShowGit(false)} />
       )}
 
       {defaultBoard ? (

@@ -89,6 +89,7 @@ async fn link_creates_then_dedupes(pool: PgPool) {
 
     let first = integrations::link(
         &pool,
+        None,
         "GH-1",
         "commit",
         "abc1234",
@@ -103,6 +104,7 @@ async fn link_creates_then_dedupes(pool: PgPool) {
 
     let second = integrations::link(
         &pool,
+        None,
         "GH-1",
         "commit",
         "abc1234",
@@ -139,9 +141,11 @@ async fn link_creates_then_dedupes(pool: PgPool) {
 #[sqlx::test(migrations = "./migrations")]
 async fn unknown_key_is_noop(pool: PgPool) {
     make_task(&pool, "GH-1").await;
-    let r = integrations::link(&pool, "NOPE-9", "commit", "abc", None, None, None, None)
-        .await
-        .unwrap();
+    let r = integrations::link(
+        &pool, None, "NOPE-9", "commit", "abc", None, None, None, None,
+    )
+    .await
+    .unwrap();
     assert!(!r);
 }
 
@@ -150,6 +154,7 @@ async fn pr_merge_updates_state_and_logs(pool: PgPool) {
     let task = make_task(&pool, "GH-1").await;
     integrations::link(
         &pool,
+        None,
         "GH-1",
         "pull_request",
         "#5",
@@ -162,6 +167,7 @@ async fn pr_merge_updates_state_and_logs(pool: PgPool) {
     .unwrap();
     integrations::link(
         &pool,
+        None,
         "GH-1",
         "pull_request",
         "#5",
@@ -291,6 +297,7 @@ async fn status_jobs_enqueue_only_when_eligible(pool: PgPool) {
     // No integration yet: linking a commit (with SHA) enqueues nothing.
     integrations::link(
         &pool,
+        None,
         "GH-1",
         "commit",
         "abc1234",
@@ -332,4 +339,109 @@ async fn status_jobs_enqueue_only_when_eligible(pool: PgPool) {
         payload.get("task_id").and_then(|v| v.as_str()),
         Some(task.to_string().as_str())
     );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn project_scope_confines_linking(pool: PgPool) {
+    let task = make_task(&pool, "GH-1").await;
+    let other_project = Uuid::now_v7();
+
+    // A scope that doesn't own GH-1 can't link it.
+    let r = integrations::link(
+        &pool,
+        Some(other_project),
+        "GH-1",
+        "commit",
+        "abc1234",
+        None,
+        Some("m"),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(!r, "out-of-scope key resolves to nothing");
+
+    // The owning project can.
+    let project_id: Uuid = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = $1")
+        .bind(task)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let r = integrations::link(
+        &pool,
+        Some(project_id),
+        "GH-1",
+        "commit",
+        "abc1234",
+        None,
+        Some("m"),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(r);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn webhook_secret_round_trips_and_update_clears_token(pool: PgPool) {
+    let task = make_task(&pool, "GH-1").await;
+    let project_id: Uuid = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = $1")
+        .bind(task)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let secret = integrations::mint_webhook_secret();
+    assert_eq!(secret.len(), 64, "32 bytes hex");
+
+    let gi = integrations::create_integration(
+        &pool,
+        MASTER_KEY,
+        project_id,
+        "gitlab",
+        "group/app",
+        Some("https://gitlab.acme.dev"),
+        Some(&secret),
+        None,
+        false,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let (pid, stored) = integrations::decrypt_webhook_secret(&pool, MASTER_KEY, gi.id)
+        .await
+        .unwrap();
+    assert_eq!(pid, project_id);
+    assert_eq!(stored.as_deref(), Some(secret.as_str()));
+
+    // Set a token, then clear it; flip status_enabled on the way.
+    let up = integrations::update_integration(
+        &pool,
+        MASTER_KEY,
+        gi.id,
+        project_id,
+        Some(Some("glpat-123")),
+        Some(true),
+    )
+    .await
+    .unwrap();
+    assert!(up.has_api_token);
+    assert!(up.status_enabled);
+    assert_eq!(
+        integrations::decrypt_api_token(&pool, MASTER_KEY, gi.id)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("glpat-123")
+    );
+
+    let up =
+        integrations::update_integration(&pool, MASTER_KEY, gi.id, project_id, Some(None), None)
+            .await
+            .unwrap();
+    assert!(!up.has_api_token, "explicit null clears the token");
+    assert!(up.status_enabled, "untouched fields stay put");
 }
