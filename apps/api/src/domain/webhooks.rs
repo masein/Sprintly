@@ -21,6 +21,11 @@ pub const EVENTS: &[&str] = &[
 ];
 
 /// Enqueue a delivery job for each matching webhook. Returns how many.
+///
+/// The job carries the raw `(event, data)`; the worker formats the body per
+/// the webhook's `target_type` at delivery time (ADR 0002). A row is
+/// deliverable if it's a chat target (URL is the credential) or a generic
+/// `outbound` target with a configured signing secret.
 pub async fn dispatch(
     pool: &PgPool,
     project_id: Uuid,
@@ -31,7 +36,8 @@ pub async fn dispatch(
         r#"
         SELECT id FROM webhooks
         WHERE  project_id = $1 AND active = true AND deleted_at IS NULL
-          AND  $2 = ANY(events) AND secret_ciphertext IS NOT NULL
+          AND  $2 = ANY(events)
+          AND  (target_type <> 'outbound' OR secret_ciphertext IS NOT NULL)
         "#,
     )
     .bind(project_id)
@@ -39,14 +45,31 @@ pub async fn dispatch(
     .fetch_all(pool)
     .await?;
 
-    // The signed body is identical for every subscriber.
-    let body = json!({ "event": event, "data": data }).to_string();
     for id in &ids {
-        sqlx::query(r#"INSERT INTO jobs (id, kind, payload) VALUES ($1, 'deliver_webhook', $2)"#)
-            .bind(Uuid::now_v7())
-            .bind(json!({ "webhook_id": id, "event": event, "body": body }))
-            .execute(pool)
-            .await?;
+        enqueue(pool, *id, event, &data).await?;
     }
     Ok(ids.len() as u64)
+}
+
+/// Enqueue a single delivery job (shared by dispatch + send-test).
+async fn enqueue(
+    pool: &PgPool,
+    webhook_id: Uuid,
+    event: &str,
+    data: &serde_json::Value,
+) -> AppResult<()> {
+    sqlx::query(r#"INSERT INTO jobs (id, kind, payload) VALUES ($1, 'deliver_webhook', $2)"#)
+        .bind(Uuid::now_v7())
+        .bind(json!({ "webhook_id": webhook_id, "event": event, "data": data }))
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Enqueue a synthetic `test` delivery to one webhook, bypassing the event
+/// subscription filter. Lets an admin confirm a target is wired up; the
+/// result lands in `webhook_deliveries` like any real delivery.
+pub async fn enqueue_test(pool: &PgPool, webhook_id: Uuid) -> AppResult<()> {
+    let data = json!({ "key": "TEST-1", "message": "hello from Sprintly" });
+    enqueue(pool, webhook_id, "test", &data).await
 }
