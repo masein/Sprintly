@@ -129,7 +129,18 @@ async fn list_backups(
             created_at: r.created_at,
         })
         .collect();
-    Ok(Json(serde_json::json!({ "items": items })))
+
+    // Surface the operator's schedule + retention policy so the admin UI can
+    // explain what's automated (F15).
+    let policy = crate::domain::backups::RetentionPolicy::from_env();
+    Ok(Json(serde_json::json!({
+        "items": items,
+        "policy": {
+            "schedule_secs": crate::domain::backups::schedule_secs(),
+            "retention_count": policy.keep_count,
+            "retention_days": policy.keep_days,
+        }
+    })))
 }
 
 async fn fetch(db: &sqlx::PgPool, id: Uuid) -> AppResult<BackupRow> {

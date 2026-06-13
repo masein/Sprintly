@@ -119,13 +119,39 @@ Double-submit cookie pattern.
   Output object: `s3://sprintly/backups/YYYY-MM-DD/<backup_id>.dump`. Custom
   format with `-Z 6` compression. Failures land on the `backups` row's
   `error` field with the `pg_dump` stderr.
-- **Restore is a documented manual procedure**, not a UI button — this
-  avoids one-click data loss. Runbook lives below.
+- **Scheduled backups + retention (F15).** Set `SPRINTLY_BACKUP_SCHEDULE_SECS`
+  and the worker auto-creates a backup on that cadence (the same code path as
+  the manual button). `SPRINTLY_BACKUP_RETENTION_COUNT` / `_DAYS` enable a
+  retention sweep (every 6h) that prunes the MinIO object **and** the row for
+  backups beyond the policy. Both are opt-in — unset means "keep everything",
+  the old behaviour. The newest backup is always kept as a safety floor.
+- **Restore is a guarded operator action**, not a UI button — this avoids
+  one-click data loss. The streamlined path is the CLI below; the fully-manual
+  path remains for unusual cases.
 - **Webhooks scaffold.** Rows + per-project CRUD + secret-hash-on-disk are
   in place. Outbound delivery is intentionally not wired in v1 — the admin
   UI flags this as "Coming soon".
 
 ### Backup restore runbook
+
+**Streamlined (CLI, F15).** The `restore` subcommand downloads the chosen
+backup from MinIO and runs `pg_restore --clean --if-exists` against the target
+database. It demands an explicit `--confirm` (it overwrites data) and writes a
+`backup.restore` row to the admin audit log.
+
+1. Find the backup id in the admin panel (Backups tab) or `GET /admin/backups`.
+2. **Drill on staging first.** Point at a throwaway DB by exporting
+   `SPRINTLY_RESTORE_DATABASE_URL=postgres://…/sprintly_staging` (defaults to
+   `DATABASE_URL` if unset).
+3. Dry-run the guard (no `--confirm`) to see what it would do:
+   `docker compose -f infra/compose/docker-compose.yml exec api sprintly-api restore <backup_id>`
+4. Execute: append `--confirm`:
+   `… exec api sprintly-api restore <backup_id> --confirm`
+5. For an in-place production restore, stop the app first
+   (`docker compose stop web caddy`), run the command against `DATABASE_URL`,
+   then `docker compose up -d`.
+
+**Fully manual (fallback).** If you'd rather drive it by hand:
 
 1. From an admin shell: `docker compose -f infra/compose/docker-compose.yml exec api bash`
 2. Identify the backup in MinIO: console at `:9001` → bucket `sprintly` →

@@ -71,7 +71,12 @@ export type BackupRow = {
   error: string | null;
   created_at: string;
 };
+export type BackupPolicy = {
+  schedule_secs: number | null;
+  retention_count: number | null;
+  retention_days: number | null;
+};
 export const listBackups = () =>
-  api<{ items: BackupRow[] }>("/admin/backups").then((r) => r.items);
+  api<{ items: BackupRow[]; policy: BackupPolicy }>("/admin/backups");
 export const startBackup = () =>
   api<BackupRow>("/admin/backups", { method: "POST" });

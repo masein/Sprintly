@@ -314,6 +314,24 @@ function BackupsTab() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-backups"] }),
   });
 
+  const items = q.data?.items ?? [];
+  const policy = q.data?.policy;
+  const scheduleLabel =
+    policy?.schedule_secs != null
+      ? policy.schedule_secs % 86400 === 0
+        ? `every ${policy.schedule_secs / 86400}d`
+        : `every ${Math.round(policy.schedule_secs / 3600)}h`
+      : "manual only";
+  const retentionLabel =
+    policy && (policy.retention_count != null || policy.retention_days != null)
+      ? [
+          policy.retention_count != null ? `keep ${policy.retention_count}` : null,
+          policy.retention_days != null ? `${policy.retention_days}d` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "keep everything";
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
@@ -329,8 +347,16 @@ function BackupsTab() {
           backups land in MinIO under <code>backups/YYYY-MM-DD/&lt;id&gt;.dump</code>
         </span>
       </div>
+      <div className="mono flex flex-wrap gap-2 text-[10px] text-chrome-dim">
+        <span className="rounded border border-white/10 px-1.5 py-0.5">
+          schedule: <span className="text-chrome">{scheduleLabel}</span>
+        </span>
+        <span className="rounded border border-white/10 px-1.5 py-0.5">
+          retention: <span className="text-chrome">{retentionLabel}</span>
+        </span>
+      </div>
       <ul className="space-y-1">
-        {(q.data ?? []).map((b) => (
+        {items.map((b) => (
           <li
             key={b.id}
             className="flex items-center gap-3 rounded border border-white/10 bg-ink-subtle px-3 py-2"
@@ -364,14 +390,16 @@ function BackupsTab() {
             )}
           </li>
         ))}
-        {q.data?.length === 0 && (
+        {items.length === 0 && (
           <li className="mono rounded border border-dashed border-white/10 p-4 text-center text-xs text-chrome-dim">
             no backups yet — kick one off and the worker takes it from here
           </li>
         )}
       </ul>
       <p className="mono text-[10px] text-chrome-dim">
-        restore is intentionally a manual operation. see <code>docs/SECURITY.md</code>.
+        restore is a guarded operator action:{" "}
+        <code>sprintly-api restore &lt;id&gt; --confirm</code>. see{" "}
+        <code>docs/SECURITY.md</code>.
       </p>
     </div>
   );

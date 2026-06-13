@@ -27,8 +27,11 @@ async fn main() -> ExitCode {
         Some("migrate") => run(cmd_migrate()).await,
         Some("healthcheck") => run(cmd_healthcheck()).await,
         Some("check-config") => run(cmd_check_config()).await,
+        Some("restore") => run(cmd_restore(std::env::args().skip(2).collect())).await,
         Some("--help") | Some("-h") => {
-            println!("usage: sprintly-api [migrate|healthcheck|check-config]");
+            println!(
+                "usage: sprintly-api [migrate|healthcheck|check-config|restore <backup-id> --confirm]"
+            );
             ExitCode::SUCCESS
         }
         _ => run(cmd_serve()).await,
@@ -114,6 +117,109 @@ async fn cmd_healthcheck() -> anyhow::Result<()> {
         Ok(())
     } else {
         anyhow::bail!("readyz check failed")
+    }
+}
+
+/// Restore a backup into the target database (F15). This is intentionally a
+/// CLI one-shot, never an API button: it OVERWRITES data, so it demands an
+/// explicit `--confirm` and is audit-logged.
+///
+///   sprintly-api restore <backup-id> --confirm
+///
+/// Target DB is `SPRINTLY_RESTORE_DATABASE_URL` if set (point this at staging
+/// for a drill), else `DATABASE_URL`.
+async fn cmd_restore(args: Vec<String>) -> anyhow::Result<()> {
+    sprintly_api::logging::init_basic();
+
+    let backup_id = args
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .ok_or_else(|| anyhow::anyhow!("usage: sprintly-api restore <backup-id> --confirm"))?;
+    let backup_id = uuid::Uuid::parse_str(backup_id)
+        .map_err(|_| anyhow::anyhow!("backup-id must be a UUID"))?;
+    let confirmed = args.iter().any(|a| a == "--confirm");
+
+    let cfg = Config::from_env()?;
+    let pool = infra::db::connect_url(&cfg.database_url).await?;
+
+    let storage_key = sprintly_api::domain::backups::storage_key_of(&pool, backup_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no completed backup with id {backup_id}"))?;
+
+    let target = std::env::var("SPRINTLY_RESTORE_DATABASE_URL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| cfg.database_url.clone());
+
+    if !confirmed {
+        eprintln!(
+            "About to restore backup {backup_id}\n  object: {storage_key}\n  into:   {}\n\n\
+             This OVERWRITES the target database. Re-run with --confirm to proceed.",
+            mask_db_url(&target)
+        );
+        anyhow::bail!("refusing to restore without --confirm");
+    }
+
+    // Download the dump from MinIO. Point the presigner at the internal
+    // endpoint (we're inside the cluster), like the worker does.
+    let mut minio = cfg.minio.clone();
+    minio.public_endpoint = minio.endpoint.clone();
+    let signer = infra::s3::Presigner::new(&minio);
+    let url = signer.get(&storage_key, None, 900);
+    let tmp = format!("/tmp/sprintly-restore-{backup_id}.dump");
+    info!(%backup_id, "downloading backup object");
+    let dl = tokio::process::Command::new("curl")
+        .args(["--fail-with-body", "-sS", "-o", &tmp, &url])
+        .status()
+        .await?;
+    if !dl.success() {
+        anyhow::bail!("failed to download backup object from MinIO");
+    }
+
+    info!("running pg_restore (this overwrites the target database)");
+    let restore = tokio::process::Command::new("pg_restore")
+        .args([
+            "--clean",
+            "--if-exists",
+            "--no-owner",
+            "--no-acl",
+            "--dbname",
+            &target,
+            &tmp,
+        ])
+        .status()
+        .await;
+    let _ = tokio::fs::remove_file(&tmp).await;
+    let restore = restore?;
+
+    // Audit the attempt regardless of pg_restore's exit (a partial restore is
+    // worth recording). actor is NULL — this is an out-of-band operator action.
+    sqlx::query(
+        r#"INSERT INTO admin_audit_log (id, actor_id, action, payload, user_agent)
+           VALUES ($1, NULL, 'backup.restore', $2, 'sprintly-api restore (cli)')"#,
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(serde_json::json!({
+        "backup_id": backup_id,
+        "storage_key": storage_key,
+        "ok": restore.success(),
+    }))
+    .execute(&pool)
+    .await?;
+
+    if !restore.success() {
+        anyhow::bail!("pg_restore exited {restore}");
+    }
+    info!("restore complete");
+    println!("restore complete: backup {backup_id} → target database");
+    Ok(())
+}
+
+fn mask_db_url(url: &str) -> String {
+    // Hide credentials in the printed confirmation line.
+    match (url.find("://"), url.rfind('@')) {
+        (Some(s), Some(a)) if a > s + 3 => format!("{}://***@{}", &url[..s], &url[a + 1..]),
+        _ => url.to_string(),
     }
 }
 

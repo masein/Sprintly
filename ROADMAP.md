@@ -535,8 +535,8 @@ endpoint returns correct aggregates for seeded transitions.
 
 ---
 
-### `[ ]` F15 — Backup restore + scheduling + retention
-**PR:** _none yet_ · **Depends on:** none · **Size:** M
+### `[x]` F15 — Backup restore + scheduling + retention
+**PR:** #58 · **Depends on:** none · **Size:** M
 
 **Goal:** Close the backup loop: scheduled `pg_dump`, retention, and a restore path.
 
