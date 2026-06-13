@@ -93,17 +93,27 @@ async fn bug_slayer(pool: &PgPool) -> AppResult<Vec<AwardCandidate>> {
         .collect())
 }
 
+/// Merged PRs that count toward `PR_WIZARD`. Tuned for a real signal without
+/// being unreachable on a small self-hosted team.
+const PR_WIZARD_THRESHOLD: i64 = 25;
+
+/// `PR_WIZARD` now counts **real merged PRs** (F1), not done tasks: each
+/// distinct merged pull/merge request (per provider + number) linked to a
+/// task is attributed to that task's assignee. A PR linked to several tasks
+/// counts once per distinct assignee.
 async fn pr_wizard(pool: &PgPool) -> AppResult<Vec<AwardCandidate>> {
     let rows = sqlx::query!(
         r#"
         SELECT t.assignee_id AS "user_id?: Uuid",
-               COUNT(*)::bigint AS "n!: i64"
-        FROM   tasks t
-        WHERE  t.status = 'done' AND t.deleted_at IS NULL
+               COUNT(DISTINCT gl.provider || ':' || gl.external_ref)::bigint AS "n!: i64"
+        FROM   git_links gl
+        JOIN   tasks t ON t.id = gl.task_id AND t.deleted_at IS NULL
+        WHERE  gl.kind = 'pull_request' AND gl.state = 'merged'
           AND  t.assignee_id IS NOT NULL
         GROUP  BY t.assignee_id
-        HAVING COUNT(*) >= 50
+        HAVING COUNT(DISTINCT gl.provider || ':' || gl.external_ref) >= $1
         "#,
+        PR_WIZARD_THRESHOLD,
     )
     .fetch_all(pool)
     .await?;

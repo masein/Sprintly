@@ -318,8 +318,8 @@ first-class Slack/Discord targets.
 
 > The flagship differentiator: tie the board to the codebase.
 
-### `[~]` F1 — Git provider integration (GitHub / GitLab / Gitea)
-**PRs:** #27 (inbound webhook commit/PR → task linking), #28 (auto-transition on merge + linked-git panel), #46 (ADR 0001 + per-project connections + outbound commit status), #47 (connect/configure UI + per-connection webhooks) · remaining: GitLab/Gitea inbound · **Depends on:** F2, F5, F12 · **Size:** L
+### `[x]` F1 — Git provider integration (GitHub / GitLab / Gitea)
+**PRs:** #27 (inbound webhook commit/PR → task linking), #28 (auto-transition on merge + linked-git panel), #46 (ADR 0001 + per-project connections + outbound commit status), #47 (connect/configure UI + per-connection webhooks), #48 (GitLab + Gitea inbound, branch linking, PR_WIZARD from merged PRs) · **Depends on:** F2, F5, F12 · **Size:** L
 
 **Goal:** Link branches/PRs/commits to tasks, auto-transition on merge, surface
 PR state on cards. Make `PR_WIZARD` mean something real.

@@ -162,21 +162,95 @@ async fn pk_dedupes_repeated_awards(pool: PgPool) {
     assert_eq!(again.rows_affected(), 0, "PK must collapse re-runs");
 }
 
-#[sqlx::test(migrations = "./migrations")]
-async fn pr_wizard_returns_users_with_50_done(pool: PgPool) {
-    let u = make_user(&pool).await;
-    // Below the threshold.
-    make_project_with_task_done(&pool, u, 49).await;
-    let batches = scan_all(&pool).await.unwrap();
-    let pr = batches.iter().find(|(c, _)| *c == "PR_WIZARD").unwrap();
-    assert!(pr.1.is_empty(), "49 done tasks shouldn't trigger PR_WIZARD");
+/// Create a project with `n` tasks assigned to `owner`, each linked to a
+/// distinct merged PR numbered `#base..#base+n`. The `base` offset keeps PR
+/// refs globally unique across calls (PR_WIZARD dedupes on provider+ref).
+async fn make_merged_prs(pool: &PgPool, owner: Uuid, base: usize, n: usize) {
+    let pid = Uuid::now_v7();
+    let key = format!("P{}", pid.simple().to_string()[26..32].to_uppercase());
+    sqlx::query(r#"INSERT INTO projects (id, key, name, created_by) VALUES ($1, $2, $2, $3)"#)
+        .bind(pid)
+        .bind(&key)
+        .bind(owner)
+        .execute(pool)
+        .await
+        .unwrap();
+    let board = Uuid::now_v7();
+    sqlx::query(
+        r#"INSERT INTO boards (id, project_id, name, is_default) VALUES ($1, $2, 'B', true)"#,
+    )
+    .bind(board)
+    .bind(pid)
+    .execute(pool)
+    .await
+    .unwrap();
+    let col = Uuid::now_v7();
+    sqlx::query(
+        r#"INSERT INTO board_columns (id, board_id, name, category, sort_order)
+           VALUES ($1, $2, 'T', 'todo', 1024.0)"#,
+    )
+    .bind(col)
+    .bind(board)
+    .execute(pool)
+    .await
+    .unwrap();
 
-    // Top up to 50.
-    make_project_with_task_done(&pool, u, 1).await;
+    for i in 0..n {
+        let mut tx = pool.begin().await.unwrap();
+        let (k, _) = task_domain::next_key(&mut tx, pid).await.unwrap();
+        let task = Uuid::now_v7();
+        sqlx::query(
+            r#"INSERT INTO tasks (id, project_id, board_id, column_id, key, title, status,
+                                  assignee_id, order_in_column)
+               VALUES ($1, $2, $3, $4, $5, 't', 'todo', $6, 1024.0)"#,
+        )
+        .bind(task)
+        .bind(pid)
+        .bind(board)
+        .bind(col)
+        .bind(&k)
+        .bind(owner)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+
+        sqlx::query(
+            r#"INSERT INTO git_links (id, task_id, provider, kind, external_ref, state)
+               VALUES ($1, $2, 'github', 'pull_request', $3, 'merged')"#,
+        )
+        .bind(Uuid::now_v7())
+        .bind(task)
+        .bind(format!("#{}", base + i))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn pr_wizard_counts_real_merged_prs(pool: PgPool) {
+    let u = make_user(&pool).await;
+
+    // Done tasks alone no longer count — only merged PRs do.
+    make_project_with_task_done(&pool, u, 60).await;
     let batches = scan_all(&pool).await.unwrap();
     let pr = batches.iter().find(|(c, _)| *c == "PR_WIZARD").unwrap();
-    assert_eq!(pr.1.len(), 1, "50 done tasks should trigger PR_WIZARD");
+    assert!(pr.1.is_empty(), "done tasks must not trigger PR_WIZARD");
+
+    // One below the threshold.
+    make_merged_prs(&pool, u, 0, 24).await;
+    let batches = scan_all(&pool).await.unwrap();
+    let pr = batches.iter().find(|(c, _)| *c == "PR_WIZARD").unwrap();
+    assert!(pr.1.is_empty(), "24 merged PRs is below the bar");
+
+    // Top up to the threshold (refs #24 — distinct from the first batch).
+    make_merged_prs(&pool, u, 24, 1).await;
+    let batches = scan_all(&pool).await.unwrap();
+    let pr = batches.iter().find(|(c, _)| *c == "PR_WIZARD").unwrap();
+    assert_eq!(pr.1.len(), 1, "25 merged PRs earns it");
     assert_eq!(pr.1[0].0, u);
+    assert_eq!(pr.1[0].1["count"], 25);
 }
 
 #[sqlx::test(migrations = "./migrations")]
