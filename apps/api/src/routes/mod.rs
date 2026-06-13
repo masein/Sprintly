@@ -26,6 +26,7 @@ pub mod tasks;
 pub mod templates;
 pub mod time_logs;
 pub mod timesheets;
+pub mod two_factor;
 pub mod users;
 pub mod vault;
 pub mod webhooks;

@@ -33,6 +33,10 @@ pub fn reset_ip_per_hour() -> u32 {
 pub fn reset_email_per_hour() -> u32 {
     env_u32("SPRINTLY_RL_RESET_EMAIL_PER_HOUR", 5)
 }
+/// Second-factor (TOTP / recovery code) attempts allowed per minute, per user.
+pub fn twofa_per_min() -> u32 {
+    env_u32("SPRINTLY_RL_2FA_PER_MIN", 10)
+}
 
 /// Core fixed-window check against any Redis connection. Testable without the
 /// full `AppState` (see `tests/rate_limit.rs`).

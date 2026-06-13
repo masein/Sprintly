@@ -18,6 +18,9 @@ pub struct Config {
     pub public_url: String,
     pub api_bind: SocketAddr,
     pub open_signup: bool,
+    /// When true, the UI nudges every user to enrol in 2FA (F11). Enforcement
+    /// is advisory — users still need access to reach settings and enrol.
+    pub require_2fa: bool,
 
     pub database_url: String,
     pub redis_url: String,
@@ -130,6 +133,9 @@ impl Config {
             open_signup: optional(&get, "SPRINTLY_OPEN_SIGNUP")
                 .map(|v| v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
+            require_2fa: optional(&get, "SPRINTLY_REQUIRE_2FA")
+                .map(|v| v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
 
             database_url: required(&get, "DATABASE_URL")?,
             redis_url: required(&get, "REDIS_URL")?,
@@ -179,6 +185,7 @@ impl Config {
             format!("public_url       = {}", self.public_url),
             format!("api_bind         = {}", self.api_bind),
             format!("open_signup      = {}", self.open_signup),
+            format!("require_2fa      = {}", self.require_2fa),
             format!("jwt_secret_bytes = {}", self.auth.jwt_secret.len()),
             format!("vault_key_bytes  = 32 (version {})", self.vault.key_version),
             format!("database_url     = {}", mask_url(&self.database_url)),

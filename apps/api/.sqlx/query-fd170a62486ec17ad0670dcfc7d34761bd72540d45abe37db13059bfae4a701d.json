@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id            AS \"id!: Uuid\",\n               password_hash AS \"password_hash!: String\",\n               role          AS \"role!: String\",\n               status        AS \"status!: String\"\n        FROM   users\n        WHERE  email = $1 AND deleted_at IS NULL\n        ",
+  "query": "\n        SELECT id               AS \"id!: Uuid\",\n               password_hash    AS \"password_hash!: String\",\n               role             AS \"role!: String\",\n               status           AS \"status!: String\",\n               totp_enrolled_at AS \"totp_enrolled_at?: chrono::DateTime<chrono::Utc>\"\n        FROM   users\n        WHERE  email = $1 AND deleted_at IS NULL\n        ",
   "describe": {
     "columns": [
       {
@@ -22,6 +22,11 @@
         "ordinal": 3,
         "name": "status!: String",
         "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "totp_enrolled_at?: chrono::DateTime<chrono::Utc>",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
@@ -38,8 +43,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "ee85271df205f18027e554b1db8245bc3e0aac5877675557ac159d239d8eb9a2"
+  "hash": "fd170a62486ec17ad0670dcfc7d34761bd72540d45abe37db13059bfae4a701d"
 }

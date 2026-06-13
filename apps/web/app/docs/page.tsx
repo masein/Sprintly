@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, Rows3, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, Rows3, ShieldCheck, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -160,6 +160,25 @@ export default function DocsPage() {
               formatted message posted to their webhook URL. Pick which board
               events fire it, hit <span className="mono">send test</span>, and
               every attempt — code, retry, error — shows in the deliveries list.
+            </p>
+          </Section>
+
+          <Section icon={ShieldCheck} title="Two-factor auth">
+            <p>
+              Turn on <span className="mono">two-factor</span> in{" "}
+              <span className="mono">/settings</span>: scan the QR with any
+              authenticator app (or type the setup key), confirm one code, and
+              save the <span className="mono">recovery codes</span> we show once.
+              After that, signing in asks for a 6-digit code on top of your
+              password. Codes are standard <span className="mono">TOTP</span> —
+              SHA1, 6 digits, 30s — so Google Authenticator, 1Password, Authy,
+              anything works, with ±30s of clock slack.
+            </p>
+            <p>
+              Lost your phone? Each recovery code works exactly once, at the
+              code prompt or to turn 2FA off. Wrong codes are rate-limited.
+              Admins can set <span className="mono">SPRINTLY_REQUIRE_2FA</span>{" "}
+              to nudge everyone to enrol.
             </p>
           </Section>
 

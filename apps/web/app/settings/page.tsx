@@ -12,6 +12,7 @@ import Link from "next/link";
 import { me, type Me, type ApiError } from "@/lib/auth-bundle";
 import { api } from "@/lib/api";
 import { ApiTokensSection } from "@/components/ApiTokensSection";
+import { TwoFactorSection } from "@/components/TwoFactorSection";
 import { setTheme as applyTheme, type Theme } from "@/lib/theme";
 
 const THEMES = ["midnight", "daylight", "solarized_dusk", "terminal_green", "hot_pink"] as const;
@@ -184,6 +185,8 @@ export default function SettingsPage() {
           </Link>
         </div>
       </form>
+
+      <TwoFactorSection />
 
       <ApiTokensSection />
     </Shell>

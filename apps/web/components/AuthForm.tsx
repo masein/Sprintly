@@ -6,7 +6,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { login, register, type ApiError } from "@/lib/auth-bundle";
+import {
+  login,
+  register,
+  twoFactorLogin,
+  isTwoFactorChallenge,
+  type ApiError,
+} from "@/lib/auth-bundle";
 
 type Mode = "login" | "register";
 
@@ -19,6 +25,14 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [invite, setInvite] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set once the password step succeeds but the account needs a second factor.
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+
+  function done() {
+    router.push("/");
+    router.refresh();
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -26,7 +40,12 @@ export function AuthForm({ mode }: { mode: Mode }) {
     setError(null);
     try {
       if (mode === "login") {
-        await login({ email, password });
+        const res = await login({ email, password });
+        if (isTwoFactorChallenge(res)) {
+          // Hold here — switch to the code step instead of navigating.
+          setChallenge(res.challenge);
+          return;
+        }
       } else {
         await register({
           email,
@@ -36,14 +55,80 @@ export function AuthForm({ mode }: { mode: Mode }) {
           invite_token: invite || undefined,
         });
       }
-      router.push("/");
-      router.refresh();
+      done();
     } catch (err) {
       const apiErr = err as unknown as ApiError;
       setError(humanize(apiErr, mode));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function onSubmit2fa(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await twoFactorLogin(challenge!, code.trim());
+      done();
+    } catch (err) {
+      const apiErr = err as unknown as ApiError;
+      setError(
+        apiErr.code === "rate_limited"
+          ? "Too many attempts. Wait a minute, then try again."
+          : "That code didn't work. Try again, or use a recovery code.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Second-factor step: shown after a correct password on a 2FA account.
+  if (challenge) {
+    return (
+      <form onSubmit={onSubmit2fa} className="space-y-5">
+        <p className="text-sm text-chrome-dim">
+          Enter the 6-digit code from your authenticator app. Lost your phone?
+          Type one of your recovery codes instead.
+        </p>
+        <Field
+          label="Authentication code"
+          value={code}
+          onChange={setCode}
+          placeholder="123456"
+          autoComplete="one-time-code"
+          mono
+          autoFocus
+          required
+        />
+        {error && (
+          <div
+            role="alert"
+            className="mono rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200"
+          >
+            {error}
+          </div>
+        )}
+        <button
+          type="submit"
+          disabled={submitting || !code.trim()}
+          className="mono w-full rounded bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {submitting ? "checking…" : "$ verify"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setChallenge(null);
+            setCode("");
+            setError(null);
+          }}
+          className="mono w-full text-xs text-chrome-dim hover:text-chrome"
+        >
+          ← back
+        </button>
+      </form>
+    );
   }
 
   return (

@@ -495,8 +495,8 @@ rejected, domain not allowed rejected. Unit: claim→user mapping.
 
 ---
 
-### `[ ]` F11 — Two-factor auth (TOTP, WebAuthn later)
-**PR:** _none yet_ · **Depends on:** none · **Size:** M
+### `[x]` F11 — Two-factor auth (TOTP, WebAuthn later)
+**PR:** #56 · **Depends on:** none · **Size:** M
 
 **Goal:** Optional TOTP second factor; recovery codes.
 
