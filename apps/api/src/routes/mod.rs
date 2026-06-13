@@ -6,6 +6,7 @@ pub mod admin_panel;
 pub mod api_tokens;
 pub mod auth;
 pub mod backups;
+pub mod board_views;
 pub mod boards;
 pub mod dashboards;
 pub mod fields;

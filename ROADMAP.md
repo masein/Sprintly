@@ -393,8 +393,8 @@ type validation. Unit: filter DSL parsing for labels/fields.
 
 ---
 
-### `[ ]` F8 — Saved filters / board views / swimlanes
-**PR:** _none yet_ · **Depends on:** F7 · **Size:** M
+### `[x]` F8 — Saved filters / board views / swimlanes
+**PR:** #53 · **Depends on:** F7 · **Size:** M
 
 **Goal:** Named, shareable board views with grouping (swimlanes) and filters.
 
