@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Book, GitBranch, KeyRound, ListChecks, TerminalSquare, Vault, Coffee, Sparkles } from "lucide-react";
+import { Book, GitBranch, KeyRound, ListChecks, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -104,6 +104,19 @@ export default function DocsPage() {
               The other direction too: CI check and pipeline results land on
               the task as a pass / fail / pending chip on the linked PR — icon
               and label, not just a colour.
+            </p>
+          </Section>
+
+          <Section icon={Webhook} title="Webhooks">
+            <p>
+              Per-project, from the <span className="mono">webhooks</span> button
+              on the board. A <span className="mono">generic</span> target gets
+              signed JSON (verify <span className="mono">X-Sprintly-Signature:
+              sha256=…</span> against your secret); <span className="mono">slack
+              </span> and <span className="mono">discord</span> targets get a
+              formatted message posted to their webhook URL. Pick which board
+              events fire it, hit <span className="mono">send test</span>, and
+              every attempt — code, retry, error — shows in the deliveries list.
             </p>
           </Section>
 

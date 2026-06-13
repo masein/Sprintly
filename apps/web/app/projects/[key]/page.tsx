@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { Archive, ArchiveRestore, GitBranch, ListChecks, Pencil, Tags } from "lucide-react";
+import { Archive, ArchiveRestore, GitBranch, ListChecks, Pencil, Tags, Webhook } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Board } from "@/components/Board";
 import { FieldsManager } from "@/components/FieldsManager";
 import { GitIntegrationsManager } from "@/components/GitIntegrationsManager";
 import { LabelsManager } from "@/components/LabelsManager";
+import { WebhooksManager } from "@/components/WebhooksManager";
 import { projectIcon } from "@/components/CreateProjectModal";
 import {
   archiveProject,
@@ -33,6 +34,7 @@ export default function ProjectPage() {
   const [showLabels, setShowLabels] = useState(false);
   const [showFields, setShowFields] = useState(false);
   const [showGit, setShowGit] = useState(false);
+  const [showWebhooks, setShowWebhooks] = useState(false);
 
   async function reload() {
     try {
@@ -187,6 +189,16 @@ export default function ProjectPage() {
         {canManage && (
           <button
             type="button"
+            onClick={() => setShowWebhooks(true)}
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          >
+            <Webhook size={14} /> webhooks
+          </button>
+        )}
+
+        {canManage && (
+          <button
+            type="button"
             onClick={async () => {
               try {
                 if (project.archived_at) await unarchiveProject(project.key);
@@ -217,6 +229,10 @@ export default function ProjectPage() {
 
       {showGit && (
         <GitIntegrationsManager projectKey={project.key} onClose={() => setShowGit(false)} />
+      )}
+
+      {showWebhooks && (
+        <WebhooksManager projectKey={project.key} onClose={() => setShowWebhooks(false)} />
       )}
 
       {defaultBoard ? (
