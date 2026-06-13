@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Book, GanttChartSquare, GitBranch, KeyRound, ListChecks, Rows3, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, Rows3, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -49,6 +49,20 @@ export default function DocsPage() {
               audit-logged. Clipboard copies auto-clear after 30 seconds. Don&apos;t
               put the actual secret in the description field — there&apos;s a field
               for that further down.
+            </p>
+          </Section>
+
+          <Section icon={FileStack} title="Templates, recurrence & the backlog">
+            <p>
+              Save a task skeleton as a <span className="mono">template</span>{" "}
+              (from the project header) and spawn a task from it whenever. Give
+              one a <span className="mono">repeat</span> —{" "}
+              <span className="mono">daily / weekly / monthly</span> — and a
+              background worker drops a fresh task each interval (it catches up
+              without spamming if it falls behind). The{" "}
+              <span className="mono">backlog</span> (everything with no sprint)
+              has multi-select: tick a few, then assign, drop into a sprint, or
+              delete them in one action.
             </p>
           </Section>
 

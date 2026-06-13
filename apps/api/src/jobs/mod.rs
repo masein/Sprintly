@@ -23,6 +23,8 @@ use crate::domain::achievements;
 
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
 const ACHIEVEMENT_SCAN_EVERY_SECS: i64 = 300;
+/// How often the worker materialises due recurring templates (F9).
+const TEMPLATE_MATERIALIZE_EVERY_SECS: i64 = 300;
 
 /// Spawn the worker on the runtime. Returns immediately. The task runs for
 /// the lifetime of the process; on shutdown the runtime cancels it. The vault
@@ -50,22 +52,20 @@ pub fn spawn(pool: PgPool, vault_master_key: [u8; 32]) {
 }
 
 async fn ensure_seed_jobs(pool: &PgPool) -> anyhow::Result<()> {
-    // Insert the achievement scan if no row of that kind exists yet.
-    let n: i64 = sqlx::query_scalar(
-        r#"SELECT COUNT(*) FROM jobs WHERE kind = 'scan_achievements' AND finished_at IS NULL"#,
-    )
-    .fetch_one(pool)
-    .await?;
-    if n == 0 {
-        sqlx::query(
-            r#"
-            INSERT INTO jobs (id, kind, run_at)
-            VALUES ($1, 'scan_achievements', now())
-            "#,
-        )
-        .bind(Uuid::now_v7())
-        .execute(pool)
-        .await?;
+    // One self-re-enqueuing row per periodic kind.
+    for kind in ["scan_achievements", "materialize_templates"] {
+        let n: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE kind = $1 AND finished_at IS NULL")
+                .bind(kind)
+                .fetch_one(pool)
+                .await?;
+        if n == 0 {
+            sqlx::query("INSERT INTO jobs (id, kind, run_at) VALUES ($1, $2, now())")
+                .bind(Uuid::now_v7())
+                .bind(kind)
+                .execute(pool)
+                .await?;
+        }
     }
     Ok(())
 }
@@ -106,6 +106,7 @@ async fn run_one(pool: &PgPool, vault_master_key: &[u8; 32]) -> anyhow::Result<b
         "create_backup" => run_create_backup(pool, id).await,
         "deliver_webhook" => run_deliver_webhook(pool, id, vault_master_key).await,
         "push_commit_status" => run_push_commit_status(pool, id, vault_master_key).await,
+        "materialize_templates" => run_materialize_templates(pool).await,
         other => Err(anyhow::anyhow!("unknown job kind: {other}")),
     };
 
@@ -271,6 +272,18 @@ async fn mark_backup_failed(pool: &PgPool, id: Uuid, msg: &str) -> anyhow::Resul
     .bind(msg)
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+/// Spawn a task for every recurring template whose next run is due (F9).
+async fn run_materialize_templates(pool: &PgPool) -> anyhow::Result<()> {
+    let made = crate::domain::templates::materialise_due(pool, chrono::Utc::now()).await?;
+    if !made.is_empty() {
+        info!(
+            count = made.len(),
+            "templates: materialised recurring tasks"
+        );
+    }
     Ok(())
 }
 
@@ -557,16 +570,20 @@ async fn finish_ok(pool: &PgPool, id: Uuid, kind: &str) -> anyhow::Result<()> {
         .bind(id)
         .execute(pool)
         .await?;
-    // Re-enqueue the achievement scan after a 5-minute cooldown.
-    if kind == "scan_achievements" {
+    // Periodic kinds re-enqueue themselves after a cooldown.
+    let cooldown = match kind {
+        "scan_achievements" => Some(ACHIEVEMENT_SCAN_EVERY_SECS),
+        "materialize_templates" => Some(TEMPLATE_MATERIALIZE_EVERY_SECS),
+        _ => None,
+    };
+    if let Some(secs) = cooldown {
         sqlx::query(
-            r#"
-            INSERT INTO jobs (id, kind, run_at)
-            VALUES ($1, 'scan_achievements', now() + ($2::int || ' seconds')::interval)
-            "#,
+            r#"INSERT INTO jobs (id, kind, run_at)
+               VALUES ($1, $2, now() + ($3::int || ' seconds')::interval)"#,
         )
         .bind(Uuid::now_v7())
-        .bind(ACHIEVEMENT_SCAN_EVERY_SECS as i32)
+        .bind(kind)
+        .bind(secs as i32)
         .execute(pool)
         .await?;
     }

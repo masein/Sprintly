@@ -430,8 +430,8 @@ progress rollup. e2e: timeline renders an epic bar.
 
 ---
 
-### `[ ]` F9 — Recurring tasks & templates + backlog/bulk ops
-**PR:** _none yet_ · **Depends on:** none · **Size:** M
+### `[x]` F9 — Recurring tasks & templates + backlog/bulk ops
+**PR:** #55 · **Depends on:** none · **Size:** M
 
 **Goal:** Reduce repetitive setup; manage the backlog efficiently.
 
