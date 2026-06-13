@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.assignee_id AS \"user_id?: Uuid\",\n               COUNT(DISTINCT gl.provider || ':' || gl.external_ref)::bigint AS \"n!: i64\"\n        FROM   git_links gl\n        JOIN   tasks t ON t.id = gl.task_id AND t.deleted_at IS NULL\n        WHERE  gl.kind = 'pull_request' AND gl.state = 'merged'\n          AND  t.assignee_id IS NOT NULL\n        GROUP  BY t.assignee_id\n        HAVING COUNT(DISTINCT gl.provider || ':' || gl.external_ref) >= $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id?: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "n!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "a1c813c15213fef9b50b179c516f81420c70710681814e0cce47ac488a2c5b77"
+}

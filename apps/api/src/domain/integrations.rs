@@ -3,30 +3,22 @@
 //! (ADR 0001).
 
 use chrono::{DateTime, Utc};
-use hmac::{Hmac, Mac};
 use serde::Serialize;
 use serde_json::json;
-use sha2::Sha256;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::{
-    domain::vault::{decrypt, encrypt, ProjectKey},
+    domain::{
+        git_providers::GitEvent,
+        vault::{decrypt, encrypt, ProjectKey},
+    },
     AppError, AppResult,
 };
 
 /// git_integrations secrets are bound to key version 1, same as webhook
 /// signing secrets (see `run_deliver_webhook`).
 const KEY_VERSION: i32 = 1;
-
-fn hex_encode(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(s, "{b:02x}");
-    }
-    s
-}
 
 /// Extract Sprintly task keys (e.g. `DEMO-1`, `WEB2-42`) from free text such as
 /// a commit message or PR title. A key is `[A-Z][A-Z0-9]{1,9}-[0-9]+` at a word
@@ -70,24 +62,6 @@ pub fn parse_task_keys(text: &str) -> Vec<String> {
     out
 }
 
-/// Verify a GitHub `X-Hub-Signature-256` header (`sha256=<hex>`) against the raw
-/// request body using the shared secret. Constant-time comparison.
-pub fn verify_github_signature(secret: &str, body: &[u8], header: &str) -> bool {
-    let Some(hex) = header.strip_prefix("sha256=") else {
-        return false;
-    };
-    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(secret.as_bytes()) else {
-        return false;
-    };
-    mac.update(body);
-    let expected = hex_encode(&mac.finalize().into_bytes());
-    if expected.len() != hex.len() {
-        return false;
-    }
-    use subtle::ConstantTimeEq;
-    expected.as_bytes().ct_eq(hex.as_bytes()).into()
-}
-
 /// Resolve a task by key and upsert a git link to it, dropping an activity-feed
 /// entry when warranted. Returns whether a link was newly created. Unresolved
 /// task keys are silently skipped (return `false`).
@@ -98,6 +72,7 @@ pub fn verify_github_signature(secret: &str, body: &[u8], header: &str) -> bool 
 #[allow(clippy::too_many_arguments)]
 pub async fn link(
     db: &PgPool,
+    provider: &str,
     project_scope: Option<Uuid>,
     task_key: &str,
     kind: &str,
@@ -124,7 +99,7 @@ pub async fn link(
     let inserted: bool = sqlx::query_scalar(
         r#"
         INSERT INTO git_links (id, task_id, provider, kind, external_ref, url, title, state, sha)
-        VALUES ($1, $2, 'github', $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT (task_id, provider, kind, external_ref) DO UPDATE
             SET state = EXCLUDED.state, url = EXCLUDED.url,
                 title = EXCLUDED.title, sha = COALESCE(EXCLUDED.sha, git_links.sha),
@@ -134,6 +109,7 @@ pub async fn link(
     )
     .bind(Uuid::now_v7())
     .bind(task_id)
+    .bind(provider)
     .bind(kind)
     .bind(ext_ref)
     .bind(url)
@@ -143,16 +119,19 @@ pub async fn link(
     .fetch_one(db)
     .await?;
 
-    // Announce a merge whenever it happens, and a link the first time it's seen;
-    // repeated open/synchronize events stay quiet.
+    // Announce a merge whenever it happens, and a link the first time it's
+    // seen; repeated open/synchronize events stay quiet. Branches use the
+    // generic 'linked' kind (no PR-specific activity row).
     let activity_kind = if pr_state == Some("merged") {
         Some("pr_merged")
-    } else if inserted && kind == "commit" {
-        Some("commit_linked")
-    } else if inserted {
-        Some("pr_linked")
-    } else {
+    } else if !inserted {
         None
+    } else if kind == "commit" {
+        Some("commit_linked")
+    } else if kind == "branch" {
+        Some("linked")
+    } else {
+        Some("pr_linked")
     };
     if let Some(ak) = activity_kind {
         sqlx::query(
@@ -227,6 +206,90 @@ async fn transition_to_done(db: &PgPool, task_id: Uuid) -> AppResult<()> {
         .await?;
     }
     Ok(())
+}
+
+/// Turn neutral provider events into task links — the shared core that every
+/// inbound webhook funnels through (ADR 0001). Branch pushes link by branch
+/// name; commits by message (short SHA as the ref, full SHA stored); PR/MR
+/// events by `#number` carrying state + head SHA. `scope` confines linking to
+/// one project (per-connection webhooks) or `None` (legacy global secret).
+/// Returns the count of newly-created links.
+pub async fn apply_events(
+    db: &PgPool,
+    provider: &str,
+    scope: Option<Uuid>,
+    events: &[GitEvent],
+) -> AppResult<usize> {
+    let mut linked = 0;
+    for event in events {
+        match event {
+            GitEvent::Push { branch, commits } => {
+                if let Some(branch) = branch {
+                    for key in parse_task_keys(branch) {
+                        if link(
+                            db, provider, scope, &key, "branch", branch, None, None, None, None,
+                        )
+                        .await?
+                        {
+                            linked += 1;
+                        }
+                    }
+                }
+                for c in commits {
+                    let short = c.sha.get(..7).unwrap_or(&c.sha);
+                    let title = c.message.lines().next().unwrap_or("");
+                    for key in parse_task_keys(&c.message) {
+                        if link(
+                            db,
+                            provider,
+                            scope,
+                            &key,
+                            "commit",
+                            short,
+                            c.url.as_deref(),
+                            Some(title),
+                            None,
+                            Some(&c.sha),
+                        )
+                        .await?
+                        {
+                            linked += 1;
+                        }
+                    }
+                }
+            }
+            GitEvent::PullRequest {
+                number,
+                title,
+                body,
+                url,
+                state,
+                head_sha,
+            } => {
+                let ext_ref = format!("#{number}");
+                let text = format!("{title} {body}");
+                for key in parse_task_keys(&text) {
+                    if link(
+                        db,
+                        provider,
+                        scope,
+                        &key,
+                        "pull_request",
+                        &ext_ref,
+                        url.as_deref(),
+                        Some(title),
+                        Some(state.as_str()),
+                        head_sha.as_deref(),
+                    )
+                    .await?
+                    {
+                        linked += 1;
+                    }
+                }
+            }
+        }
+    }
+    Ok(linked)
 }
 
 // ─── per-project provider connections (ADR 0001) ────────────────────────────
@@ -509,18 +572,5 @@ mod tests {
             parse_task_keys("not a key: ABC- or ABC-x"),
             Vec::<String>::new()
         );
-    }
-
-    #[test]
-    fn signature_round_trips() {
-        let secret = "s3cr3t";
-        let body = br#"{"hello":"world"}"#;
-        let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
-        mac.update(body);
-        let header = format!("sha256={}", hex_encode(&mac.finalize().into_bytes()));
-        assert!(verify_github_signature(secret, body, &header));
-        assert!(!verify_github_signature("wrong", body, &header));
-        assert!(!verify_github_signature(secret, b"tampered", &header));
-        assert!(!verify_github_signature(secret, body, "nope"));
     }
 }

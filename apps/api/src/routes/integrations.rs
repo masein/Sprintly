@@ -22,13 +22,13 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{
     domain::{
-        git_providers::Provider,
+        git_providers::{self, Provider},
         integrations,
         permissions::{can, Action},
         projects as project_ctx,
@@ -275,29 +275,21 @@ async fn integration_webhook(
         integrations::decrypt_webhook_secret(&state.db, &state.cfg.vault.master_key, id).await?;
     let secret = secret.ok_or(AppError::Unauthorized)?;
 
-    match provider {
-        Provider::Github => {
-            let sig = headers
-                .get("x-hub-signature-256")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            if !integrations::verify_github_signature(&secret, &body, sig) {
-                return Err(AppError::Unauthorized);
-            }
-            let event = headers
-                .get("x-github-event")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            let payload: Value = serde_json::from_slice(&body)
-                .map_err(|_| AppError::BadRequest("invalid JSON body".into()))?;
-            let linked = dispatch_github_event(&state, Some(project_id), event, &payload).await?;
-            Ok((StatusCode::OK, Json(json!({ "linked": linked }))))
-        }
-        // GitLab/Gitea inbound land with the multi-provider slice.
-        _ => Err(AppError::BadRequest(
-            "inbound webhooks for this provider aren't wired up yet".into(),
-        )),
+    let presented = headers
+        .get(provider.signature_header())
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !git_providers::verify_signature(provider, &secret, presented, &body) {
+        return Err(AppError::Unauthorized);
     }
+    let event_type = headers
+        .get(provider.event_header())
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let events = git_providers::parse_event(provider, event_type, &body)?;
+    let linked =
+        integrations::apply_events(&state.db, provider.as_str(), Some(project_id), &events).await?;
+    Ok((StatusCode::OK, Json(json!({ "linked": linked }))))
 }
 
 /// Legacy global-secret route. Disabled unless `SPRINTLY_GITHUB_WEBHOOK_SECRET`
@@ -314,113 +306,18 @@ async fn github_webhook_legacy(
         .as_deref()
         .ok_or(AppError::NotFound)?;
 
-    let sig = headers
-        .get("x-hub-signature-256")
+    let presented = headers
+        .get(Provider::Github.signature_header())
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if !integrations::verify_github_signature(secret, &body, sig) {
+    if !git_providers::verify_signature(Provider::Github, secret, presented, &body) {
         return Err(AppError::Unauthorized);
     }
-
-    let event = headers
-        .get("x-github-event")
+    let event_type = headers
+        .get(Provider::Github.event_header())
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let payload: Value = serde_json::from_slice(&body)
-        .map_err(|_| AppError::BadRequest("invalid JSON body".into()))?;
-
-    let linked = dispatch_github_event(&state, None, event, &payload).await?;
+    let events = git_providers::parse_event(Provider::Github, event_type, &body)?;
+    let linked = integrations::apply_events(&state.db, "github", None, &events).await?;
     Ok((StatusCode::OK, Json(json!({ "linked": linked }))))
-}
-
-async fn dispatch_github_event(
-    state: &AppState,
-    scope: Option<Uuid>,
-    event: &str,
-    payload: &Value,
-) -> AppResult<usize> {
-    Ok(match event {
-        "ping" => 0,
-        "push" => handle_push(state, scope, payload).await?,
-        "pull_request" => handle_pull_request(state, scope, payload).await?,
-        _ => 0, // event we don't act on
-    })
-}
-
-async fn handle_push(state: &AppState, scope: Option<Uuid>, payload: &Value) -> AppResult<usize> {
-    let mut linked = 0;
-    let commits = payload.get("commits").and_then(|c| c.as_array());
-    for commit in commits.into_iter().flatten() {
-        let message = commit.get("message").and_then(|v| v.as_str()).unwrap_or("");
-        let id = commit.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let url = commit.get("url").and_then(|v| v.as_str());
-        let short = id.get(..7).unwrap_or(id);
-        let title = message.lines().next().unwrap_or("");
-        for key in integrations::parse_task_keys(message) {
-            if integrations::link(
-                &state.db,
-                scope,
-                &key,
-                "commit",
-                short,
-                url,
-                Some(title),
-                None,
-                Some(id),
-            )
-            .await?
-            {
-                linked += 1;
-            }
-        }
-    }
-    Ok(linked)
-}
-
-async fn handle_pull_request(
-    state: &AppState,
-    scope: Option<Uuid>,
-    payload: &Value,
-) -> AppResult<usize> {
-    let pr = payload.get("pull_request").cloned().unwrap_or(Value::Null);
-    let action = payload.get("action").and_then(|v| v.as_str()).unwrap_or("");
-    let number = pr.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-    let title = pr.get("title").and_then(|v| v.as_str()).unwrap_or("");
-    let pr_body = pr.get("body").and_then(|v| v.as_str()).unwrap_or("");
-    let url = pr.get("html_url").and_then(|v| v.as_str());
-    let merged = pr.get("merged").and_then(|v| v.as_bool()).unwrap_or(false);
-    let head_sha = pr
-        .get("head")
-        .and_then(|h| h.get("sha"))
-        .and_then(|v| v.as_str());
-
-    let state_str = if merged {
-        "merged"
-    } else if action == "closed" {
-        "closed"
-    } else {
-        "open"
-    };
-    let ext_ref = format!("#{number}");
-    let text = format!("{title} {pr_body}");
-
-    let mut linked = 0;
-    for key in integrations::parse_task_keys(&text) {
-        if integrations::link(
-            &state.db,
-            scope,
-            &key,
-            "pull_request",
-            &ext_ref,
-            url,
-            Some(title),
-            Some(state_str),
-            head_sha,
-        )
-        .await?
-        {
-            linked += 1;
-        }
-    }
-    Ok(linked)
 }

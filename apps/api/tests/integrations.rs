@@ -1,8 +1,12 @@
 //! F1 — Git integration: linking commits/PRs to tasks, provider connections,
-//! and outbound status job enqueueing. (Signature verification, key parsing,
-//! and status-request shapes are unit-tested in the domain modules.)
+//! multi-provider inbound (GitHub + GitLab fixtures), and outbound status job
+//! enqueueing. (Pure signature/parse/status-request shapes are unit-tested in
+//! the domain modules.)
 
-use sprintly_api::domain::integrations;
+use sprintly_api::domain::{
+    git_providers::{self, Provider},
+    integrations,
+};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -89,6 +93,7 @@ async fn link_creates_then_dedupes(pool: PgPool) {
 
     let first = integrations::link(
         &pool,
+        "github",
         None,
         "GH-1",
         "commit",
@@ -104,6 +109,7 @@ async fn link_creates_then_dedupes(pool: PgPool) {
 
     let second = integrations::link(
         &pool,
+        "github",
         None,
         "GH-1",
         "commit",
@@ -142,7 +148,7 @@ async fn link_creates_then_dedupes(pool: PgPool) {
 async fn unknown_key_is_noop(pool: PgPool) {
     make_task(&pool, "GH-1").await;
     let r = integrations::link(
-        &pool, None, "NOPE-9", "commit", "abc", None, None, None, None,
+        &pool, "github", None, "NOPE-9", "commit", "abc", None, None, None, None,
     )
     .await
     .unwrap();
@@ -154,6 +160,7 @@ async fn pr_merge_updates_state_and_logs(pool: PgPool) {
     let task = make_task(&pool, "GH-1").await;
     integrations::link(
         &pool,
+        "github",
         None,
         "GH-1",
         "pull_request",
@@ -167,6 +174,7 @@ async fn pr_merge_updates_state_and_logs(pool: PgPool) {
     .unwrap();
     integrations::link(
         &pool,
+        "github",
         None,
         "GH-1",
         "pull_request",
@@ -297,6 +305,7 @@ async fn status_jobs_enqueue_only_when_eligible(pool: PgPool) {
     // No integration yet: linking a commit (with SHA) enqueues nothing.
     integrations::link(
         &pool,
+        "github",
         None,
         "GH-1",
         "commit",
@@ -349,6 +358,7 @@ async fn project_scope_confines_linking(pool: PgPool) {
     // A scope that doesn't own GH-1 can't link it.
     let r = integrations::link(
         &pool,
+        "github",
         Some(other_project),
         "GH-1",
         "commit",
@@ -370,6 +380,7 @@ async fn project_scope_confines_linking(pool: PgPool) {
         .unwrap();
     let r = integrations::link(
         &pool,
+        "github",
         Some(project_id),
         "GH-1",
         "commit",
@@ -444,4 +455,146 @@ async fn webhook_secret_round_trips_and_update_clears_token(pool: PgPool) {
             .unwrap();
     assert!(!up.has_api_token, "explicit null clears the token");
     assert!(up.status_enabled, "untouched fields stay put");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn gitlab_merge_request_fixture_links_and_transitions(pool: PgPool) {
+    let task = make_task(&pool, "GH-1").await;
+    let project_id: Uuid = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = $1")
+        .bind(task)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // A realistic GitLab "Merge Request Hook" payload referencing GH-1.
+    let body = br#"{
+        "object_kind": "merge_request",
+        "object_attributes": {
+            "iid": 9,
+            "title": "GH-1 wire it up",
+            "description": "also touches GH-1",
+            "url": "https://gitlab.example/acme/app/-/merge_requests/9",
+            "state": "merged",
+            "last_commit": { "id": "abc123def4567890" }
+        }
+    }"#;
+
+    // Signature is a shared token; enforce it both ways.
+    assert!(git_providers::verify_signature(
+        Provider::Gitlab,
+        "gltoken",
+        "gltoken",
+        body
+    ));
+    assert!(!git_providers::verify_signature(
+        Provider::Gitlab,
+        "gltoken",
+        "nope",
+        body
+    ));
+
+    let events = git_providers::parse_event(Provider::Gitlab, "Merge Request Hook", body).unwrap();
+    let n = integrations::apply_events(&pool, "gitlab", Some(project_id), &events)
+        .await
+        .unwrap();
+    assert_eq!(n, 1, "one PR link created from the fixture");
+
+    let (provider, state, sha): (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT provider, state, sha FROM git_links WHERE task_id = $1 AND kind = 'pull_request'",
+    )
+    .bind(task)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(provider, "gitlab");
+    assert_eq!(state.as_deref(), Some("merged"));
+    assert_eq!(sha.as_deref(), Some("abc123def4567890"));
+
+    // Merge auto-transitioned the task to done.
+    let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
+        .bind(task)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "done");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn github_push_fixture_links_branch_and_commit(pool: PgPool) {
+    // AC1: pushing a branch named like a task key links it.
+    let task = make_task(&pool, "GH-1").await;
+    let project_id: Uuid = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = $1")
+        .bind(task)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let body = br#"{
+        "ref": "refs/heads/GH-1-add-thing",
+        "commits": [
+            { "id": "deadbeefcafebabe", "message": "GH-1 start work", "url": "http://c/1" }
+        ]
+    }"#;
+    let events = git_providers::parse_event(Provider::Github, "push", body).unwrap();
+    let n = integrations::apply_events(&pool, "github", Some(project_id), &events)
+        .await
+        .unwrap();
+    assert_eq!(n, 2, "branch + commit both link");
+
+    let kinds: Vec<String> =
+        sqlx::query_scalar("SELECT kind FROM git_links WHERE task_id = $1 ORDER BY kind")
+            .bind(task)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(kinds, vec!["branch".to_string(), "commit".to_string()]);
+
+    let branch_ref: String = sqlx::query_scalar(
+        "SELECT external_ref FROM git_links WHERE task_id = $1 AND kind = 'branch'",
+    )
+    .bind(task)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(branch_ref, "GH-1-add-thing");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn same_pr_number_distinct_per_provider(pool: PgPool) {
+    // The (task, provider, kind, ref) unique key lets GitHub #5 and GitLab !5
+    // coexist on one task without colliding.
+    let task = make_task(&pool, "GH-1").await;
+    let pid: Uuid = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = $1")
+        .bind(task)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let gh = git_providers::parse_event(
+        Provider::Github,
+        "pull_request",
+        br#"{"action":"opened","pull_request":{"number":5,"title":"GH-1 a","body":"","html_url":"http://gh/5","merged":false,"head":{"sha":"aa"}}}"#,
+    )
+    .unwrap();
+    let gl = git_providers::parse_event(
+        Provider::Gitlab,
+        "Merge Request Hook",
+        br#"{"object_attributes":{"iid":5,"title":"GH-1 b","description":"","url":"http://gl/5","state":"opened","last_commit":{"id":"bb"}}}"#,
+    )
+    .unwrap();
+    integrations::apply_events(&pool, "github", Some(pid), &gh)
+        .await
+        .unwrap();
+    integrations::apply_events(&pool, "gitlab", Some(pid), &gl)
+        .await
+        .unwrap();
+
+    let n: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM git_links WHERE task_id = $1 AND kind = 'pull_request'",
+    )
+    .bind(task)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 2, "both providers' PR #5 coexist");
 }
