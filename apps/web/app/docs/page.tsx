@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Book, GitBranch, KeyRound, ListChecks, Rows3, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { Book, GanttChartSquare, GitBranch, KeyRound, ListChecks, Rows3, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -49,6 +49,19 @@ export default function DocsPage() {
               audit-logged. Clipboard copies auto-clear after 30 seconds. Don&apos;t
               put the actual secret in the description field — there&apos;s a field
               for that further down.
+            </p>
+          </Section>
+
+          <Section icon={GanttChartSquare} title="Roadmap & timeline">
+            <p>
+              Each project has a <span className="mono">timeline</span> (linked
+              from the board header): group tasks into <span className="mono">epics
+              </span> — coloured, date-ranged bars that show{" "}
+              <span className="mono">done/total</span> progress — and drop{" "}
+              <span className="mono">milestones</span> as dated markers. Assign a
+              task to an epic from the task&apos;s sidebar. Dragging a bar to
+              reschedule is a v2 idea; for now, edit an epic&apos;s dates in its
+              row and the bar moves.
             </p>
           </Section>
 

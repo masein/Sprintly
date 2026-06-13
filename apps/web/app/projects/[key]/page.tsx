@@ -150,6 +150,12 @@ export default function ProjectPage() {
           sprints →
         </Link>
         <Link
+          href={`/projects/${project.key}/timeline`}
+          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+        >
+          timeline →
+        </Link>
+        <Link
           href={`/projects/${project.key}/vault`}
           className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
         >

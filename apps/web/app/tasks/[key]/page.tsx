@@ -20,6 +20,7 @@ import { FieldValuesPanel } from "@/components/FieldValuesPanel";
 import { GitLinksPanel } from "@/components/GitLinksPanel";
 import { TaskTimer } from "@/components/TaskTimer";
 import { deleteTask, editTask, getTask, type Task } from "@/lib/tasks";
+import { assignTaskEpic, listEpics } from "@/lib/roadmap";
 import { me } from "@/lib/auth-bundle";
 import { getProject } from "@/lib/projects";
 import type { ApiError } from "@/lib/api";
@@ -280,6 +281,7 @@ function Sidebar({ task, canEdit }: { task: Task; canEdit: boolean }) {
         options={canEdit ? TYPES.slice() : undefined}
         onChange={(v) => patch.mutate({ type: v as Task["type"] })}
       />
+      <EpicField task={task} canEdit={canEdit} />
       {task.due_date && <Field label="due" value={task.due_date} />}
       {task.estimate_minutes != null && (
         <Field label="estimate" value={`${task.estimate_minutes} min`} />
@@ -302,6 +304,47 @@ function Sidebar({ task, canEdit }: { task: Task; canEdit: boolean }) {
         </div>
       )}
     </section>
+  );
+}
+
+// The task's epic (F6). Read-only label for viewers; a select for editors.
+function EpicField({ task, canEdit }: { task: Task; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const epicsQ = useQuery({
+    queryKey: ["epics", task.project_key],
+    queryFn: () => listEpics(task.project_key),
+    retry: false,
+  });
+  const assign = useMutation({
+    mutationFn: (epicId: string | null) => assignTaskEpic(task.key, epicId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task", task.key] });
+      qc.invalidateQueries({ queryKey: ["epics", task.project_key] });
+    },
+  });
+  const epics = epicsQ.data ?? [];
+  const current = epics.find((e) => e.id === task.epic_id);
+
+  if (!canEdit) {
+    return current ? <Field label="epic" value={current.name} /> : null;
+  }
+  if (epics.length === 0) return null; // nothing to assign to yet
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">epic</span>
+      <select
+        value={task.epic_id ?? ""}
+        onChange={(e) => assign.mutate(e.target.value || null)}
+        aria-label="epic"
+        className="mono rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
+      >
+        <option value="">none</option>
+        {epics.map((e) => (
+          <option key={e.id} value={e.id}>{e.name}</option>
+        ))}
+      </select>
+    </div>
   );
 }
 
