@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Book, GitBranch, KeyRound, ListChecks, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { Book, GitBranch, KeyRound, ListChecks, Rows3, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -49,6 +49,22 @@ export default function DocsPage() {
               audit-logged. Clipboard copies auto-clear after 30 seconds. Don&apos;t
               put the actual secret in the description field — there&apos;s a field
               for that further down.
+            </p>
+          </Section>
+
+          <Section icon={Rows3} title="Board views & swimlanes">
+            <p>
+              Filter the board with chips, then group it into swimlanes by{" "}
+              <span className="mono">assignee</span>,{" "}
+              <span className="mono">label</span>, or{" "}
+              <span className="mono">priority</span> from the{" "}
+              <span className="mono">swimlanes</span> control. Save a filter +
+              grouping as a named <span className="mono">view</span> to reopen
+              later; tick <span className="mono">shared</span> and the rest of
+              the project can pick it too (yours to edit, theirs to use). In a
+              grouped view cards still drag between columns within their lane —
+              changing lane means changing the card&apos;s assignee, label, or
+              priority on the card itself.
             </p>
           </Section>
 
