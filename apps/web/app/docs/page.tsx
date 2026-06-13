@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, Rows3, ShieldCheck, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, LogIn, Rows3, ShieldCheck, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -160,6 +160,29 @@ export default function DocsPage() {
               formatted message posted to their webhook URL. Pick which board
               events fire it, hit <span className="mono">send test</span>, and
               every attempt — code, retry, error — shows in the deliveries list.
+            </p>
+          </Section>
+
+          <Section icon={LogIn} title="Single sign-on (OIDC)">
+            <p>
+              Point Sprintly at your identity provider — Authentik, Keycloak,
+              Google, anything that speaks <span className="mono">OIDC</span> —
+              with <span className="mono">SPRINTLY_OIDC_ISSUER</span>,{" "}
+              <span className="mono">_CLIENT_ID</span> and{" "}
+              <span className="mono">_CLIENT_SECRET</span>. A{" "}
+              <span className="mono">$ sso --login</span> button then appears on
+              the sign-in page. First login creates an account (or links to an
+              existing one by verified email); the flow uses{" "}
+              <span className="mono">auth-code + PKCE</span> with state and nonce
+              checks throughout.
+            </p>
+            <p>
+              Restrict who can get in with{" "}
+              <span className="mono">SPRINTLY_OIDC_ALLOWED_DOMAINS</span>{" "}
+              (comma-separated email domains). Password login keeps working
+              alongside SSO unless you set{" "}
+              <span className="mono">SPRINTLY_LOCAL_LOGIN_DISABLED=true</span> to
+              go SSO-only.
             </p>
           </Section>
 

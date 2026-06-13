@@ -11,6 +11,7 @@ pub mod integrations;
 pub mod labels;
 pub mod metrics;
 pub mod notifications;
+pub mod oidc;
 pub mod password;
 pub mod payroll;
 pub mod permissions;
