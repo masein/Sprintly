@@ -1,4 +1,10 @@
-//! Flow-metrics computation: lead time, weekly throughput, current WIP.
+//! Flow-metrics computation: lead time, cycle time, weekly throughput,
+//! current WIP.
+//!
+//! Lead time measures `created_at → completed_at` (the whole journey,
+//! backlog wait included); cycle time measures `started_at → completed_at`
+//! (active work only, from the first move into in_progress/review). Both are
+//! summarised as count + average + p50/p90 over the trailing window.
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Serialize;
@@ -7,8 +13,9 @@ use uuid::Uuid;
 
 use crate::AppResult;
 
+/// Count + average + percentile summary of a set of durations, in hours.
 #[derive(Debug, Serialize, FromRow)]
-pub struct LeadTime {
+pub struct DurationStats {
     pub count: i64,
     pub avg_hours: f64,
     pub p50_hours: f64,
@@ -31,7 +38,8 @@ pub struct Wip {
 #[derive(Debug, Serialize)]
 pub struct Metrics {
     pub weeks: i64,
-    pub lead_time: LeadTime,
+    pub lead_time: DurationStats,
+    pub cycle_time: DurationStats,
     pub throughput: Vec<ThroughputPoint>,
     pub wip: Wip,
 }
@@ -41,7 +49,7 @@ pub async fn compute(db: &PgPool, project_id: Uuid, weeks: i64) -> AppResult<Met
     let weeks = weeks.clamp(1, 52);
     let since: DateTime<Utc> = Utc::now() - Duration::weeks(weeks);
 
-    let lead_time: LeadTime = sqlx::query_as(
+    let lead_time: DurationStats = sqlx::query_as(
         r#"
         SELECT count(*)::int8 AS count,
                COALESCE(avg(EXTRACT(EPOCH FROM (completed_at - created_at)) / 3600.0), 0)::float8 AS avg_hours,
@@ -52,6 +60,27 @@ pub async fn compute(db: &PgPool, project_id: Uuid, weeks: i64) -> AppResult<Met
         FROM   tasks
         WHERE  project_id = $1 AND deleted_at IS NULL
           AND  completed_at IS NOT NULL AND completed_at >= $2
+        "#,
+    )
+    .bind(project_id)
+    .bind(since)
+    .fetch_one(db)
+    .await?;
+
+    // Cycle time: active work, started_at → completed_at. Only tasks that
+    // actually entered progress (started_at set) count.
+    let cycle_time: DurationStats = sqlx::query_as(
+        r#"
+        SELECT count(*)::int8 AS count,
+               COALESCE(avg(EXTRACT(EPOCH FROM (completed_at - started_at)) / 3600.0), 0)::float8 AS avg_hours,
+               COALESCE(percentile_cont(0.5) WITHIN GROUP (
+                   ORDER BY EXTRACT(EPOCH FROM (completed_at - started_at)) / 3600.0), 0)::float8 AS p50_hours,
+               COALESCE(percentile_cont(0.9) WITHIN GROUP (
+                   ORDER BY EXTRACT(EPOCH FROM (completed_at - started_at)) / 3600.0), 0)::float8 AS p90_hours
+        FROM   tasks
+        WHERE  project_id = $1 AND deleted_at IS NULL
+          AND  completed_at IS NOT NULL AND started_at IS NOT NULL
+          AND  completed_at >= $2
         "#,
     )
     .bind(project_id)
@@ -104,6 +133,7 @@ pub async fn compute(db: &PgPool, project_id: Uuid, weeks: i64) -> AppResult<Met
     Ok(Metrics {
         weeks,
         lead_time,
+        cycle_time,
         throughput,
         wip,
     })

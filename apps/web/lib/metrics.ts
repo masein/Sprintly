@@ -2,7 +2,7 @@
 
 import { api } from "./api";
 
-export type LeadTime = {
+export type DurationStats = {
   count: number;
   avg_hours: number;
   p50_hours: number;
@@ -15,7 +15,8 @@ export type Wip = { todo: number; in_progress: number; review: number };
 
 export type Metrics = {
   weeks: number;
-  lead_time: LeadTime;
+  lead_time: DurationStats;
+  cycle_time: DurationStats;
   throughput: ThroughputPoint[];
   wip: Wip;
 };

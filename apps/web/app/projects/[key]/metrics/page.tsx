@@ -1,6 +1,6 @@
 "use client";
 
-// Project flow metrics: lead time, throughput, WIP.
+// Project flow metrics: lead time, cycle time, throughput, WIP.
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -87,11 +87,43 @@ export default function MetricsPage() {
 
       {m && (
         <div className="space-y-6">
-          <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Tile label="completed" value={`${m.lead_time.count}`} />
-            <Tile label="avg lead" value={fmtHours(m.lead_time.avg_hours)} />
-            <Tile label="median lead" value={fmtHours(m.lead_time.p50_hours)} />
-            <Tile label="p90 lead" value={fmtHours(m.lead_time.p90_hours)} />
+          <section className="space-y-2">
+            <div className="mono flex items-center justify-between text-xs uppercase tracking-widest text-chrome-dim">
+              <span>lead time · created → done</span>
+              <span className="normal-case tracking-normal text-chrome-dim">
+                {m.lead_time.count} completed
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <Tile label="avg lead" value={fmtHours(m.lead_time.avg_hours)} />
+              <Tile label="median lead" value={fmtHours(m.lead_time.p50_hours)} />
+              <Tile label="p90 lead" value={fmtHours(m.lead_time.p90_hours)} />
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <div className="mono flex items-center justify-between text-xs uppercase tracking-widest text-chrome-dim">
+              <span>cycle time · started → done</span>
+              <span className="normal-case tracking-normal text-chrome-dim">
+                {m.cycle_time.count} with a start
+              </span>
+            </div>
+            {m.cycle_time.count === 0 ? (
+              <div className="mono rounded-lg border border-dashed border-white/10 bg-ink-subtle p-4 text-xs text-chrome-dim">
+                Nothing has moved into progress and back out yet. Drag a card to
+                in-progress and ship it — then we&apos;ll have something to measure.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3">
+                <Tile label="avg cycle" value={fmtHours(m.cycle_time.avg_hours)} />
+                <Tile label="median cycle" value={fmtHours(m.cycle_time.p50_hours)} />
+                <Tile label="p90 cycle" value={fmtHours(m.cycle_time.p90_hours)} />
+              </div>
+            )}
+            <p className="mono text-[10px] text-chrome-dim">
+              Lead counts the wait in the backlog; cycle is just the active work.
+              The gap between them is how long things sit before anyone starts.
+            </p>
           </section>
 
           <ThroughputChart points={m.throughput} />
