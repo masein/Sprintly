@@ -100,6 +100,11 @@ export default function DocsPage() {
               <span className="mono">pending</span>. Tokens and secrets are
               vault-encrypted; linking is scoped to the connected project.
             </p>
+            <p>
+              The other direction too: CI check and pipeline results land on
+              the task as a pass / fail / pending chip on the linked PR — icon
+              and label, not just a colour.
+            </p>
           </Section>
 
           <Section icon={TerminalSquare} title="API tokens">

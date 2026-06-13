@@ -2,6 +2,8 @@
 
 import { api } from "./api";
 
+export type CheckState = "pending" | "passed" | "failed";
+
 export type GitLink = {
   id: string;
   kind: "commit" | "pull_request" | "branch";
@@ -9,6 +11,7 @@ export type GitLink = {
   url: string | null;
   title: string | null;
   state: string | null;
+  check_state: CheckState | null;
   created_at: string;
 };
 
