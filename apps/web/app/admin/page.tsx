@@ -377,21 +377,23 @@ function BackupsTab() {
   );
 }
 
-// ─── Webhooks (scaffolding) ─────────────────────────────────────────────────
+// ─── Webhooks (managed per project) ─────────────────────────────────────────
 
 function WebhooksTab() {
   return (
     <div className="rounded-lg border border-dashed border-white/10 bg-ink-subtle p-12 text-center">
       <Webhook size={28} className="mx-auto mb-3 text-chrome-dim" />
       <div className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
-        webhooks · scaffolding only
+        webhooks · per project
       </div>
       <p className="text-sm text-chrome-dim">
-        The schema and per-project CRUD exist (<code className="mono">/projects/:key/webhooks</code>),
-        but outbound delivery isn&apos;t wired yet. Coming in the next pass.
+        Outbound delivery is live — generic signed endpoints plus Slack and
+        Discord. Webhooks belong to a project, so manage them from a project&apos;s{" "}
+        <span className="mono">webhooks</span> button (lead-only): add a target,
+        pick events, send a test, watch deliveries.
       </p>
-      <div className="mono mt-3 inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] uppercase text-amber-300">
-        <Check size={10} /> coming soon
+      <div className="mono mt-3 inline-flex items-center gap-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[10px] uppercase text-emerald-300">
+        <Check size={10} /> delivery wired
       </div>
     </div>
   );

@@ -287,7 +287,7 @@ assert exit 0 and schema applied.
 ---
 
 ### `[x]` F2 — Outbound webhook delivery + chat notifications
-**PR:** #26 (generic signed+retried delivery) + #50 (ADR 0002 + Slack/Discord adapters, deliveries/test endpoints) · **Depends on:** F5 · **Size:** M
+**PR:** #26 (generic signed+retried delivery) + #50 (ADR 0002 + Slack/Discord adapters, deliveries/test endpoints) + #51 (per-project webhook admin UI) · **Depends on:** F5 · **Size:** M
 
 **Goal:** Actually deliver the webhooks that are currently only stored, plus
 first-class Slack/Discord targets.
