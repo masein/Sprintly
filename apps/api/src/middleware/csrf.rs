@@ -29,6 +29,8 @@ const CSRF_HEADER: &str = "x-csrf-token";
 
 const EXEMPT_PATHS: &[&str] = &[
     "/api/v1/auth/login",
+    // 2FA step-up: presents a signed challenge token, not a cookie session yet.
+    "/api/v1/auth/2fa",
     "/api/v1/auth/register",
     "/api/v1/auth/refresh",
     "/api/v1/auth/password/reset/request",

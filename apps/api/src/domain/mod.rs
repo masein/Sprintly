@@ -22,5 +22,7 @@ pub mod tasks;
 pub mod templates;
 pub mod timesheets;
 pub mod tokens;
+pub mod totp;
+pub mod two_factor;
 pub mod vault;
 pub mod webhooks;

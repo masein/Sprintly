@@ -18,7 +18,7 @@ use std::net::SocketAddr;
 use axum::{
     extract::{ConnectInfo, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::post,
     Json, Router,
 };
@@ -26,6 +26,7 @@ use base64::Engine as _;
 use chrono::{Duration, Utc};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -33,7 +34,7 @@ use validator::Validate;
 
 use crate::{
     config::Config,
-    domain::{password, sessions, tokens},
+    domain::{password, sessions, tokens, totp, two_factor},
     infra::AppState,
     middleware::{client_ip, csrf, rate_limit, CurrentUser},
     AppError, AppResult,
@@ -43,6 +44,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/register", post(register))
         .route("/auth/login", post(login))
+        .route("/auth/2fa", post(two_factor_login))
         .route("/auth/logout", post(logout))
         .route("/auth/refresh", post(refresh))
         .route("/auth/password/reset/request", post(password_reset_request))
@@ -185,7 +187,7 @@ async fn login(
     headers: HeaderMap,
     info: ConnectInfo<SocketAddr>,
     Json(req): Json<LoginReq>,
-) -> AppResult<impl IntoResponse> {
+) -> AppResult<Response> {
     req.validate()
         .map_err(|e| AppError::Validation(e.to_string()))?;
 
@@ -208,10 +210,11 @@ async fn login(
 
     let row = sqlx::query!(
         r#"
-        SELECT id            AS "id!: Uuid",
-               password_hash AS "password_hash!: String",
-               role          AS "role!: String",
-               status        AS "status!: String"
+        SELECT id               AS "id!: Uuid",
+               password_hash    AS "password_hash!: String",
+               role             AS "role!: String",
+               status           AS "status!: String",
+               totp_enrolled_at AS "totp_enrolled_at?: chrono::DateTime<chrono::Utc>"
         FROM   users
         WHERE  email = $1 AND deleted_at IS NULL
         "#,
@@ -247,7 +250,84 @@ async fn login(
         return Err(AppError::Forbidden);
     }
 
-    issue_session_response(&state, user.id, &user.role, &headers).await
+    // 2FA step-up: if the account has a confirmed second factor, the password
+    // alone doesn't get a session. Hand back a short-lived signed challenge the
+    // client spends at POST /auth/2fa with a TOTP or recovery code.
+    if user.totp_enrolled_at.is_some() {
+        let challenge = tokens::mint_2fa_challenge(&state.cfg.auth, user.id, &user.role)?;
+        return Ok(Json(json!({
+            "two_factor_required": true,
+            "challenge": challenge,
+        }))
+        .into_response());
+    }
+
+    Ok(
+        issue_session_response(&state, user.id, &user.role, &headers)
+            .await?
+            .into_response(),
+    )
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct TwoFactorLoginReq {
+    /// The challenge token returned by /auth/login.
+    #[validate(length(min = 1))]
+    pub challenge: String,
+    /// A TOTP code or a recovery code.
+    #[validate(length(min = 1))]
+    pub code: String,
+}
+
+/// Complete a login that required a second factor. Verifies the challenge
+/// token, then a TOTP code (with ±1 step skew) or a single-use recovery code,
+/// rate-limited per user. On success, issues a normal session.
+async fn two_factor_login(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    info: ConnectInfo<SocketAddr>,
+    Json(req): Json<TwoFactorLoginReq>,
+) -> AppResult<Response> {
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
+
+    let claims = tokens::verify_2fa_challenge(&state.cfg.auth, &req.challenge)?;
+
+    // Throttle code guessing by user (from the verified challenge) and IP.
+    let ip = client_ip(&headers, info);
+    rate_limit::hit(
+        &state,
+        &format!("sprintly:rl:2fa:{}", claims.sub),
+        rate_limit::twofa_per_min(),
+        60,
+    )
+    .await?;
+    rate_limit::hit(
+        &state,
+        &format!("sprintly:rl:2fa:ip:{ip}"),
+        rate_limit::login_ip_per_min(),
+        60,
+    )
+    .await?;
+
+    // The challenge proves the password step passed for an enabled account, but
+    // re-check that 2FA is still on (it could have been disabled in the window).
+    let secret = two_factor::secret_if_enabled(&state.db, claims.sub)
+        .await?
+        .ok_or(AppError::Unauthorized)?;
+
+    let now = Utc::now().timestamp() as u64;
+    let ok = totp::verify(&secret, &req.code, now, 1)
+        || two_factor::consume_recovery_code(&state.db, claims.sub, &req.code).await?;
+    if !ok {
+        return Err(AppError::Unauthorized);
+    }
+
+    Ok(
+        issue_session_response(&state, claims.sub, &claims.role, &headers)
+            .await?
+            .into_response(),
+    )
 }
 
 async fn logout(State(state): State<AppState>, user: CurrentUser) -> AppResult<impl IntoResponse> {

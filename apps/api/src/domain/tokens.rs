@@ -72,6 +72,57 @@ pub fn verify_access(cfg: &AuthConfig, token: &str) -> AppResult<AccessClaims> {
     .map_err(|_| AppError::Unauthorized)
 }
 
+/// Claims for the short-lived "you passed the password, now prove the second
+/// factor" challenge token (F11). Issued by `/auth/login` when the account has
+/// 2FA enabled and spent at `/auth/2fa`. The `purpose` field is an explicit
+/// guard so an access token can never be replayed here and vice versa.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TwoFactorChallenge {
+    pub sub: Uuid, // user_id
+    pub role: String,
+    pub purpose: String, // always "2fa"
+    pub iat: i64,
+    pub exp: i64,
+}
+
+const TWOFA_CHALLENGE_TTL_SECS: i64 = 300; // 5 minutes to enter a code
+
+/// Mint a 2FA step-up challenge for `user_id`.
+pub fn mint_2fa_challenge(cfg: &AuthConfig, user_id: Uuid, role: &str) -> AppResult<String> {
+    let now = Utc::now();
+    let claims = TwoFactorChallenge {
+        sub: user_id,
+        role: role.to_string(),
+        purpose: "2fa".into(),
+        iat: now.timestamp(),
+        exp: (now + Duration::seconds(TWOFA_CHALLENGE_TTL_SECS)).timestamp(),
+    };
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(&cfg.jwt_secret),
+    )
+    .map_err(|_| AppError::Crypto("jwt encode failed"))
+}
+
+/// Verify a 2FA challenge token. Unauthorized for anything off, including an
+/// access token presented in its place (wrong claim shape / purpose).
+pub fn verify_2fa_challenge(cfg: &AuthConfig, token: &str) -> AppResult<TwoFactorChallenge> {
+    let mut validation = Validation::default();
+    validation.leeway = 60;
+    let claims = decode::<TwoFactorChallenge>(
+        token,
+        &DecodingKey::from_secret(&cfg.jwt_secret),
+        &validation,
+    )
+    .map(|d| d.claims)
+    .map_err(|_| AppError::Unauthorized)?;
+    if claims.purpose != "2fa" {
+        return Err(AppError::Unauthorized);
+    }
+    Ok(claims)
+}
+
 /// A freshly minted refresh token: the plaintext to hand the client, and the
 /// hash to store.
 #[derive(Debug, Clone)]
@@ -145,6 +196,28 @@ mod tests {
         let tampered = String::from_utf8(bytes).unwrap();
         assert!(matches!(
             verify_access(&c, &tampered),
+            Err(AppError::Unauthorized)
+        ));
+    }
+
+    #[test]
+    fn twofa_challenge_round_trips_and_rejects_access_tokens() {
+        let c = cfg();
+        let uid = Uuid::now_v7();
+        let challenge = mint_2fa_challenge(&c, uid, "member").unwrap();
+        let claims = verify_2fa_challenge(&c, &challenge).unwrap();
+        assert_eq!(claims.sub, uid);
+        assert_eq!(claims.purpose, "2fa");
+
+        // An access token must not pass as a challenge (no `purpose` field).
+        let access = mint_access(&c, uid, Uuid::now_v7(), "member").unwrap();
+        assert!(matches!(
+            verify_2fa_challenge(&c, &access),
+            Err(AppError::Unauthorized)
+        ));
+        // …and the challenge must not pass as an access token (no sid).
+        assert!(matches!(
+            verify_access(&c, &challenge),
             Err(AppError::Unauthorized)
         ));
     }
