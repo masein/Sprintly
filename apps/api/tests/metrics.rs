@@ -55,13 +55,15 @@ async fn task(
     key: &str,
     status: &str,
     created_days_ago: i64,
+    started_days_ago: Option<i64>,
     completed_days_ago: Option<i64>,
 ) {
     let created = Utc::now() - Duration::days(created_days_ago);
+    let started = started_days_ago.map(|d| Utc::now() - Duration::days(d));
     let completed = completed_days_ago.map(|d| Utc::now() - Duration::days(d));
     sqlx::query(
-        r#"INSERT INTO tasks (id, project_id, board_id, column_id, key, title, status, order_in_column, created_at, completed_at)
-           VALUES ($1, $2, $3, $4, $5, 't', $6, 1024.0, $7, $8)"#,
+        r#"INSERT INTO tasks (id, project_id, board_id, column_id, key, title, status, order_in_column, created_at, started_at, completed_at)
+           VALUES ($1, $2, $3, $4, $5, 't', $6, 1024.0, $7, $8, $9)"#,
     )
     .bind(Uuid::now_v7())
     .bind(pid)
@@ -70,6 +72,7 @@ async fn task(
     .bind(key)
     .bind(status)
     .bind(created)
+    .bind(started)
     .bind(completed)
     .execute(pool)
     .await
@@ -77,12 +80,47 @@ async fn task(
 }
 
 #[sqlx::test(migrations = "./migrations")]
-async fn computes_lead_throughput_and_wip(pool: PgPool) {
+async fn computes_lead_cycle_throughput_and_wip(pool: PgPool) {
     let (pid, board, todo, done) = setup(&pool).await;
-    task(&pool, pid, board, done, "MET-1", "done", 10, Some(8)).await; // 48h lead
-    task(&pool, pid, board, done, "MET-2", "done", 5, Some(4)).await; // 24h lead
-    task(&pool, pid, board, todo, "MET-3", "in_progress", 3, None).await;
-    task(&pool, pid, board, todo, "MET-4", "todo", 2, None).await;
+    // created/started/completed (days ago). lead = created→completed,
+    // cycle = started→completed.
+    task(
+        &pool,
+        pid,
+        board,
+        done,
+        "MET-1",
+        "done",
+        10,
+        Some(9),
+        Some(8),
+    )
+    .await; // lead 48h, cycle 24h
+    task(
+        &pool,
+        pid,
+        board,
+        done,
+        "MET-2",
+        "done",
+        5,
+        Some(5),
+        Some(4),
+    )
+    .await; // lead 24h, cycle 24h
+    task(
+        &pool,
+        pid,
+        board,
+        todo,
+        "MET-3",
+        "in_progress",
+        3,
+        Some(3),
+        None,
+    )
+    .await;
+    task(&pool, pid, board, todo, "MET-4", "todo", 2, None, None).await;
 
     let m = metrics::compute(&pool, pid, 8).await.unwrap();
 
@@ -94,6 +132,19 @@ async fn computes_lead_throughput_and_wip(pool: PgPool) {
     );
     assert!(m.lead_time.p90_hours >= m.lead_time.p50_hours);
 
+    // Cycle time spans started→completed; both completed tasks started, so
+    // count matches and the average (24h) is below the lead average.
+    assert_eq!(m.cycle_time.count, 2);
+    assert!(
+        (m.cycle_time.avg_hours - 24.0).abs() < 1.0,
+        "avg cycle ~24h, got {}",
+        m.cycle_time.avg_hours
+    );
+    assert!(
+        m.cycle_time.avg_hours < m.lead_time.avg_hours,
+        "cycle (active work) is shorter than lead (incl. backlog wait)"
+    );
+
     let total: i64 = m.throughput.iter().map(|p| p.count).sum();
     assert_eq!(total, 2, "two tasks completed in the window");
 
@@ -103,11 +154,36 @@ async fn computes_lead_throughput_and_wip(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn cycle_time_ignores_tasks_that_never_started(pool: PgPool) {
+    let (pid, board, _todo, done) = setup(&pool).await;
+    // A task completed without a started_at (e.g. linked-PR auto-complete from
+    // the backlog) has a lead time but no cycle time.
+    task(&pool, pid, board, done, "MET-7", "done", 6, None, Some(5)).await;
+
+    let m = metrics::compute(&pool, pid, 8).await.unwrap();
+    assert_eq!(m.lead_time.count, 1);
+    assert_eq!(m.cycle_time.count, 0, "no started_at → not in cycle time");
+    assert_eq!(m.cycle_time.avg_hours, 0.0);
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn old_completions_fall_outside_window(pool: PgPool) {
     let (pid, board, _todo, done) = setup(&pool).await;
-    task(&pool, pid, board, done, "MET-9", "done", 100, Some(90)).await; // 90d ago
+    task(
+        &pool,
+        pid,
+        board,
+        done,
+        "MET-9",
+        "done",
+        100,
+        Some(95),
+        Some(90),
+    )
+    .await; // 90d ago
 
     let m = metrics::compute(&pool, pid, 8).await.unwrap(); // 8-week window
     assert_eq!(m.lead_time.count, 0);
+    assert_eq!(m.cycle_time.count, 0);
     assert_eq!(m.throughput.iter().map(|p| p.count).sum::<i64>(), 0);
 }
