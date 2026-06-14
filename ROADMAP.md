@@ -595,8 +595,8 @@ billable logs → expected invoice totals + line items.
 
 # M17 — Polish
 
-### `[ ]` F17 — Mobile / responsive + PWA
-**PR:** _none yet_ · **Depends on:** none · **Size:** M
+### `[x]` F17 — Mobile / responsive + PWA
+**PR:** #62 · **Depends on:** none · **Size:** M
 
 **Goal:** Usable on phones; installable PWA with basic offline shell.
 

@@ -96,7 +96,7 @@ export default function ProjectPage() {
 
   return (
     <AppShell currentProjectKey={projectKey}>
-      <header className="mb-6 flex items-center gap-4">
+      <header className="mb-6 flex flex-wrap items-center gap-2 sm:gap-3">
         <div
           className="flex h-12 w-12 items-center justify-center rounded-lg"
           style={{ background: `${project.color}20`, color: project.color }}
