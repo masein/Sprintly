@@ -39,6 +39,14 @@ export default function DocsPage() {
               <li><kbd>g p</kbd> projects · <kbd>g m</kbd> my tasks · <kbd>g d</kbd> my day · <kbd>g s</kbd> settings</li>
               <li><kbd>:q</kbd> close modal · <kbd>:wq</kbd> save &amp; close</li>
             </ul>
+            <p className="mt-2">
+              Quick-add works inside a sprint too: the{" "}
+              <span className="mono">+ add tasks</span> box finds existing tasks
+              as you type, and typing a brand-new title then{" "}
+              <kbd>↵</kbd> creates it straight into the sprint — the field clears
+              and keeps focus, so you can plan a whole sprint without leaving the
+              keyboard.
+            </p>
           </Section>
 
           <Section icon={Vault} title="Vault">

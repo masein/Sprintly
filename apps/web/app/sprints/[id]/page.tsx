@@ -3,7 +3,7 @@
 // Sprint detail. Header (name/goal/dates/state) + actions (start/complete) +
 // task assignment + burndown chart + summary (when retro is closed).
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -22,6 +22,7 @@ import {
   type SprintTask,
 } from "@/lib/sprints";
 import { search } from "@/lib/search";
+import { createTask } from "@/lib/tasks";
 import type { ApiError } from "@/lib/api";
 
 export default function SprintDetailPage() {
@@ -156,7 +157,7 @@ export default function SprintDetailPage() {
           </h2>
           <TaskList tasks={tasksQ.data ?? []} sprintId={id} canManage={sprint.state !== "completed"} />
           {sprint.state !== "completed" && (
-            <AddTaskRow sprintId={id} onAdded={() => {
+            <AddTaskRow sprintId={id} projectKey={sprint.project_key} onAdded={() => {
               qc.invalidateQueries({ queryKey: ["sprint-tasks", id] });
               qc.invalidateQueries({ queryKey: ["sprint", id] });
               qc.invalidateQueries({ queryKey: ["sprint-burndown", id] });
@@ -240,30 +241,91 @@ function TaskList({
   );
 }
 
+// Inline quick-add for a sprint (QA F1). Search existing tasks OR create a new
+// one — typing a fresh title and pressing Enter creates it in this project and
+// drops it into the sprint, then clears + keeps focus for the next one (mirrors
+// the board's rapid quick-add). Enter is never a silent no-op.
 function AddTaskRow({
   sprintId,
+  projectKey,
   onAdded,
 }: {
   sprintId: string;
+  projectKey: string;
   onAdded: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const hits = useQuery({
+  const [highlight, setHighlight] = useState(0);
+  const [cue, setCue] = useState<{ msg: string; ok: boolean } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const hitsQ = useQuery({
     queryKey: ["sprint-task-search", q],
     queryFn: () => search(q, 6),
-    enabled: q.length >= 2,
+    enabled: q.trim().length >= 2,
     staleTime: 5_000,
   });
-  const add = useMutation({
+  const hits = hitsQ.data?.tasks ?? [];
+  const trimmed = q.trim();
+  const searched = q.trim().length >= 2 && !hitsQ.isFetching;
+  // Offer "create" unless the query is an exact title match of an existing task.
+  const exact = hits.some((t) => t.title.trim().toLowerCase() === trimmed.toLowerCase());
+  const showCreate = trimmed.length > 0 && !exact;
+  const rowCount = (showCreate ? 1 : 0) + hits.length;
+
+  function flash(msg: string, ok: boolean) {
+    setCue({ msg, ok });
+    window.setTimeout(() => setCue((c) => (c?.msg === msg ? null : c)), 1800);
+  }
+
+  function afterAdd(msg: string) {
+    onAdded();
+    setQ("");
+    setHighlight(0);
+    flash(msg, true);
+    inputRef.current?.focus();
+  }
+
+  const addExisting = useMutation({
     mutationFn: (key: string) => assignTaskToSprint(sprintId, key),
-    onSuccess: () => {
-      setQ("");
-      setOpen(false);
-      onAdded();
-    },
-    onError: (e) => alert((e as unknown as ApiError).message),
+    onSuccess: (_d, key) => afterAdd(`added ${key}`),
+    onError: (e) => flash((e as unknown as ApiError).message ?? "couldn't add it", false),
   });
+  const createAndAdd = useMutation({
+    mutationFn: (title: string) => createTask(projectKey, { title, sprint_id: sprintId }),
+    onSuccess: (task) => afterAdd(`created ${task.key}`),
+    onError: (e) => flash((e as unknown as ApiError).message ?? "couldn't create it", false),
+  });
+  const busy = addExisting.isPending || createAndAdd.isPending;
+
+  function commit(index: number) {
+    if (busy) return;
+    if (showCreate && index === 0) {
+      if (trimmed) createAndAdd.mutate(trimmed);
+      return;
+    }
+    const hit = hits[index - (showCreate ? 1 : 0)];
+    if (hit) addExisting.mutate(hit.key);
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlight((h) => Math.min(h + 1, Math.max(rowCount - 1, 0)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlight((h) => Math.max(h - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (rowCount === 0) return; // empty query — nothing to add or create
+      commit(highlight < rowCount ? highlight : 0);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+      setQ("");
+    }
+  }
 
   if (!open) {
     return (
@@ -277,40 +339,87 @@ function AddTaskRow({
     );
   }
 
+  const createIndex = 0;
   return (
     <div className="mt-2 space-y-1 rounded border border-white/10 bg-ink-subtle p-2">
       <div className="flex items-center gap-2">
         <input
+          ref={inputRef}
           autoFocus
           value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="search tasks to add…"
-          className="flex-1 rounded border border-white/10 bg-ink px-2 py-1 text-xs text-chrome focus:border-accent focus:outline-none"
+          onChange={(e) => {
+            setQ(e.target.value);
+            setHighlight(0);
+          }}
+          onKeyDown={onKeyDown}
+          placeholder="find a task, or type a new one…"
+          aria-label="add a task to this sprint"
+          className="mono flex-1 rounded border border-white/10 bg-ink px-2 py-1 text-xs text-chrome focus:border-accent focus:outline-none"
         />
         <button
           type="button"
-          onClick={() => setOpen(false)}
+          onClick={() => {
+            setOpen(false);
+            setQ("");
+          }}
           className="text-chrome-dim hover:text-chrome"
           aria-label="Cancel"
         >
           <X size={12} />
         </button>
       </div>
+
       <ul className="max-h-48 overflow-y-auto">
-        {(hits.data?.tasks ?? []).map((t) => (
-          <li key={t.key}>
+        {showCreate && (
+          <li>
             <button
               type="button"
-              onClick={() => add.mutate(t.key)}
-              className="mono flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs hover:bg-white/5"
+              onMouseEnter={() => setHighlight(createIndex)}
+              onClick={() => commit(createIndex)}
+              className={`mono flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs ${
+                highlight === createIndex ? "bg-accent/15 text-chrome" : "text-chrome-dim hover:bg-white/5"
+              }`}
             >
-              <span className="text-chrome-dim">{t.key}</span>
-              <span className="truncate text-chrome">{t.title}</span>
-              <span className="ml-auto text-chrome-dim">{t.status}</span>
+              <span className="text-accent">↵</span>
+              <span className="text-chrome">
+                create &ldquo;<span className="truncate">{trimmed}</span>&rdquo;
+              </span>
+              <span className="ml-auto text-chrome-dim">new task</span>
             </button>
           </li>
-        ))}
+        )}
+        {hits.map((t, i) => {
+          const idx = i + (showCreate ? 1 : 0);
+          return (
+            <li key={t.key}>
+              <button
+                type="button"
+                onMouseEnter={() => setHighlight(idx)}
+                onClick={() => commit(idx)}
+                className={`mono flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs ${
+                  highlight === idx ? "bg-accent/15" : "hover:bg-white/5"
+                }`}
+              >
+                <span className="text-chrome-dim">{t.key}</span>
+                <span className="truncate text-chrome">{t.title}</span>
+                <span className="ml-auto text-chrome-dim">{t.status}</span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
+
+      <div className="mono px-1 text-[10px] text-chrome-dim">
+        {busy
+          ? "nudging electrons…"
+          : cue
+            ? <span className={cue.ok ? "text-emerald-300" : "text-red-300"}>{cue.msg}</span>
+            : hitsQ.isFetching
+              ? "searching…"
+              : searched && hits.length === 0
+                ? "nothing matches yet — ↵ to create it"
+                : "↵ to add · ↑↓ to choose · esc to close"}
+      </div>
     </div>
   );
 }

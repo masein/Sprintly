@@ -50,6 +50,7 @@ export const createTask = (
     assignee_id?: string;
     parent_task_id?: string;
     labels?: string[];
+    sprint_id?: string;
   },
 ) =>
   api<Task>(`/projects/${encodeURIComponent(projectKey)}/tasks`, {
