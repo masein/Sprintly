@@ -101,6 +101,76 @@ async fn make_sprint(pool: &PgPool, project_id: Uuid, state: &str) -> Uuid {
     id
 }
 
+// F1 QA fix: creating a task directly into a sprint.
+
+/// The guard the create-task handler uses so a task can't be slotted into a
+/// sprint that belongs to a different project.
+#[sqlx::test(migrations = "./migrations")]
+async fn sprint_belongs_to_project_guards_cross_project(pool: PgPool) {
+    let owner = make_user(&pool).await;
+    let (proj_a, _, _) = make_project(&pool, "AAA", owner).await;
+    let (proj_b, _, _) = make_project(&pool, "BBB", owner).await;
+    let sprint_a = make_sprint(&pool, proj_a, "active").await;
+
+    assert!(
+        sprint_domain::sprint_belongs_to_project(&pool, sprint_a, proj_a)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !sprint_domain::sprint_belongs_to_project(&pool, sprint_a, proj_b)
+            .await
+            .unwrap(),
+        "a sprint must not be claimable by another project"
+    );
+    assert!(
+        !sprint_domain::sprint_belongs_to_project(&pool, Uuid::now_v7(), proj_a)
+            .await
+            .unwrap(),
+        "an unknown sprint id is not a match"
+    );
+}
+
+/// A task created with `sprint_id` set lands in that sprint — the exact path
+/// the sprint-detail quick-add now drives, and what the sprint task list reads.
+#[sqlx::test(migrations = "./migrations")]
+async fn task_created_with_sprint_is_in_the_sprint(pool: PgPool) {
+    let owner = make_user(&pool).await;
+    let (pid, board, col) = make_project(&pool, "SPR", owner).await;
+    let sprint = make_sprint(&pool, pid, "active").await;
+
+    // Mirror the create-task path: reserve a key, insert with sprint_id set.
+    let mut tx = pool.begin().await.unwrap();
+    let (key, _) = task_domain::next_key(&mut tx, pid).await.unwrap();
+    sqlx::query(
+        r#"INSERT INTO tasks (id, project_id, board_id, column_id, key, title, status,
+                              order_in_column, sprint_id)
+           VALUES ($1, $2, $3, $4, $5, 'Write API tests', 'todo', 1024.0, $6)"#,
+    )
+    .bind(Uuid::now_v7())
+    .bind(pid)
+    .bind(board)
+    .bind(col)
+    .bind(&key)
+    .bind(sprint)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    // The sprint's task list (WHERE sprint_id = sprint) includes exactly it.
+    let (count, title): (i64, String) = sqlx::query_as(
+        r#"SELECT COUNT(*) OVER (), title FROM tasks
+            WHERE sprint_id = $1 AND deleted_at IS NULL"#,
+    )
+    .bind(sprint)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1);
+    assert_eq!(title, "Write API tests");
+}
+
 #[sqlx::test(migrations = "./migrations")]
 async fn one_active_sprint_per_project(pool: PgPool) {
     let owner = make_user(&pool).await;

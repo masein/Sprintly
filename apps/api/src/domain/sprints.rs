@@ -163,6 +163,29 @@ fn section(buf: &mut String, heading: &str, items: &[&str]) {
     buf.push('\n');
 }
 
+/// Whether `sprint_id` is a live sprint of `project_id`. Used when creating a
+/// task directly into a sprint (sprint-detail quick-add) so a task can never
+/// land in another project's sprint. Accepts any executor so callers can run it
+/// inside the create-task transaction.
+pub async fn sprint_belongs_to_project<'e, E>(
+    exec: E,
+    sprint_id: uuid::Uuid,
+    project_id: uuid::Uuid,
+) -> crate::AppResult<bool>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let found: Option<i32> = sqlx::query_scalar(
+        r#"SELECT 1 FROM sprints
+            WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL"#,
+    )
+    .bind(sprint_id)
+    .bind(project_id)
+    .fetch_optional(exec)
+    .await?;
+    Ok(found.is_some())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

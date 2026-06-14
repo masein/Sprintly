@@ -27,7 +27,7 @@ use validator::Validate;
 use crate::{
     domain::{
         permissions::{can, Action},
-        projects as project_ctx, tasks as task_domain,
+        projects as project_ctx, sprints as sprint_domain, tasks as task_domain,
     },
     infra::{events::Event, AppState},
     middleware::CurrentUser,
@@ -88,6 +88,9 @@ pub struct CreateTaskReq {
     pub story_points: Option<i32>,
     pub due_date: Option<NaiveDate>,
     pub labels: Option<Vec<String>>,
+    /// Create the task directly inside this sprint (must belong to the same
+    /// project). Used by the sprint-detail inline quick-add.
+    pub sprint_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -155,6 +158,16 @@ async fn create_task(
     }
 
     let mut tx = state.db.begin().await?;
+
+    // If we're slotting this straight into a sprint, it must be one of this
+    // project's sprints — don't let a task leak into another project's sprint.
+    if let Some(sprint_id) = req.sprint_id {
+        if !sprint_domain::sprint_belongs_to_project(&mut *tx, sprint_id, ctx.id).await? {
+            return Err(AppError::BadRequest(
+                "sprint does not belong to this project".into(),
+            ));
+        }
+    }
 
     // Resolve the destination column. If unspecified, first column of the
     // default board.
@@ -226,11 +239,13 @@ async fn create_task(
         INSERT INTO tasks (
             id, project_id, board_id, column_id, key, title, description,
             type, priority, status, assignee_id, reporter_id, parent_task_id,
-            estimate_minutes, story_points, due_date, labels, order_in_column
+            estimate_minutes, story_points, due_date, labels, order_in_column,
+            sprint_id
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7,
             $8, $9, $10, $11, $12, $13,
-            $14, $15, $16, $17, $18
+            $14, $15, $16, $17, $18,
+            $19
         )
         "#,
     )
@@ -252,6 +267,7 @@ async fn create_task(
     .bind(req.due_date)
     .bind(req.labels.as_deref().unwrap_or(&[]))
     .bind(order_in_column)
+    .bind(req.sprint_id)
     .execute(&mut *tx)
     .await?;
 
