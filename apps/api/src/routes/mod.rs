@@ -12,6 +12,7 @@ pub mod dashboards;
 pub mod fields;
 pub mod health;
 pub mod integrations;
+pub mod invoicing;
 pub mod labels;
 pub mod metrics;
 pub mod notifications;

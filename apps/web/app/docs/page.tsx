@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, LogIn, Rows3, ShieldCheck, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, LogIn, Receipt, Rows3, ShieldCheck, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -113,6 +113,24 @@ export default function DocsPage() {
               <span className="mono">field:severity=high</span> chips stack,
               and every predicate must match. Field values also feed search
               (<kbd>⌘K</kbd>).
+            </p>
+          </Section>
+
+          <Section icon={Receipt} title="Billing & invoices">
+            <p>
+              Admins manage <span className="mono">clients</span> in{" "}
+              <span className="mono">/billing</span> and link each project to
+              one. Generating an invoice for a client + date range rolls up the{" "}
+              <span className="mono">billable</span> time logged on those
+              projects, one line per project + contributor, priced at each
+              person&apos;s configured hourly rate (cents math, no floats — the
+              PDF total equals the sum of the lines).
+            </p>
+            <p>
+              Export to <span className="mono">PDF</span> or{" "}
+              <span className="mono">CSV</span>, then walk it{" "}
+              <span className="mono">draft → sent → paid</span>. Draft invoices
+              can be deleted; once sent or paid they&apos;re kept as a record.
             </p>
           </Section>
 

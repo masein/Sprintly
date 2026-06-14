@@ -20,7 +20,7 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   Search, ArrowRight, Hash, FolderKanban, User, Sparkles,
-  Settings, LogOut, FolderPlus, AtSign, ListTodo,
+  Settings, LogOut, FolderPlus, AtSign, ListTodo, Receipt,
 } from "lucide-react";
 import { search, type SearchHits } from "@/lib/search";
 import { logout } from "@/lib/auth-bundle";
@@ -99,6 +99,12 @@ const ACTIONS: Action[] = [
     label: "admin panel (admin only)",
     icon: Settings,
     run: ({ router, close }) => { router.push("/admin"); close(); },
+  },
+  {
+    id: "open-billing",
+    label: "billing & invoices (admin only)",
+    icon: Receipt,
+    run: ({ router, close }) => { router.push("/billing"); close(); },
   },
   {
     id: "go-achievements",

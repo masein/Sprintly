@@ -574,8 +574,8 @@ expected rows; export contains expected entities.
 
 ---
 
-### `[ ]` F14 — Invoicing / per-client billing
-**PR:** _none yet_ · **Depends on:** none · **Size:** M
+### `[x]` F14 — Invoicing / per-client billing
+**PR:** #59 · **Depends on:** none · **Size:** M
 
 **Goal:** Turn billable time + rates into client invoices.
 
