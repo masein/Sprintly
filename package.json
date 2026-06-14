@@ -1,7 +1,7 @@
 {
   "name": "sprintly",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Sprintly — self-hosted dev-themed PM. Root workspace.",
   "packageManager": "pnpm@9.12.0",
   "engines": {
