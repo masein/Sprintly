@@ -16,6 +16,7 @@ import { SessionBadge } from "./SessionBadge";
 import { RunningTimerChip } from "./RunningTimerChip";
 import { CoffeeMeter } from "./CoffeeMeter";
 import { NotificationBell } from "./NotificationBell";
+import { OfflineBanner } from "./OfflineBanner";
 
 export function AppShell({
   currentProjectKey,
@@ -26,8 +27,9 @@ export function AppShell({
 }) {
   return (
     <div className="min-h-screen">
+      <OfflineBanner />
       <TopBar currentProjectKey={currentProjectKey} />
-      <main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">{children}</main>
     </div>
   );
 }
@@ -35,16 +37,19 @@ export function AppShell({
 function TopBar({ currentProjectKey }: { currentProjectKey?: string }) {
   return (
     <header className="sticky top-0 z-20 border-b border-white/10 bg-ink/80 backdrop-blur">
-      <div className="mx-auto flex h-12 max-w-7xl items-center gap-3 px-6">
-        <Link href="/" className="mono text-sm tracking-tight">
+      <div className="mx-auto flex h-12 max-w-7xl items-center gap-2 px-4 sm:gap-3 sm:px-6">
+        <Link href="/" className="mono shrink-0 text-sm tracking-tight">
           <span className="font-semibold">sprintly</span>
           <span className="text-chrome-dim">/</span>
         </Link>
 
         <ProjectSwitcher currentProjectKey={currentProjectKey} />
 
-        <div className="ml-auto flex items-center gap-3">
-          <CoffeeMeter />
+        <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+          {/* The coffee meter is a nicety; hide it on the narrowest screens. */}
+          <span className="hidden sm:inline-flex">
+            <CoffeeMeter />
+          </span>
           <RunningTimerChip />
           <NotificationBell />
           <SessionBadge />

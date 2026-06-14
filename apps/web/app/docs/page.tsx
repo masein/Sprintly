@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, LogIn, Receipt, Rows3, Share2, ShieldCheck, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -113,6 +113,19 @@ export default function DocsPage() {
               <span className="mono">field:severity=high</span> chips stack,
               and every predicate must match. Field values also feed search
               (<kbd>⌘K</kbd>).
+            </p>
+          </Section>
+
+          <Section icon={Smartphone} title="Mobile & offline">
+            <p>
+              The board, task detail, and the rest are usable down to a phone
+              screen — columns scroll sideways, the project toolbar wraps.
+              Sprintly is also an installable <span className="mono">PWA</span>:
+              add it to your home screen and it opens standalone. The app shell
+              is cached, so a dropped connection shows a clean{" "}
+              <span className="mono">offline</span> screen and a banner instead
+              of a broken page — your data syncs again the moment you&apos;re
+              back online (we never cache the API, so nothing goes stale).
             </p>
           </Section>
 
