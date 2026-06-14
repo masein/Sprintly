@@ -46,6 +46,13 @@
 - **RBAC:** single `can(actor, action, resource)` function in
   `domain::permissions`. Adding an `Action` variant without matching it is
   a compile error.
+- **Public status pages (F18) are opt-in and whitelisted.** A project lead can
+  mint a `projects.public_token`; `GET /public/status/<token>` is the only
+  unauthenticated read endpoint and returns a hand-built struct
+  (`domain::public_status::PublicStatus`) carrying *only* the project name, the
+  active sprint's progress, and per-column task **counts** — never task content,
+  assignees, labels, custom fields, comments, attachments, or vault data.
+  Disabling clears the token and the URL 404s.
 
 ## Invite-token lifecycle
 

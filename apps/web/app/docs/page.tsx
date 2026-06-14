@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, LogIn, Receipt, Rows3, ShieldCheck, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, LogIn, Receipt, Rows3, Share2, ShieldCheck, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -113,6 +113,20 @@ export default function DocsPage() {
               <span className="mono">field:severity=high</span> chips stack,
               and every predicate must match. Field values also feed search
               (<kbd>⌘K</kbd>).
+            </p>
+          </Section>
+
+          <Section icon={Share2} title="Public status pages">
+            <p>
+              A project lead can flip on a{" "}
+              <span className="mono">public status</span> page (from the project
+              header): it mints a tokenised, unauthenticated URL at{" "}
+              <span className="mono">/status/&lt;token&gt;</span> showing the
+              active sprint&apos;s progress and per-column task{" "}
+              <span className="mono">counts</span> — and nothing else. No task
+              titles, assignees, labels, comments, custom fields, or anything
+              vault-adjacent ever leave the building. Off by default; turning it
+              off invalidates the link immediately.
             </p>
           </Section>
 

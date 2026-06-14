@@ -19,6 +19,7 @@ pub mod metrics;
 pub mod notifications;
 pub mod payroll;
 pub mod projects;
+pub mod public_status;
 pub mod retros;
 pub mod roadmap;
 pub mod search;
