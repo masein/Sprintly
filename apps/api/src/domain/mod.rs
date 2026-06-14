@@ -9,6 +9,7 @@ pub mod chat_adapters;
 pub mod fields;
 pub mod git_providers;
 pub mod integrations;
+pub mod invoicing;
 pub mod labels;
 pub mod metrics;
 pub mod notifications;
