@@ -19,6 +19,7 @@ pub mod password;
 pub mod payroll;
 pub mod permissions;
 pub mod projects;
+pub mod public_status;
 pub mod roadmap;
 pub mod sessions;
 pub mod sprints;

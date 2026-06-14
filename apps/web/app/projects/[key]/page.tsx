@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { Archive, ArchiveRestore, ArrowDownUp, FileStack, GitBranch, ListChecks, Pencil, Tags, Webhook } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDownUp, FileStack, GitBranch, ListChecks, Pencil, Share2, Tags, Webhook } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Board } from "@/components/Board";
 import { FieldsManager } from "@/components/FieldsManager";
 import { GitIntegrationsManager } from "@/components/GitIntegrationsManager";
 import { ImportExportModal } from "@/components/ImportExportModal";
 import { LabelsManager } from "@/components/LabelsManager";
+import { PublicStatusModal } from "@/components/PublicStatusModal";
 import { TemplatesManager } from "@/components/TemplatesManager";
 import { WebhooksManager } from "@/components/WebhooksManager";
 import { projectIcon } from "@/components/CreateProjectModal";
@@ -39,6 +40,7 @@ export default function ProjectPage() {
   const [showWebhooks, setShowWebhooks] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showPublic, setShowPublic] = useState(false);
 
   async function reload() {
     try {
@@ -235,6 +237,16 @@ export default function ProjectPage() {
         {canManage && (
           <button
             type="button"
+            onClick={() => setShowPublic(true)}
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          >
+            <Share2 size={14} /> public status
+          </button>
+        )}
+
+        {canManage && (
+          <button
+            type="button"
             onClick={async () => {
               try {
                 if (project.archived_at) await unarchiveProject(project.key);
@@ -281,6 +293,10 @@ export default function ProjectPage() {
           onClose={() => setShowImport(false)}
           onImported={() => reload()}
         />
+      )}
+
+      {showPublic && (
+        <PublicStatusModal projectKey={project.key} onClose={() => setShowPublic(false)} />
       )}
 
       {defaultBoard ? (

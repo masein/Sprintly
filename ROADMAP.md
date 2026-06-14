@@ -612,8 +612,8 @@ PWA check in CI (optional).
 
 ---
 
-### `[ ]` F18 — Public read-only status pages
-**PR:** _none yet_ · **Depends on:** none · **Size:** S
+### `[x]` F18 — Public read-only status pages
+**PR:** #61 · **Depends on:** none · **Size:** S
 
 **Goal:** Shareable, unauthenticated read-only project status (opt-in per project).
 
