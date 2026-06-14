@@ -50,6 +50,7 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::vault::router())
         .merge(routes::payroll::router())
         .merge(routes::invoicing::router())
+        .merge(routes::import_export::router())
         .merge(routes::notifications::router())
         .merge(routes::integrations::router())
         .merge(routes::achievements::router())

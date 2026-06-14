@@ -555,8 +555,8 @@ documented restore drill on a throwaway DB.
 
 ---
 
-### `[ ]` F16 — Import / export
-**PR:** _none yet_ · **Depends on:** F7 · **Size:** M
+### `[x]` F16 — Import / export
+**PR:** #60 · **Depends on:** F7 · **Size:** M
 
 **Goal:** Migrate in (Jira/Trello/CSV) and full data export out.
 

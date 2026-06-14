@@ -8,6 +8,7 @@ pub mod board_views;
 pub mod chat_adapters;
 pub mod fields;
 pub mod git_providers;
+pub mod import_export;
 pub mod integrations;
 pub mod invoicing;
 pub mod labels;

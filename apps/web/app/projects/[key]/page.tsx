@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { Archive, ArchiveRestore, FileStack, GitBranch, ListChecks, Pencil, Tags, Webhook } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDownUp, FileStack, GitBranch, ListChecks, Pencil, Tags, Webhook } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Board } from "@/components/Board";
 import { FieldsManager } from "@/components/FieldsManager";
 import { GitIntegrationsManager } from "@/components/GitIntegrationsManager";
+import { ImportExportModal } from "@/components/ImportExportModal";
 import { LabelsManager } from "@/components/LabelsManager";
 import { TemplatesManager } from "@/components/TemplatesManager";
 import { WebhooksManager } from "@/components/WebhooksManager";
@@ -37,6 +38,7 @@ export default function ProjectPage() {
   const [showGit, setShowGit] = useState(false);
   const [showWebhooks, setShowWebhooks] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   async function reload() {
     try {
@@ -223,6 +225,16 @@ export default function ProjectPage() {
         {canManage && (
           <button
             type="button"
+            onClick={() => setShowImport(true)}
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          >
+            <ArrowDownUp size={14} /> import / export
+          </button>
+        )}
+
+        {canManage && (
+          <button
+            type="button"
             onClick={async () => {
               try {
                 if (project.archived_at) await unarchiveProject(project.key);
@@ -261,6 +273,14 @@ export default function ProjectPage() {
 
       {showTemplates && (
         <TemplatesManager projectKey={project.key} onClose={() => setShowTemplates(false)} />
+      )}
+
+      {showImport && (
+        <ImportExportModal
+          projectKey={project.key}
+          onClose={() => setShowImport(false)}
+          onImported={() => reload()}
+        />
       )}
 
       {defaultBoard ? (

@@ -11,6 +11,7 @@ pub mod boards;
 pub mod dashboards;
 pub mod fields;
 pub mod health;
+pub mod import_export;
 pub mod integrations;
 pub mod invoicing;
 pub mod labels;
