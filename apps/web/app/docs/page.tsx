@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, LogIn, Receipt, Rows3, ShieldCheck, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, LogIn, Receipt, Rows3, ShieldCheck, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -113,6 +113,24 @@ export default function DocsPage() {
               <span className="mono">field:severity=high</span> chips stack,
               and every predicate must match. Field values also feed search
               (<kbd>⌘K</kbd>).
+            </p>
+          </Section>
+
+          <Section icon={ArrowDownUp} title="Import & export">
+            <p>
+              From a project&apos;s header (<span className="mono">import / export</span>):
+              bring a board in from a <span className="mono">Trello</span> JSON export
+              or a <span className="mono">CSV</span> (a <span className="mono">name</span>{" "}
+              column, plus optional <span className="mono">description / list / labels</span>) —
+              cards become tasks, lists become columns, labels are created as
+              needed. Import always <span className="mono">previews</span> first: a
+              dry-run shows exactly what would be created (it&apos;s the real
+              resolution, rolled back) before you commit.
+            </p>
+            <p>
+              Export the other way: a <span className="mono">JSON</span> bundle
+              (tasks with comments and an attachment manifest — metadata, not the
+              bytes) or a flat task <span className="mono">CSV</span>.
             </p>
           </Section>
 
