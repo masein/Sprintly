@@ -52,3 +52,6 @@ utoipa = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+# Already a runtime dep; mirrored here so integration tests can drive the
+# notification path (which takes a Redis pool).
+deadpool-redis = { workspace = true }
