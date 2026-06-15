@@ -190,14 +190,17 @@ async fn project_dashboard(
                s.starts_at   AS "starts_at!: DateTime<Utc>",
                s.ends_at     AS "ends_at!: DateTime<Utc>",
                COALESCE((SELECT COUNT(*) FROM tasks t
-                          WHERE t.sprint_id = s.id AND t.deleted_at IS NULL), 0)
+                          WHERE t.sprint_id = s.id AND t.deleted_at IS NULL
+                            AND t.parent_task_id IS NULL), 0)
                              AS "task_count!: i64",
                COALESCE((SELECT SUM(story_points) FROM tasks t
-                          WHERE t.sprint_id = s.id AND t.deleted_at IS NULL), 0)::bigint
+                          WHERE t.sprint_id = s.id AND t.deleted_at IS NULL
+                            AND t.parent_task_id IS NULL), 0)::bigint
                              AS "total_points!: i64",
                COALESCE((SELECT SUM(story_points) FROM tasks t
                           WHERE t.sprint_id = s.id AND t.status = 'done'
-                            AND t.deleted_at IS NULL), 0)::bigint
+                            AND t.deleted_at IS NULL
+                            AND t.parent_task_id IS NULL), 0)::bigint
                              AS "done_points!: i64"
         FROM   sprints s
         WHERE  s.project_id = $1 AND s.state = 'active' AND s.deleted_at IS NULL

@@ -170,6 +170,7 @@ async fn list_for_project(
                                       THEN story_points END), 0) AS done_points
             FROM    tasks
             WHERE   sprint_id = s.id AND deleted_at IS NULL
+              AND   parent_task_id IS NULL  -- count top-level tasks only (subtasks roll up under them)
         ) t ON TRUE
         WHERE  s.project_id = $1 AND s.deleted_at IS NULL
         ORDER  BY
@@ -325,7 +326,8 @@ async fn complete(
     let velocity: i64 = sqlx::query_scalar(
         r#"SELECT COALESCE(SUM(story_points), 0)
            FROM   tasks
-           WHERE  sprint_id = $1 AND status = 'done' AND deleted_at IS NULL"#,
+           WHERE  sprint_id = $1 AND status = 'done' AND deleted_at IS NULL
+             AND  parent_task_id IS NULL"#,
     )
     .bind(id)
     .fetch_one(&mut *tx)
@@ -555,6 +557,7 @@ async fn fetch_sprint(db: &PgPool, id: Uuid) -> AppResult<SprintDto> {
                                  THEN story_points END), 0)::bigint AS done_points
             FROM    tasks
             WHERE   sprint_id = s.id AND deleted_at IS NULL
+              AND   parent_task_id IS NULL  -- count top-level tasks only (subtasks roll up under them)
         ) t ON TRUE
         WHERE  s.id = $1
         "#,

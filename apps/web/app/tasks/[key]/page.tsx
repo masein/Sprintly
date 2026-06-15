@@ -82,6 +82,17 @@ export default function TaskPage() {
           ← {task.project_key}
         </Link>
         <span className="mono text-xs text-chrome-dim">/</span>
+        {task.parent_key && (
+          <>
+            <Link
+              href={`/tasks/${task.parent_key}`}
+              className="mono text-xs text-chrome-dim hover:text-chrome"
+            >
+              {task.parent_key}
+            </Link>
+            <span className="mono text-xs text-chrome-dim">/</span>
+          </>
+        )}
         <span className="mono text-xs text-accent">{task.key}</span>
         {canDelete && (
           <button
@@ -269,6 +280,19 @@ function Sidebar({ task, canEdit }: { task: Task; canEdit: boolean }) {
       <h2 className="mono text-xs uppercase tracking-widest text-chrome-dim">
         details
       </h2>
+      {task.parent_key && (
+        <div className="flex items-center justify-between gap-3">
+          <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">
+            parent
+          </span>
+          <Link
+            href={`/tasks/${task.parent_key}`}
+            className="mono text-xs text-accent hover:underline"
+          >
+            ↳ {task.parent_key}
+          </Link>
+        </div>
+      )}
       <Field label="status" value={task.status} />
       <Field
         label="priority"
