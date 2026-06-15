@@ -10,6 +10,7 @@ import Link from "next/link";
 import { Bug, Sparkles, Wrench, Beaker, Flame } from "lucide-react";
 import type { Task } from "@/lib/tasks";
 import { labelColorMap, listProjectLabels } from "@/lib/labels";
+import { listMembers } from "@/lib/projects";
 
 const TYPE_ICON = {
   feature: Sparkles,
@@ -48,6 +49,18 @@ export function TaskCard({
     retry: false,
   });
   const colors = labelColorMap(labelsQ.data ?? []);
+
+  // Resolve the assignee to a handle for the avatar (cached per project).
+  const membersQ = useQuery({
+    queryKey: ["project-members", task.project_key],
+    queryFn: () => listMembers(task.project_key),
+    staleTime: 60_000,
+    retry: false,
+    enabled: !!task.assignee_id,
+  });
+  const assignee = task.assignee_id
+    ? (membersQ.data ?? []).find((m) => m.user_id === task.assignee_id)
+    : undefined;
 
   const style = {
     transform: CSS.Transform.toString(sortable.transform),
@@ -102,6 +115,14 @@ export function TaskCard({
               +{task.labels.length - 3}
             </span>
           )}
+        </div>
+      )}
+      {assignee && (
+        <div className="mt-2 flex items-center justify-end gap-1" title={`assigned to @${assignee.handle}`}>
+          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent/20 text-[8px] font-semibold text-accent">
+            {(assignee.display_name || assignee.handle).slice(0, 2).toUpperCase()}
+          </span>
+          <span className="mono text-[9px] text-chrome-dim">@{assignee.handle}</span>
         </div>
       )}
     </div>

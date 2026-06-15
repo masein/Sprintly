@@ -101,11 +101,27 @@ pub struct EditTaskReq {
     pub description: Option<String>,
     pub r#type: Option<String>,
     pub priority: Option<String>,
-    pub assignee_id: Option<Uuid>,
+    /// Clearable: absent = leave as-is, `null` = unassign, id = assign. The
+    /// double-option lets PATCH distinguish "not sent" from "set to null".
+    #[serde(default, with = "double_option")]
+    pub assignee_id: Option<Option<Uuid>>,
     pub estimate_minutes: Option<i32>,
     pub story_points: Option<i32>,
     pub due_date: Option<NaiveDate>,
     pub labels: Option<Vec<String>>,
+}
+
+/// Serde glue so an `Option<Option<T>>` PATCH field tells "field omitted"
+/// (outer `None`) apart from "field present and null" (`Some(None)`).
+mod double_option {
+    use serde::{Deserialize, Deserializer};
+    pub fn deserialize<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        Ok(Some(Option::<T>::deserialize(d)?))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -510,15 +526,14 @@ async fn edit_task(
     sqlx::query(
         r#"
         UPDATE tasks SET
-            title             = COALESCE($2,  title),
-            description       = COALESCE($3,  description),
-            type              = COALESCE($4,  type),
-            priority          = COALESCE($5,  priority),
-            assignee_id       = COALESCE($6,  assignee_id),
-            estimate_minutes  = COALESCE($7,  estimate_minutes),
-            story_points      = COALESCE($8,  story_points),
-            due_date          = COALESCE($9,  due_date),
-            labels            = COALESCE($10, labels)
+            title             = COALESCE($2, title),
+            description       = COALESCE($3, description),
+            type              = COALESCE($4, type),
+            priority          = COALESCE($5, priority),
+            estimate_minutes  = COALESCE($6, estimate_minutes),
+            story_points      = COALESCE($7, story_points),
+            due_date          = COALESCE($8, due_date),
+            labels            = COALESCE($9, labels)
         WHERE  id = $1
         "#,
     )
@@ -527,13 +542,33 @@ async fn edit_task(
     .bind(req.description.as_deref())
     .bind(req.r#type.as_deref())
     .bind(req.priority.as_deref())
-    .bind(req.assignee_id)
     .bind(req.estimate_minutes)
     .bind(req.story_points)
     .bind(req.due_date)
     .bind(req.labels.as_deref())
     .execute(&mut *tx)
     .await?;
+
+    // Assignee is handled separately so it's clearable (unassign). Outer Some =
+    // the field was sent; the inner Option is the new value (None = unassign).
+    if let Some(new_assignee) = req.assignee_id {
+        sqlx::query(r#"UPDATE tasks SET assignee_id = $2 WHERE id = $1"#)
+            .bind(task_id)
+            .bind(new_assignee)
+            .execute(&mut *tx)
+            .await?;
+        // A fresh assignee starts watching the task (parity with create).
+        if let Some(a) = new_assignee {
+            sqlx::query(
+                r#"INSERT INTO task_watchers (task_id, user_id) VALUES ($1, $2)
+                   ON CONFLICT DO NOTHING"#,
+            )
+            .bind(task_id)
+            .bind(a)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
 
     // Cheap activity: one row tagged with which fields changed. M5 expands.
     task_domain::log_activity(
@@ -547,7 +582,7 @@ async fn edit_task(
     tx.commit().await?;
 
     // Notify on re-assignment to a new person (notify() skips self).
-    if let Some(new_assignee) = req.assignee_id {
+    if let Some(Some(new_assignee)) = req.assignee_id {
         if Some(new_assignee) != old_assignee {
             let _ = crate::domain::notifications::notify(
                 &state.db,

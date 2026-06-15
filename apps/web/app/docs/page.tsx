@@ -122,6 +122,15 @@ export default function DocsPage() {
               and every predicate must match. Field values also feed search
               (<kbd>⌘K</kbd>).
             </p>
+            <p>
+              Apply them from a task&apos;s <span className="mono">details</span>{" "}
+              panel: the <span className="mono">labels</span> row adds/removes
+              from the project palette (chips carry colour + text on the task and
+              its board card), and the <span className="mono">assignee</span>{" "}
+              picker hands the task to any project member — or{" "}
+              <span className="mono">unassigned</span>. Assigning notifies the new
+              owner and shows their avatar on the card.
+            </p>
           </Section>
 
           <Section icon={Smartphone} title="Mobile & offline">

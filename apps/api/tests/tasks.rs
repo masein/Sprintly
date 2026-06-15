@@ -1,11 +1,32 @@
 //! M3 phase A integration tests.
 
+use deadpool_redis::{Config as RedisConfig, Runtime};
 use sprintly_api::{
     config::AuthConfig,
-    domain::{password, tasks as task_domain},
+    domain::{notifications, password, tasks as task_domain},
 };
 use sqlx::PgPool;
 use uuid::Uuid;
+
+fn redis_pool() -> deadpool_redis::Pool {
+    let url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379/0".into());
+    RedisConfig::from_url(url)
+        .create_pool(Some(Runtime::Tokio1))
+        .expect("redis pool")
+}
+
+async fn add_member(pool: &PgPool, project_id: Uuid, user_id: Uuid, role: &str) {
+    sqlx::query(
+        r#"INSERT INTO project_members (project_id, user_id, role, added_by)
+           VALUES ($1, $2, $3, $2)"#,
+    )
+    .bind(project_id)
+    .bind(user_id)
+    .bind(role)
+    .execute(pool)
+    .await
+    .unwrap();
+}
 
 fn cfg() -> AuthConfig {
     AuthConfig {
@@ -109,6 +130,164 @@ async fn make_task(
     .unwrap();
     tx.commit().await.unwrap();
     (task_id, key)
+}
+
+// QA F2/F3: assignee + labels on the task detail.
+
+/// Assigning to a teammate persists, creates the F5 "assigned" notification for
+/// them (the exact path the task PATCH reuses), and unassign clears it.
+#[sqlx::test(migrations = "./migrations")]
+async fn assign_persists_notifies_and_unassign_clears(pool: PgPool) {
+    let owner = make_user(&pool).await;
+    let teammate = make_user(&pool).await;
+    let (pid, board, col) = make_project_with_board(&pool, "ASG", owner).await;
+    add_member(&pool, pid, teammate, "contributor").await;
+    let (task_id, key) = make_task(&pool, pid, board, col, 1024.0).await;
+
+    // Assign to the teammate + fire the F5 notification (mirrors edit_task).
+    sqlx::query("UPDATE tasks SET assignee_id = $2 WHERE id = $1")
+        .bind(task_id)
+        .bind(teammate)
+        .execute(&pool)
+        .await
+        .unwrap();
+    notifications::notify(
+        &pool,
+        &redis_pool(),
+        teammate,
+        owner,
+        "assigned",
+        &format!("You were assigned {key}"),
+        None,
+        Some(&format!("/tasks/{key}")),
+        Some(task_id),
+    )
+    .await
+    .unwrap();
+
+    let assignee: Option<Uuid> = sqlx::query_scalar("SELECT assignee_id FROM tasks WHERE id = $1")
+        .bind(task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(assignee, Some(teammate));
+
+    let notified: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM notifications
+            WHERE user_id = $1 AND actor_id = $2 AND kind = 'assigned' AND task_id = $3"#,
+    )
+    .bind(teammate)
+    .bind(owner)
+    .bind(task_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(notified, 1, "the assignee gets an F5 notification");
+
+    // Unassign clears it.
+    sqlx::query("UPDATE tasks SET assignee_id = NULL WHERE id = $1")
+        .bind(task_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let assignee: Option<Uuid> = sqlx::query_scalar("SELECT assignee_id FROM tasks WHERE id = $1")
+        .bind(task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(assignee, None);
+}
+
+/// `notify` never notifies you about your own action — assigning a task to
+/// yourself is silent.
+#[sqlx::test(migrations = "./migrations")]
+async fn self_assignment_is_not_notified(pool: PgPool) {
+    let me = make_user(&pool).await;
+    let (pid, board, col) = make_project_with_board(&pool, "SLF", me).await;
+    let (task_id, key) = make_task(&pool, pid, board, col, 1024.0).await;
+    notifications::notify(
+        &pool,
+        &redis_pool(),
+        me,
+        me,
+        "assigned",
+        &format!("You were assigned {key}"),
+        None,
+        None,
+        Some(task_id),
+    )
+    .await
+    .unwrap();
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE user_id = $1")
+        .bind(me)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0);
+}
+
+/// The members list (the assignee picker's source) is scoped to one project.
+#[sqlx::test(migrations = "./migrations")]
+async fn member_list_is_scoped_to_project(pool: PgPool) {
+    let owner_a = make_user(&pool).await;
+    let teammate_a = make_user(&pool).await;
+    let owner_b = make_user(&pool).await;
+    let (proj_a, _, _) = make_project_with_board(&pool, "MEMA", owner_a).await;
+    add_member(&pool, proj_a, teammate_a, "contributor").await;
+    let (_proj_b, _, _) = make_project_with_board(&pool, "MEMB", owner_b).await;
+
+    // The exact query the GET /projects/:key/members route runs.
+    let members: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT pm.user_id
+             FROM project_members pm JOIN users u ON u.id = pm.user_id
+            WHERE pm.project_id = $1 AND u.deleted_at IS NULL
+            ORDER BY pm.role, u.handle"#,
+    )
+    .bind(proj_a)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(members.len(), 2);
+    assert!(members.contains(&owner_a) && members.contains(&teammate_a));
+    assert!(
+        !members.contains(&owner_b),
+        "members must not leak across projects"
+    );
+}
+
+/// Labels are a TEXT[] on the task: setting the new array attaches, sending a
+/// shorter array detaches — exactly what the detail panel's multi-select sends.
+#[sqlx::test(migrations = "./migrations")]
+async fn labels_attach_and_detach(pool: PgPool) {
+    let owner = make_user(&pool).await;
+    let (pid, board, col) = make_project_with_board(&pool, "LBL", owner).await;
+    let (task_id, _) = make_task(&pool, pid, board, col, 1024.0).await;
+
+    sqlx::query("UPDATE tasks SET labels = $2 WHERE id = $1")
+        .bind(task_id)
+        .bind(vec!["backend".to_string(), "urgent".to_string()])
+        .execute(&pool)
+        .await
+        .unwrap();
+    let labels: Vec<String> = sqlx::query_scalar("SELECT labels FROM tasks WHERE id = $1")
+        .bind(task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(labels, vec!["backend", "urgent"]);
+
+    sqlx::query("UPDATE tasks SET labels = $2 WHERE id = $1")
+        .bind(task_id)
+        .bind(vec!["backend".to_string()])
+        .execute(&pool)
+        .await
+        .unwrap();
+    let labels: Vec<String> = sqlx::query_scalar("SELECT labels FROM tasks WHERE id = $1")
+        .bind(task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(labels, vec!["backend"], "detaching removes the label");
 }
 
 #[sqlx::test(migrations = "./migrations")]

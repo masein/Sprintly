@@ -22,7 +22,8 @@ import { TaskTimer } from "@/components/TaskTimer";
 import { deleteTask, editTask, getTask, type Task } from "@/lib/tasks";
 import { assignTaskEpic, listEpics } from "@/lib/roadmap";
 import { me } from "@/lib/auth-bundle";
-import { getProject } from "@/lib/projects";
+import { getProject, listMembers } from "@/lib/projects";
+import { labelColorMap, listProjectLabels } from "@/lib/labels";
 import type { ApiError } from "@/lib/api";
 
 const TYPES = ["feature", "bug", "chore", "spike", "incident"] as const;
@@ -281,29 +282,136 @@ function Sidebar({ task, canEdit }: { task: Task; canEdit: boolean }) {
         options={canEdit ? TYPES.slice() : undefined}
         onChange={(v) => patch.mutate({ type: v as Task["type"] })}
       />
+      <AssigneeField task={task} canEdit={canEdit} />
       <EpicField task={task} canEdit={canEdit} />
       {task.due_date && <Field label="due" value={task.due_date} />}
       {task.estimate_minutes != null && (
         <Field label="estimate" value={`${task.estimate_minutes} min`} />
       )}
-      {task.labels.length > 0 && (
-        <div>
-          <span className="mono block text-[10px] uppercase tracking-widest text-chrome-dim">
-            labels
-          </span>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {task.labels.map((l) => (
-              <span
-                key={l}
-                className="mono rounded border border-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-chrome-dim"
-              >
-                {l}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      <LabelsField task={task} canEdit={canEdit} />
     </section>
+  );
+}
+
+// Assignee picker (QA F2): any project member, plus "unassigned". Setting it
+// reuses the task PATCH → the F5 assignment notification fires server-side.
+function AssigneeField({ task, canEdit }: { task: Task; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const membersQ = useQuery({
+    queryKey: ["project-members", task.project_key],
+    queryFn: () => listMembers(task.project_key),
+    retry: false,
+  });
+  const patch = useMutation({
+    mutationFn: (assignee_id: string | null) => editTask(task.key, { assignee_id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task", task.key] });
+      qc.invalidateQueries({ queryKey: ["tasks", task.project_id] });
+    },
+  });
+  const members = membersQ.data ?? [];
+  const current = members.find((m) => m.user_id === task.assignee_id);
+
+  if (!canEdit) {
+    return current ? <Field label="assignee" value={`@${current.handle}`} /> : null;
+  }
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">assignee</span>
+      <select
+        value={task.assignee_id ?? ""}
+        onChange={(e) => patch.mutate(e.target.value || null)}
+        aria-label="assignee"
+        className="mono max-w-[60%] truncate rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
+      >
+        <option value="">unassigned</option>
+        {members.map((m) => (
+          <option key={m.user_id} value={m.user_id}>
+            @{m.handle}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+// Labels multi-select (QA F3): chips for what's on the task (colour + text, with
+// an × to remove) and a picker of the project palette to add. Persists via the
+// task PATCH labels array.
+function LabelsField({ task, canEdit }: { task: Task; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const paletteQ = useQuery({
+    queryKey: ["project-labels", task.project_key],
+    queryFn: () => listProjectLabels(task.project_key),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const patch = useMutation({
+    mutationFn: (labels: string[]) => editTask(task.key, { labels }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task", task.key] });
+      qc.invalidateQueries({ queryKey: ["tasks", task.project_id] });
+    },
+  });
+  const palette = paletteQ.data ?? [];
+  const colors = labelColorMap(palette);
+  const current = task.labels;
+  const available = palette.filter(
+    (l) => !current.some((c) => c.toLowerCase() === l.name.toLowerCase()),
+  );
+
+  if (current.length === 0 && (!canEdit || available.length === 0)) return null;
+
+  return (
+    <div>
+      <span className="mono block text-[10px] uppercase tracking-widest text-chrome-dim">
+        labels
+      </span>
+      <div className="mt-1 flex flex-wrap items-center gap-1">
+        {current.map((l) => {
+          const c = colors[l.toLowerCase()];
+          return (
+            <span
+              key={l}
+              className="mono inline-flex items-center gap-1 rounded border border-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-chrome-dim"
+              style={c ? { borderColor: `${c}66`, color: c, background: `${c}14` } : undefined}
+            >
+              {l}
+              {canEdit && (
+                <button
+                  type="button"
+                  aria-label={`remove ${l}`}
+                  onClick={() => patch.mutate(current.filter((x) => x !== l))}
+                  className="text-current opacity-70 hover:opacity-100"
+                >
+                  <X size={9} />
+                </button>
+              )}
+            </span>
+          );
+        })}
+        {canEdit && available.length > 0 && (
+          <select
+            value=""
+            onChange={(e) => {
+              if (e.target.value) patch.mutate([...current, e.target.value]);
+            }}
+            aria-label="add label"
+            className="mono rounded border border-dashed border-white/15 bg-ink px-1 py-0.5 text-[10px] text-chrome-dim"
+          >
+            <option value="">+ label</option>
+            {available.map((l) => (
+              <option key={l.id} value={l.name}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {current.length === 0 && (!canEdit || available.length === 0) && (
+          <span className="mono text-[10px] text-chrome-dim">none</span>
+        )}
+      </div>
+    </div>
   );
 }
 
