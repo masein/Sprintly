@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id              AS \"id!: Uuid\",\n               t.key             AS \"key!: String\",\n               t.project_id      AS \"project_id!: Uuid\",\n               p.key             AS \"project_key!: String\",\n               t.board_id        AS \"board_id!: Uuid\",\n               t.column_id       AS \"column_id!: Uuid\",\n               t.title           AS \"title!: String\",\n               t.description     AS \"description!: String\",\n               t.type            AS \"type!: String\",\n               t.priority        AS \"priority!: String\",\n               t.status          AS \"status!: String\",\n               t.assignee_id,\n               t.reporter_id,\n               t.parent_task_id,\n               t.epic_id,\n               t.estimate_minutes,\n               t.story_points,\n               t.due_date,\n               t.labels          AS \"labels!: Vec<String>\",\n               t.order_in_column AS \"order_in_column!: f64\",\n               t.created_at      AS \"created_at!: DateTime<Utc>\",\n               t.updated_at      AS \"updated_at!: DateTime<Utc>\",\n               t.completed_at\n        FROM   tasks t\n        JOIN   projects p ON p.id = t.project_id\n        WHERE  t.key = $1 AND t.project_id = $2 AND t.deleted_at IS NULL\n        ",
+  "query": "\n        SELECT t.id              AS \"id!: Uuid\",\n               t.key             AS \"key!: String\",\n               t.project_id      AS \"project_id!: Uuid\",\n               p.key             AS \"project_key!: String\",\n               t.board_id        AS \"board_id!: Uuid\",\n               t.column_id       AS \"column_id!: Uuid\",\n               t.title           AS \"title!: String\",\n               t.description     AS \"description!: String\",\n               t.type            AS \"type!: String\",\n               t.priority        AS \"priority!: String\",\n               t.status          AS \"status!: String\",\n               t.assignee_id,\n               t.reporter_id,\n               t.parent_task_id,\n               parent.key        AS \"parent_key?: String\",\n               t.epic_id,\n               t.estimate_minutes,\n               t.story_points,\n               t.due_date,\n               t.labels          AS \"labels!: Vec<String>\",\n               t.order_in_column AS \"order_in_column!: f64\",\n               t.created_at      AS \"created_at!: DateTime<Utc>\",\n               t.updated_at      AS \"updated_at!: DateTime<Utc>\",\n               t.completed_at\n        FROM   tasks t\n        JOIN   projects p ON p.id = t.project_id\n        LEFT JOIN tasks parent ON parent.id = t.parent_task_id\n        WHERE  t.key = $1 AND t.project_id = $2 AND t.deleted_at IS NULL\n        ",
   "describe": {
     "columns": [
       {
@@ -75,46 +75,51 @@
       },
       {
         "ordinal": 14,
+        "name": "parent_key?: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
         "name": "epic_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "estimate_minutes",
         "type_info": "Int4"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "story_points",
         "type_info": "Int4"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "due_date",
         "type_info": "Date"
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "labels!: Vec<String>",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "order_in_column!: f64",
         "type_info": "Float8"
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "created_at!: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "updated_at!: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 22,
+        "ordinal": 23,
         "name": "completed_at",
         "type_info": "Timestamptz"
       }
@@ -140,6 +145,7 @@
       true,
       true,
       true,
+      false,
       true,
       true,
       true,
@@ -151,5 +157,5 @@
       true
     ]
   },
-  "hash": "df937e7ae3e4adbd6a2d8a2abe74bc88f368d242d26d90cf10435f47a9efdd12"
+  "hash": "239ccf45a0b4b0c976a17aba097d3cb0fb6235e94ab6ad40214b4289bd262629"
 }

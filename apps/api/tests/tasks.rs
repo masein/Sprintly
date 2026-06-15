@@ -367,3 +367,153 @@ async fn resolve_position_append_when_no_hints(pool: PgPool) {
         .unwrap();
     assert!(appended > 2048.0);
 }
+
+// QA F4/F8: subtask hierarchy.
+
+async fn make_subtask(
+    pool: &PgPool,
+    project_id: Uuid,
+    board_id: Uuid,
+    column_id: Uuid,
+    parent_id: Uuid,
+    sprint: Option<Uuid>,
+    order: f64,
+) -> (Uuid, String) {
+    let mut tx = pool.begin().await.unwrap();
+    let (key, _) = task_domain::next_key(&mut tx, project_id).await.unwrap();
+    let id = Uuid::now_v7();
+    sqlx::query(
+        r#"INSERT INTO tasks
+             (id, project_id, board_id, column_id, key, title, parent_task_id, sprint_id, order_in_column)
+           VALUES ($1, $2, $3, $4, $5, 'sub', $6, $7, $8)"#,
+    )
+    .bind(id)
+    .bind(project_id)
+    .bind(board_id)
+    .bind(column_id)
+    .bind(&key)
+    .bind(parent_id)
+    .bind(sprint)
+    .bind(order)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    (id, key)
+}
+
+/// Subtasks are excluded from the top-level board + backlog, but still listed
+/// under their parent. (Mirrors the list_tasks / backlog / list_subtasks WHERE.)
+#[sqlx::test(migrations = "./migrations")]
+async fn board_and_backlog_exclude_subtasks(pool: PgPool) {
+    let owner = make_user(&pool).await;
+    let (pid, board, col) = make_project_with_board(&pool, "SUB", owner).await;
+    let (parent_id, _) = make_task(&pool, pid, board, col, 1024.0).await;
+    make_subtask(&pool, pid, board, col, parent_id, None, 2048.0).await;
+
+    // Board (list_tasks) lists only the top-level card.
+    let board_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT id FROM tasks
+            WHERE project_id = $1 AND deleted_at IS NULL AND parent_task_id IS NULL"#,
+    )
+    .bind(pid)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        board_ids,
+        vec![parent_id],
+        "the board shows only the parent"
+    );
+
+    // Backlog excludes the subtask too.
+    let backlog: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM tasks
+            WHERE project_id = $1 AND sprint_id IS NULL AND deleted_at IS NULL
+              AND status <> 'done' AND parent_task_id IS NULL"#,
+    )
+    .bind(pid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(backlog, 1);
+
+    // But the subtask IS listed under its parent.
+    let children: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM tasks WHERE parent_task_id = $1 AND deleted_at IS NULL",
+    )
+    .bind(parent_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(children, 1);
+}
+
+/// Sprint task counts roll subtasks up under their parent — they don't add a
+/// second item to the tally.
+#[sqlx::test(migrations = "./migrations")]
+async fn sprint_count_excludes_subtasks(pool: PgPool) {
+    let owner = make_user(&pool).await;
+    let (pid, board, col) = make_project_with_board(&pool, "SPC", owner).await;
+    let sprint = Uuid::now_v7();
+    sqlx::query(
+        r#"INSERT INTO sprints (id, project_id, name, state, starts_at, ends_at)
+           VALUES ($1, $2, 'S', 'active', now() - interval '1 day', now() + interval '6 days')"#,
+    )
+    .bind(sprint)
+    .bind(pid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (parent_id, _) = make_task(&pool, pid, board, col, 1024.0).await;
+    sqlx::query("UPDATE tasks SET sprint_id = $2 WHERE id = $1")
+        .bind(parent_id)
+        .bind(sprint)
+        .execute(&pool)
+        .await
+        .unwrap();
+    make_subtask(&pool, pid, board, col, parent_id, Some(sprint), 2048.0).await;
+
+    let count: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM tasks
+            WHERE sprint_id = $1 AND deleted_at IS NULL AND parent_task_id IS NULL"#,
+    )
+    .bind(sprint)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1, "the sprint counts top-level tasks only");
+}
+
+/// The task read resolves the parent's key for a subtask (for the breadcrumb /
+/// "parent" link) and NULL for a top-level task. (Mirrors fetch_task's join.)
+#[sqlx::test(migrations = "./migrations")]
+async fn fetch_task_exposes_parent_key(pool: PgPool) {
+    let owner = make_user(&pool).await;
+    let (pid, board, col) = make_project_with_board(&pool, "PAR", owner).await;
+    let (parent_id, parent_key) = make_task(&pool, pid, board, col, 1024.0).await;
+    let (_sub, sub_key) = make_subtask(&pool, pid, board, col, parent_id, None, 2048.0).await;
+
+    let parent_of = |key: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Option<String>>(
+                r#"SELECT parent.key
+                     FROM tasks t
+                     LEFT JOIN tasks parent ON parent.id = t.parent_task_id
+                    WHERE t.key = $1 AND t.project_id = $2 AND t.deleted_at IS NULL"#,
+            )
+            .bind(key)
+            .bind(pid)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    assert_eq!(
+        parent_of(sub_key).await.as_deref(),
+        Some(parent_key.as_str())
+    );
+    assert_eq!(parent_of(parent_key.clone()).await, None);
+}

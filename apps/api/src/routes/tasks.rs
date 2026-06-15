@@ -62,6 +62,8 @@ pub struct TaskDto {
     pub assignee_id: Option<Uuid>,
     pub reporter_id: Option<Uuid>,
     pub parent_task_id: Option<Uuid>,
+    /// The parent task's key (e.g. `QAV-1`), for the subtask breadcrumb/link.
+    pub parent_key: Option<String>,
     pub epic_id: Option<Uuid>,
     pub estimate_minutes: Option<i32>,
     pub story_points: Option<i32>,
@@ -419,6 +421,9 @@ async fn list_tasks(
         JOIN   projects p ON p.id = t.project_id
         WHERE  t.project_id = $1
           AND  t.deleted_at IS NULL
+          -- Subtasks live under their parent (SUBTASKS panel), not as their own
+          -- top-level cards. Excluding them keeps the board + column counts honest.
+          AND  t.parent_task_id IS NULL
           AND  ($2::uuid  IS NULL OR t.assignee_id = $2)
           AND  ($3::text  IS NULL OR t.status   = $3)
           AND  ($4::text  IS NULL OR t.priority = $4)
@@ -454,6 +459,8 @@ async fn list_tasks(
             assignee_id: r.assignee_id,
             reporter_id: r.reporter_id,
             parent_task_id: r.parent_task_id,
+            // The board never lists subtasks, so there's no parent to surface.
+            parent_key: None,
             epic_id: r.epic_id,
             estimate_minutes: r.estimate_minutes,
             story_points: r.story_points,
@@ -818,6 +825,7 @@ async fn fetch_task(db: &PgPool, task_key: &str, project_id: Uuid) -> AppResult<
                t.assignee_id,
                t.reporter_id,
                t.parent_task_id,
+               parent.key        AS "parent_key?: String",
                t.epic_id,
                t.estimate_minutes,
                t.story_points,
@@ -829,6 +837,7 @@ async fn fetch_task(db: &PgPool, task_key: &str, project_id: Uuid) -> AppResult<
                t.completed_at
         FROM   tasks t
         JOIN   projects p ON p.id = t.project_id
+        LEFT JOIN tasks parent ON parent.id = t.parent_task_id
         WHERE  t.key = $1 AND t.project_id = $2 AND t.deleted_at IS NULL
         "#,
         task_key,
@@ -851,6 +860,7 @@ async fn fetch_task(db: &PgPool, task_key: &str, project_id: Uuid) -> AppResult<
         assignee_id: r.assignee_id,
         reporter_id: r.reporter_id,
         parent_task_id: r.parent_task_id,
+        parent_key: r.parent_key,
         epic_id: r.epic_id,
         estimate_minutes: r.estimate_minutes,
         story_points: r.story_points,

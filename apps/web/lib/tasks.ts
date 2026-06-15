@@ -19,6 +19,7 @@ export type Task = {
   assignee_id: string | null;
   reporter_id: string | null;
   parent_task_id: string | null;
+  parent_key: string | null;
   epic_id: string | null;
   estimate_minutes: number | null;
   story_points: number | null;

@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, ListTree, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -84,6 +84,20 @@ export default function DocsPage() {
               task to an epic from the task&apos;s sidebar. Dragging a bar to
               reschedule is a v2 idea; for now, edit an epic&apos;s dates in its
               row and the bar moves.
+            </p>
+          </Section>
+
+          <Section icon={ListTree} title="Subtasks">
+            <p>
+              Break a task down from its <span className="mono">subtasks</span>{" "}
+              panel. A subtask is a real task — it has its own key, status, and
+              detail page — but it lives <em>under</em> its parent: it does{" "}
+              <span className="mono">not</span> get its own card on the board or
+              a row in the backlog, and it doesn&apos;t inflate column or sprint
+              counts. Its detail page breadcrumbs back to the parent
+              (<span className="mono">↳ QAV-1</span>). It&apos;s still findable
+              by key/title in search and shows up in your task list — it just
+              stops masquerading as independent top-level work.
             </p>
           </Section>
 

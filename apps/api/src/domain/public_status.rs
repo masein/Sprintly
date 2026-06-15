@@ -106,7 +106,8 @@ pub async fn load_by_token(db: &PgPool, token: &str) -> AppResult<PublicStatus> 
                 r#"SELECT COUNT(*),
                           COUNT(*) FILTER (WHERE status = 'done')
                      FROM tasks
-                    WHERE sprint_id = $1 AND deleted_at IS NULL"#,
+                    WHERE sprint_id = $1 AND deleted_at IS NULL
+                      AND parent_task_id IS NULL"#,
             )
             .bind(sprint_id)
             .fetch_one(db)
@@ -130,6 +131,7 @@ pub async fn load_by_token(db: &PgPool, token: &str) -> AppResult<PublicStatus> 
              FROM boards b
              JOIN board_columns bc ON bc.board_id = b.id AND bc.deleted_at IS NULL
              LEFT JOIN tasks t ON t.column_id = bc.id AND t.deleted_at IS NULL
+                                  AND t.parent_task_id IS NULL
             WHERE b.project_id = $1 AND b.deleted_at IS NULL
               AND b.id = (
                   SELECT id FROM boards

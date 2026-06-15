@@ -348,6 +348,8 @@ pub async fn backlog(db: &PgPool, project_id: Uuid) -> AppResult<Vec<BacklogItem
            FROM tasks
            WHERE project_id = $1 AND sprint_id IS NULL AND deleted_at IS NULL
              AND status <> 'done'
+             -- Subtasks belong to their parent, not the top-level backlog.
+             AND parent_task_id IS NULL
            ORDER BY priority, created_at"#,
     )
     .bind(project_id)
