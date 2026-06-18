@@ -115,6 +115,17 @@ export default function DocsPage() {
               changing lane means changing the card&apos;s assignee, label, or
               priority on the card itself.
             </p>
+            <p>
+              The <span className="mono">scope</span> control sets which sprint
+              the board shows. While a sprint is running the board opens on{" "}
+              <span className="mono">active sprint</span> so you see only what
+              you committed to; switch to <span className="mono">all tasks</span>{" "}
+              for the whole project (sprint cards plus the backlog), or pick a
+              specific sprint to look back. With no sprint running the control
+              reads <span className="mono">all tasks (no active sprint)</span>.
+              Column counts follow the scope, and your choice is remembered per
+              project.
+            </p>
           </Section>
 
           <Section icon={ListChecks} title="Labels & custom fields">
