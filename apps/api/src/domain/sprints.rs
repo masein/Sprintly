@@ -186,6 +186,27 @@ where
     Ok(found.is_some())
 }
 
+/// The project's currently active sprint, if any. The state machine permits at
+/// most one active sprint per project, but we `LIMIT 1` defensively. Used to
+/// scope the board to "active sprint" without the caller knowing the id.
+pub async fn active_sprint_id<'e, E>(
+    exec: E,
+    project_id: uuid::Uuid,
+) -> crate::AppResult<Option<uuid::Uuid>>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let id: Option<uuid::Uuid> = sqlx::query_scalar(
+        r#"SELECT id FROM sprints
+            WHERE project_id = $1 AND state = 'active' AND deleted_at IS NULL
+            LIMIT 1"#,
+    )
+    .bind(project_id)
+    .fetch_optional(exec)
+    .await?;
+    Ok(id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
