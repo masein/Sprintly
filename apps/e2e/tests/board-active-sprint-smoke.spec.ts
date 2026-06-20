@@ -47,7 +47,7 @@ test.describe("QA F10 — board active-sprint scope", () => {
     await test.step("create a sprint with one card, then start it", async () => {
       await page.goto(`/projects/${key}/sprints`);
       await page.getByRole("button", { name: /new sprint/i }).click();
-      await page.getByPlaceholder(/sprint name/i).fill("Sprint 1");
+      await page.getByPlaceholder(/Sprint 23/i).fill("Sprint 1");
       await page.getByRole("button", { name: /\$ git init sprint/ }).click();
       await expect(page).toHaveURL(/\/sprints\/[0-9a-f-]+$/);
 

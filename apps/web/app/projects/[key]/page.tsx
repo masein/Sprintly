@@ -145,31 +145,31 @@ export default function ProjectPage() {
 
         <Link
           href={`/projects/${project.key}/dashboard`}
-          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
         >
           dashboard →
         </Link>
         <Link
           href={`/projects/${project.key}/sprints`}
-          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
         >
           sprints →
         </Link>
         <Link
           href={`/projects/${project.key}/timeline`}
-          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
         >
           timeline →
         </Link>
         <Link
           href={`/projects/${project.key}/backlog`}
-          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
         >
           backlog →
         </Link>
         <Link
           href={`/projects/${project.key}/vault`}
-          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
         >
           vault →
         </Link>
@@ -178,7 +178,7 @@ export default function ProjectPage() {
           <button
             type="button"
             onClick={() => setShowLabels(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             <Tags size={14} /> labels
           </button>
@@ -188,7 +188,7 @@ export default function ProjectPage() {
           <button
             type="button"
             onClick={() => setShowFields(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             <ListChecks size={14} /> fields
           </button>
@@ -198,7 +198,7 @@ export default function ProjectPage() {
           <button
             type="button"
             onClick={() => setShowGit(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             <GitBranch size={14} /> git
           </button>
@@ -208,7 +208,7 @@ export default function ProjectPage() {
           <button
             type="button"
             onClick={() => setShowTemplates(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             <FileStack size={14} /> templates
           </button>
@@ -218,7 +218,7 @@ export default function ProjectPage() {
           <button
             type="button"
             onClick={() => setShowWebhooks(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             <Webhook size={14} /> webhooks
           </button>
@@ -228,7 +228,7 @@ export default function ProjectPage() {
           <button
             type="button"
             onClick={() => setShowImport(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             <ArrowDownUp size={14} /> import / export
           </button>
@@ -238,7 +238,7 @@ export default function ProjectPage() {
           <button
             type="button"
             onClick={() => setShowPublic(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             <Share2 size={14} /> public status
           </button>
@@ -256,7 +256,7 @@ export default function ProjectPage() {
                 setError((e as unknown as ApiError).message);
               }
             }}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             {project.archived_at ? (
               <><ArchiveRestore size={14} /> unarchive</>
@@ -343,6 +343,12 @@ function InlineName({
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
         className="w-full rounded border border-white/10 bg-ink px-2 py-1 text-2xl font-semibold text-chrome focus:border-accent focus:outline-none"
       />
       <button type="submit" className="mono text-xs text-accent">save</button>

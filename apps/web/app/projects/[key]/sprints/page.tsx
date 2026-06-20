@@ -9,6 +9,7 @@ import Link from "next/link";
 import { Plus, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { createSprint, listSprints, type Sprint } from "@/lib/sprints";
+import { pluralize } from "@/lib/format";
 import type { ApiError } from "@/lib/api";
 
 export default function SprintsPage() {
@@ -113,7 +114,7 @@ function SprintRow({ sprint }: { sprint: Sprint }) {
         {sprint.starts_at.slice(0, 10)} → {sprint.ends_at.slice(0, 10)}
       </div>
       <div className="mono text-xs text-chrome-dim">
-        {sprint.task_count} tasks · {sprint.done_points}/{sprint.total_points} pts
+        {pluralize(sprint.task_count, "task")} · {sprint.done_points}/{sprint.total_points} pts
       </div>
       {sprint.state === "completed" && sprint.velocity_points != null && (
         <span className="mono rounded border border-white/10 px-1.5 py-0.5 text-[10px] uppercase text-chrome-dim">
@@ -141,6 +142,7 @@ function CreateSprintForm({
   const [start, setStart] = useState(today);
   const [end, setEnd] = useState(twoWeeks);
   const [error, setError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   const create = useMutation({
     mutationFn: () =>
@@ -161,7 +163,12 @@ function CreateSprintForm({
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (name.trim()) create.mutate();
+        // Inline required-field feedback instead of a silent no-op (QA F5).
+        if (!name.trim()) {
+          setNameError("Name is required.");
+          return;
+        }
+        create.mutate();
       }}
       className="mb-6 space-y-3 rounded-lg border border-white/10 bg-ink-subtle p-4"
     >
@@ -180,17 +187,23 @@ function CreateSprintForm({
       </div>
       <input
         value={name}
-        onChange={(e) => setName(e.target.value)}
-        required
-        placeholder="sprint name (e.g. Sprint 23)"
-        className="block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
+        onChange={(e) => {
+          setName(e.target.value);
+          if (nameError) setNameError(null);
+        }}
+        placeholder="e.g. Sprint 23"
+        aria-invalid={!!nameError}
+        className={`block w-full rounded border bg-ink px-2 py-1 text-sm text-chrome focus:outline-none placeholder:text-chrome-dim/50 placeholder:italic ${
+          nameError ? "border-red-500/60 focus:border-red-500" : "border-white/10 focus:border-accent"
+        }`}
       />
+      {nameError && <div className="mono text-xs text-red-300">{nameError}</div>}
       <textarea
         value={goal}
         onChange={(e) => setGoal(e.target.value)}
         rows={2}
         placeholder="goal (markdown — what does success look like?)"
-        className="block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
+        className="block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none placeholder:text-chrome-dim/50 placeholder:italic"
       />
       <div className="flex items-center gap-2">
         <input
@@ -208,7 +221,7 @@ function CreateSprintForm({
         />
         <button
           type="submit"
-          disabled={!name.trim() || create.isPending}
+          disabled={create.isPending}
           className="mono ml-auto rounded bg-accent px-3 py-1.5 text-xs text-accent-fg disabled:opacity-50"
         >
           {create.isPending ? "creating…" : "$ git init sprint"}
