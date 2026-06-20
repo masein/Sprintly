@@ -44,6 +44,7 @@ export function CreateProjectModal({
   const [color, setColor] = useState<string>(COLORS[0]!);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ name?: string; key?: string }>({});
 
   useEffect(() => {
     if (!open) {
@@ -54,6 +55,7 @@ export function CreateProjectModal({
       setIcon("kanban");
       setColor(COLORS[0]!);
       setError(null);
+      setFieldErrors({});
     }
   }, [open]);
 
@@ -81,6 +83,15 @@ export function CreateProjectModal({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    // Inline required-field feedback instead of a silent no-op (QA F5).
+    const errs: { name?: string; key?: string } = {};
+    if (!name.trim()) errs.name = "Name is required.";
+    if (!key.trim()) errs.key = "Key is required.";
+    else if (!/^[A-Z][A-Z0-9]{1,9}$/.test(key))
+      errs.key = "Key must be 2–10 uppercase letters or digits, starting with a letter.";
+    setFieldErrors(errs);
+    if (errs.name || errs.key) return;
+
     setSubmitting(true);
     setError(null);
     try {
@@ -129,12 +140,22 @@ export function CreateProjectModal({
           </span>
           <input
             value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
+            onChange={(e) => {
+              setName(e.target.value);
+              if (fieldErrors.name) setFieldErrors((p) => ({ ...p, name: undefined }));
+            }}
             maxLength={80}
-            placeholder="Sprintly Internal"
-            className="block w-full rounded border border-white/10 bg-ink px-3 py-2 text-sm text-chrome outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            placeholder="e.g. Sprintly Internal"
+            aria-invalid={!!fieldErrors.name}
+            className={`block w-full rounded border bg-ink px-3 py-2 text-sm text-chrome outline-none focus:ring-1 placeholder:text-chrome-dim/50 placeholder:italic ${
+              fieldErrors.name
+                ? "border-red-500/60 focus:border-red-500 focus:ring-red-500"
+                : "border-white/10 focus:border-accent focus:ring-accent"
+            }`}
           />
+          {fieldErrors.name && (
+            <span className="mono block text-xs text-red-300">{fieldErrors.name}</span>
+          )}
         </label>
 
         <label className="block space-y-1.5">
@@ -146,12 +167,19 @@ export function CreateProjectModal({
             onChange={(e) => {
               setKey(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10));
               setKeyTouched(true);
+              if (fieldErrors.key) setFieldErrors((p) => ({ ...p, key: undefined }));
             }}
-            required
-            pattern="^[A-Z][A-Z0-9]{1,9}$"
-            placeholder="SPRT"
-            className="mono block w-full rounded border border-white/10 bg-ink px-3 py-2 text-sm text-chrome outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            placeholder="e.g. SPRT"
+            aria-invalid={!!fieldErrors.key}
+            className={`mono block w-full rounded border bg-ink px-3 py-2 text-sm text-chrome outline-none focus:ring-1 placeholder:text-chrome-dim/50 placeholder:italic ${
+              fieldErrors.key
+                ? "border-red-500/60 focus:border-red-500 focus:ring-red-500"
+                : "border-white/10 focus:border-accent focus:ring-accent"
+            }`}
           />
+          {fieldErrors.key && (
+            <span className="mono block text-xs text-red-300">{fieldErrors.key}</span>
+          )}
         </label>
 
         <div className="space-y-1.5">
@@ -215,7 +243,7 @@ export function CreateProjectModal({
           </button>
           <button
             type="submit"
-            disabled={submitting || !key || !name}
+            disabled={submitting}
             className="mono rounded bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? "spinning up…" : "$ git init project"}

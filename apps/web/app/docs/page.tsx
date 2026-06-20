@@ -126,6 +126,21 @@ export default function DocsPage() {
               Column counts follow the scope, and your choice is remembered per
               project.
             </p>
+            <p>
+              Click anywhere on a card to open it — the small{" "}
+              <span className="mono">KEY</span> link still works, but the whole
+              card is a target now (a real drag still moves the card; a click
+              that doesn&apos;t travel opens it). The{" "}
+              <span className="mono">+ add card</span> box stays available in
+              swimlane mode and drops the new card into the lane you add it from
+              (its assignee / label / priority). <kbd>Esc</kbd> dismisses any
+              inline editor — add-card, add-column, a column rename — the same as
+              the <span className="mono">:q cancel</span> control. Change a
+              card&apos;s <span className="mono">status</span> from the task
+              detail&apos;s <span className="mono">details</span> panel: the
+              dropdown lists the board&apos;s real columns, so moving status there
+              moves the card on the board too.
+            </p>
           </Section>
 
           <Section icon={ListChecks} title="Labels & custom fields">

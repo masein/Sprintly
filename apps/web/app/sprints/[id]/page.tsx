@@ -23,6 +23,7 @@ import {
 } from "@/lib/sprints";
 import { search } from "@/lib/search";
 import { createTask } from "@/lib/tasks";
+import { pluralize } from "@/lib/format";
 import type { ApiError } from "@/lib/api";
 
 export default function SprintDetailPage() {
@@ -112,7 +113,7 @@ export default function SprintDetailPage() {
       <header className="mb-6">
         <h1 className="text-3xl font-semibold">{sprint.name}</h1>
         <div className="mono mt-1 text-xs text-chrome-dim">
-          {sprint.starts_at.slice(0, 10)} → {sprint.ends_at.slice(0, 10)} · {sprint.task_count} tasks · {sprint.done_points}/{sprint.total_points} pts
+          {sprint.starts_at.slice(0, 10)} → {sprint.ends_at.slice(0, 10)} · {pluralize(sprint.task_count, "task")} · {sprint.done_points}/{sprint.total_points} pts
           {sprint.velocity_points != null && (
             <> · velocity {sprint.velocity_points}</>
           )}
