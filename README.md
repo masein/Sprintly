@@ -1,8 +1,18 @@
 # Sprintly
 
+[![CI](https://github.com/masein/Sprintly/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/masein/Sprintly/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/masein/Sprintly/branch/main/graph/badge.svg)](https://codecov.io/gh/masein/Sprintly)
+
 Self-hosted, dev-themed project management. Kanban-first, with sprints, time
 tracking, payroll, and an encrypted per-project secrets vault. Built for small
 software teams who'd rather use a thing than configure a thing.
+
+> **Coverage:** the badge reflects **unit + integration** line coverage. The
+> backend's domain/logic layer is integration-tested against a real Postgres;
+> the **HTTP route handlers** and the **web UI** are exercised by the Playwright
+> **e2e** suite, which runs against an un-instrumented build — so it isn't
+> counted here and the number understates real testing. See the `api` / `web`
+> flags on Codecov for the split.
 
 > Codename in the repo is **Sprintly**. The marketing name may change later;
 > the codename stays.
