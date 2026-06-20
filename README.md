@@ -7,11 +7,12 @@ Self-hosted, dev-themed project management. Kanban-first, with sprints, time
 tracking, payroll, and an encrypted per-project secrets vault. Built for small
 software teams who'd rather use a thing than configure a thing.
 
-> **Coverage:** the backend (`apps/api`, `apps/worker`) carries the bulk of the
-> line coverage via integration tests against a real Postgres; the web UI is
-> exercised by the Playwright e2e suite, with unit coverage measured on the
-> `lib/` logic layer. The badge blends both — see the `api` / `web` flags on
-> Codecov for the split.
+> **Coverage:** the badge reflects **unit + integration** line coverage. The
+> backend's domain/logic layer is integration-tested against a real Postgres;
+> the **HTTP route handlers** and the **web UI** are exercised by the Playwright
+> **e2e** suite, which runs against an un-instrumented build — so it isn't
+> counted here and the number understates real testing. See the `api` / `web`
+> flags on Codecov for the split.
 
 > Codename in the repo is **Sprintly**. The marketing name may change later;
 > the codename stays.
