@@ -9,6 +9,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\""
   },
   "dependencies": {

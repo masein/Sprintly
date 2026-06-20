@@ -145,7 +145,11 @@ jobs:
         working-directory: apps/api
         run: sqlx migrate run
       - name: Backend coverage (Rust → lcov)
-        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov-api.info
+        run: |
+          cargo llvm-cov --workspace --locked --lcov --output-path lcov-api.info
+          # Print a human-readable summary to the log + job summary (visible
+          # even before Codecov ingests the report).
+          cargo llvm-cov report --summary-only | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: pnpm/action-setup@v6
         with: { version: 9.12.0 }
       - uses: actions/setup-node@v6
@@ -155,18 +159,20 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - name: Web lib coverage (vitest → lcov)
-        run: pnpm --filter @sprintly/web test:unit -- --coverage
+        run: pnpm --filter @sprintly/web test:coverage
       - name: Upload backend coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: ./lcov-api.info
           flags: api
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
       - name: Upload web coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: ./apps/web/coverage/lcov.info
           flags: web
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
   # Dependency advisories. Non-blocking for now (warn, don't gate) — flip to
