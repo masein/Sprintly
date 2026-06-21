@@ -140,7 +140,8 @@ export function useMoveTask(projectId: string) {
 // Compute the new list after a move, without contacting the server. Used as
 // the optimistic update in useMoveTask. Mirrors the server's resolve_position
 // logic closely enough for the UI to feel right; server is still authoritative.
-function applyOptimisticMove(
+// Exported for unit testing.
+export function applyOptimisticMove(
   list: Task[],
   {
     taskKey,
