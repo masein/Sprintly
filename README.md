@@ -7,6 +7,9 @@ Self-hosted, dev-themed project management. Kanban-first, with sprints, time
 tracking, payroll, and an encrypted per-project secrets vault. Built for small
 software teams who'd rather use a thing than configure a thing.
 
+**Live site:** https://masein.github.io/Sprintly/ — the landing page, served from
+GitHub Pages (root `index.html`).
+
 > **Coverage:** the badge reflects **unit + integration** line coverage. The
 > backend's domain layer and the core HTTP routes (auth, projects, boards,
 > tasks, sprints) are integration-tested against a real Postgres; the rest of
