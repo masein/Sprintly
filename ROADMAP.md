@@ -572,6 +572,15 @@ manifest) and CSV.
 **Test plan:** Unit: mapping of sample fixtures. Integration: import fixture →
 expected rows; export contains expected entities.
 
+**Native Jira import (follow-up · ADR 0004):** a first-class Jira source for the
+"Export Excel CSV (all fields)" export, mapping assignee (email→name), priority,
+type, sub-tasks, epics, sprints, story points (a number custom field), and
+comments. The Jira issue key is stored as `tasks.external_ref`, so a re-import
+dedupes/updates instead of duplicating. CSV is shipped; the REST/JSON export is
+the next slice (same `JiraPlan` model). Robust RFC-4180 reader (the `csv` crate)
+handles multi-line cells; the `JIRA-TO-SPRINTLY.md` manual bridge is now
+superseded.
+
 ---
 
 ### `[x]` F14 — Invoicing / per-client billing

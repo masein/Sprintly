@@ -109,11 +109,13 @@ export function ImportExportModal({
             <Upload size={12} /> import
           </h3>
           <p className="text-xs text-chrome-dim">
-            A Trello board <span className="mono">.json</span> export, or a{" "}
+            A Trello board <span className="mono">.json</span> export, a{" "}
             <span className="mono">.csv</span> with a <span className="mono">name</span>{" "}
-            column (plus optional <span className="mono">description</span>,{" "}
-            <span className="mono">list</span>, <span className="mono">labels</span>).
-            Cards become tasks; lists become columns.
+            column, or a <span className="mono">Jira</span> &ldquo;Export Excel CSV
+            (all fields)&rdquo; export. Jira files are auto-detected and map richly —
+            assignee, priority, type, sub-tasks, epics, sprints, story points, and
+            comments. Re-importing the same Jira export updates cards instead of
+            duplicating them (matched by issue key).
           </p>
           <label className="mono flex cursor-pointer items-center gap-2 text-xs text-chrome-dim">
             <input
@@ -138,6 +140,7 @@ export function ImportExportModal({
                 <option value="auto">auto-detect</option>
                 <option value="trello">trello</option>
                 <option value="csv">csv</option>
+                <option value="jira">jira</option>
               </select>
             </div>
           )}
@@ -150,6 +153,7 @@ export function ImportExportModal({
               <div className="mono text-chrome">
                 {report.tasks_created} task{report.tasks_created === 1 ? "" : "s"}
                 {report.dry_run ? " would be created" : " created"}
+                {report.tasks_updated > 0 && `, ${report.tasks_updated} updated`}
               </div>
               {report.columns_created.length > 0 && (
                 <div>new columns: <span className="text-chrome">{report.columns_created.join(", ")}</span></div>
@@ -159,6 +163,18 @@ export function ImportExportModal({
               )}
               {report.labels_created.length > 0 && (
                 <div>new labels: <span className="text-chrome">{report.labels_created.join(", ")}</span></div>
+              )}
+              {report.epics_created.length > 0 && (
+                <div>new epics: <span className="text-chrome">{report.epics_created.join(", ")}</span></div>
+              )}
+              {report.sprints_created.length > 0 && (
+                <div>new sprints: <span className="text-chrome">{report.sprints_created.join(", ")}</span></div>
+              )}
+              {report.fields_created.length > 0 && (
+                <div>new fields: <span className="text-chrome">{report.fields_created.join(", ")}</span></div>
+              )}
+              {report.comments_created > 0 && (
+                <div>{report.comments_created} comment{report.comments_created === 1 ? "" : "s"} imported</div>
               )}
               {report.warnings.map((w, i) => (
                 <div key={i} className="text-amber-300">{w}</div>
