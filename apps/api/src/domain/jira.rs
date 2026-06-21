@@ -256,9 +256,8 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
 
     let mut issues = Vec::new();
     let mut warnings = Vec::new();
-    let mut row = 1; // header is row 1
-    for result in rdr.records() {
-        row += 1;
+    // Row numbers for error messages start at 2 — the header is row 1.
+    for (row, result) in (2..).zip(rdr.records()) {
         let rec = result
             .map_err(|e| AppError::BadRequest(format!("malformed Jira CSV row {row}: {e}")))?;
         let key = match first(&rec, &key_i) {
