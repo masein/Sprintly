@@ -8,11 +8,12 @@ tracking, payroll, and an encrypted per-project secrets vault. Built for small
 software teams who'd rather use a thing than configure a thing.
 
 > **Coverage:** the badge reflects **unit + integration** line coverage. The
-> backend's domain/logic layer is integration-tested against a real Postgres;
-> the **HTTP route handlers** and the **web UI** are exercised by the Playwright
-> **e2e** suite, which runs against an un-instrumented build — so it isn't
-> counted here and the number understates real testing. See the `api` / `web`
-> flags on Codecov for the split.
+> backend's domain layer and the core HTTP routes (auth, projects, boards,
+> tasks, sprints) are integration-tested against a real Postgres; the rest of
+> the **web UI** and the remaining routes are exercised by the Playwright
+> **e2e** suite, which runs against an un-instrumented build — so that part
+> isn't counted here and the number understates real testing. See the `api` /
+> `web` flags on Codecov for the split.
 
 > Codename in the repo is **Sprintly**. The marketing name may change later;
 > the codename stays.
