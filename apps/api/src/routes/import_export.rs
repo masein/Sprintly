@@ -53,12 +53,17 @@ async fn import(
         return Err(AppError::Forbidden);
     }
 
-    let format = ImportFormat::parse(req.format.as_deref().unwrap_or("auto"));
-    let plan = import_export::parse(&req.content, format)?;
+    let requested = ImportFormat::parse(req.format.as_deref().unwrap_or("auto"));
+    let format = import_export::resolve_format(&req.content, requested);
 
     let board_id = default_board(&state.db, ctx.id).await?;
-    let report =
-        import_export::apply_import(&state.db, ctx.id, board_id, &plan, req.dry_run).await?;
+    let report = if format == ImportFormat::Jira {
+        let plan = crate::domain::jira::parse_jira_csv(&req.content)?;
+        import_export::apply_jira_import(&state.db, ctx.id, board_id, &plan, req.dry_run).await?
+    } else {
+        let plan = import_export::parse(&req.content, format)?;
+        import_export::apply_import(&state.db, ctx.id, board_id, &plan, req.dry_run).await?
+    };
     Ok(Json(report))
 }
 

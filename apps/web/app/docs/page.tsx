@@ -212,6 +212,46 @@ export default function DocsPage() {
               resolution, rolled back) before you commit.
             </p>
             <p>
+              <span className="mono">Jira</span> gets a first-class importer: drop
+              in a Jira <span className="mono">&ldquo;Export Excel CSV (all
+              fields)&rdquo;</span> export and it&apos;s auto-detected (no need to
+              pick a format) and mapped richly. A re-import of the same export{" "}
+              <span className="text-chrome">updates</span> cards instead of
+              duplicating them — they&apos;re matched by Jira issue key.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="mono w-full text-xs">
+                <thead>
+                  <tr className="text-chrome-dim">
+                    <th className="py-1 pr-4 text-left font-normal">Jira</th>
+                    <th className="py-1 text-left font-normal">Sprintly</th>
+                  </tr>
+                </thead>
+                <tbody className="text-chrome-dim">
+                  {[
+                    ["Summary / Description", "title / description"],
+                    ["Status", "board column (To do / In progress / Done…)"],
+                    ["Labels (repeated columns)", "labels"],
+                    ["Assignee (email, then name)", "user — unmatched → unassigned + warning"],
+                    ["Priority Highest…Lowest", "p0 · p1 · p2 · p3"],
+                    ["Issue Type", "feature · bug · chore · spike · incident"],
+                    ["Epic / Epic Link", "epic (created, task assigned)"],
+                    ["Sub-task + Parent", "subtask under its parent"],
+                    ["Sprint", "sprint (created, task added)"],
+                    ["Story Points", "a “Story Points” number custom field"],
+                    ["Comment (date;author;body)", "task comment (author matched)"],
+                    ["Due date", "due date"],
+                    ["Issue key", "external ref → idempotent re-import"],
+                  ].map(([j, s]) => (
+                    <tr key={j} className="border-t border-white/5">
+                      <td className="py-1 pr-4 align-top text-chrome">{j}</td>
+                      <td className="py-1 align-top">{s}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p>
               Export the other way: a <span className="mono">JSON</span> bundle
               (tasks with comments and an attachment manifest — metadata, not the
               bytes) or a flat task <span className="mono">CSV</span>.

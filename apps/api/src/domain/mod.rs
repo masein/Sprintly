@@ -11,6 +11,7 @@ pub mod git_providers;
 pub mod import_export;
 pub mod integrations;
 pub mod invoicing;
+pub mod jira;
 pub mod labels;
 pub mod metrics;
 pub mod notifications;
