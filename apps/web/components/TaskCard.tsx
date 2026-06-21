@@ -3,6 +3,8 @@
 // Task card on the Kanban board. Stays small on purpose — the detail page
 // (Phase B) is where the heavy info lives.
 
+import { useRef } from "react";
+import { useRouter } from "next/navigation";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useQuery } from "@tanstack/react-query";
@@ -34,12 +36,25 @@ export function TaskCard({
   task: Task;
   canManage: boolean;
 }) {
+  const router = useRouter();
   const sortable = useSortable({
     id: task.id,
     data: { kind: "task", task },
     disabled: !canManage,
   });
   const Icon = TYPE_ICON[task.type] ?? Sparkles;
+
+  // Whole-card click opens the task (QA F7) — but the card is also a drag
+  // handle, so distinguish a click from a drag by how far the pointer moved
+  // between press and release. The dnd PointerSensor activates at 6px, so we
+  // use the same threshold: anything under it is a click, not a drag.
+  const downPos = useRef<{ x: number; y: number } | null>(null);
+  // dnd-kit owns onPointerDown to begin drag tracking; compose with it rather
+  // than overriding, so both navigation and drag keep working.
+  const { onPointerDown: dndPointerDown, ...dragListeners } = sortable.listeners ?? {};
+  function open() {
+    router.push(`/tasks/${task.key}`);
+  }
 
   // Tint label chips from the project's label registry (cached per project).
   const labelsQ = useQuery({
@@ -73,8 +88,25 @@ export function TaskCard({
       ref={sortable.setNodeRef}
       style={style}
       {...sortable.attributes}
-      {...sortable.listeners}
-      className="group block cursor-grab rounded border border-white/10 bg-ink p-2.5 text-left transition hover:border-white/20 active:cursor-grabbing"
+      {...dragListeners}
+      role="button"
+      tabIndex={0}
+      onPointerDown={(e) => {
+        downPos.current = { x: e.clientX, y: e.clientY };
+        dndPointerDown?.(e);
+      }}
+      onClick={(e) => {
+        const d = downPos.current;
+        if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) return; // a drag, not a click
+        open();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      }}
+      className="group block cursor-pointer rounded border border-white/10 bg-ink p-2.5 text-left transition hover:border-white/20 active:cursor-grabbing"
     >
       <div className="mb-1 flex items-center gap-2">
         <span

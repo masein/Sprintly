@@ -19,10 +19,10 @@ import { SubtasksPanel, LinksPanel } from "@/components/Relations";
 import { FieldValuesPanel } from "@/components/FieldValuesPanel";
 import { GitLinksPanel } from "@/components/GitLinksPanel";
 import { TaskTimer } from "@/components/TaskTimer";
-import { deleteTask, editTask, getTask, type Task } from "@/lib/tasks";
+import { deleteTask, editTask, getTask, moveTask, type Task } from "@/lib/tasks";
 import { assignTaskEpic, listEpics } from "@/lib/roadmap";
 import { me } from "@/lib/auth-bundle";
-import { getProject, listMembers } from "@/lib/projects";
+import { getProject, listBoards, listMembers } from "@/lib/projects";
 import { labelColorMap, listProjectLabels } from "@/lib/labels";
 import type { ApiError } from "@/lib/api";
 
@@ -293,7 +293,7 @@ function Sidebar({ task, canEdit }: { task: Task; canEdit: boolean }) {
           </Link>
         </div>
       )}
-      <Field label="status" value={task.status} />
+      <StatusField task={task} canEdit={canEdit} />
       <Field
         label="priority"
         value={task.priority}
@@ -314,6 +314,54 @@ function Sidebar({ task, canEdit }: { task: Task; canEdit: boolean }) {
       )}
       <LabelsField task={task} canEdit={canEdit} />
     </section>
+  );
+}
+
+// Status picker (QA F6): a dropdown of the board's real columns. Choosing one
+// moves the card to that column, which is what sets `status` server-side — so
+// the board and the detail panel can never disagree. Reuses the move endpoint;
+// no new API.
+function StatusField({ task, canEdit }: { task: Task; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const boardsQ = useQuery({
+    queryKey: ["boards", task.project_key],
+    queryFn: () => listBoards(task.project_key),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const move = useMutation({
+    mutationFn: (column_id: string) => moveTask(task.key, { column_id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task", task.key] });
+      qc.invalidateQueries({ queryKey: ["tasks", task.project_id] });
+    },
+  });
+
+  const board = (boardsQ.data ?? []).find((b) => b.id === task.board_id);
+  const columns = board?.columns ?? [];
+  const current = columns.find((c) => c.id === task.column_id);
+
+  // Until the columns load (or if we can't edit), show the static status text.
+  if (!canEdit || columns.length === 0) {
+    return <Field label="status" value={current?.name ?? task.status} />;
+  }
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">status</span>
+      <select
+        value={task.column_id}
+        onChange={(e) => move.mutate(e.target.value)}
+        aria-label="status"
+        disabled={move.isPending}
+        className="mono max-w-[60%] truncate rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome disabled:opacity-50"
+      >
+        {columns.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 

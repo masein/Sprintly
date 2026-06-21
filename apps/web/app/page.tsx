@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { SessionBadge } from "@/components/SessionBadge";
 import { Sprint } from "@/components/Sprint";
+import { APP_VERSION } from "@/lib/version";
 
 export default function Home() {
   const apiBase =
@@ -13,7 +14,7 @@ export default function Home() {
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col justify-center gap-10 px-6 py-20">
       <div className="flex items-center justify-between">
         <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-          sprintly · v0.0.1 · M1
+          sprintly · v{APP_VERSION}
         </div>
         <SessionBadge />
       </div>

@@ -517,3 +517,76 @@ async fn fetch_task_exposes_parent_key(pool: PgPool) {
     );
     assert_eq!(parent_of(parent_key.clone()).await, None);
 }
+
+/// The board scope (F10): with a sprint selected, list_tasks returns only that
+/// sprint's tasks; with no scope ("all") it returns the whole project; and
+/// `active_sprint_id` resolves the active sprint (or None before one starts).
+#[sqlx::test(migrations = "./migrations")]
+async fn board_scopes_to_the_active_sprint(pool: PgPool) {
+    use sprintly_api::domain::sprints as sprint_domain;
+
+    let owner = make_user(&pool).await;
+    let (pid, board, col) = make_project_with_board(&pool, "SCO", owner).await;
+
+    // No active sprint yet → the helper returns None (board stays "all tasks").
+    assert!(sprint_domain::active_sprint_id(&pool, pid)
+        .await
+        .unwrap()
+        .is_none());
+
+    let sprint = Uuid::now_v7();
+    sqlx::query(
+        r#"INSERT INTO sprints (id, project_id, name, state, starts_at, ends_at)
+           VALUES ($1, $2, 'S', 'active', now() - interval '1 day', now() + interval '6 days')"#,
+    )
+    .bind(sprint)
+    .bind(pid)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // One task in the sprint, one left in the backlog (no sprint).
+    let (in_sprint, in_sprint_key) = make_task(&pool, pid, board, col, 1024.0).await;
+    sqlx::query("UPDATE tasks SET sprint_id = $2 WHERE id = $1")
+        .bind(in_sprint)
+        .bind(sprint)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_backlog, backlog_key) = make_task(&pool, pid, board, col, 2048.0).await;
+
+    // The helper now resolves the active sprint.
+    assert_eq!(
+        sprint_domain::active_sprint_id(&pool, pid).await.unwrap(),
+        Some(sprint)
+    );
+
+    // Mirror the list_tasks board WHERE, parameterised by the resolved scope.
+    let board_keys = |scope: Option<Uuid>| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>(
+                r#"SELECT key FROM tasks
+                    WHERE project_id = $1
+                      AND deleted_at IS NULL
+                      AND parent_task_id IS NULL
+                      AND ($2::uuid IS NULL OR sprint_id = $2)
+                    ORDER BY key"#,
+            )
+            .bind(pid)
+            .bind(scope)
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+        }
+    };
+
+    // Scoped to the active sprint → only the sprint task.
+    assert_eq!(board_keys(Some(sprint)).await, vec![in_sprint_key.clone()]);
+    // No scope ("all tasks") → the whole project, sprint + backlog.
+    let mut all = board_keys(None).await;
+    all.sort();
+    let mut expected = vec![in_sprint_key, backlog_key];
+    expected.sort();
+    assert_eq!(all, expected);
+}

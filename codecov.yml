@@ -1,0 +1,30 @@
+# Codecov configuration. Coverage is informational — it reports and trends but
+# never blocks a merge (the gating checks are api/web/e2e in CI). Two flags keep
+# backend and web coverage honest and separate.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+        target: auto
+    patch:
+      default:
+        informational: true
+
+flag_management:
+  default_rules:
+    carryforward: true # a web-only PR keeps the last api coverage, and vice versa
+
+flags:
+  api:
+    paths:
+      - apps/api/
+      - apps/worker/
+  web:
+    paths:
+      - apps/web/
+
+# A single tidy PR comment, not per-line noise.
+comment:
+  layout: "reach, diff, flags"
+  require_changes: false

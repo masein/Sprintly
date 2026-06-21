@@ -23,6 +23,11 @@ test-results/
 playwright-report/
 .playwright/
 
+# Coverage artifacts (vitest / cargo-llvm-cov)
+coverage/
+*.lcov
+lcov*.info
+
 # Editors
 .vscode/
 .idea/

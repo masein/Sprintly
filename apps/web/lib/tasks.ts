@@ -31,11 +31,17 @@ export type Task = {
   completed_at: string | null;
 };
 
-export const listTasks = (projectKey: string, filter?: string) =>
-  api<{ items: Task[] }>(
-    `/projects/${encodeURIComponent(projectKey)}/tasks` +
-      (filter ? `?filter=${encodeURIComponent(filter)}` : ""),
+// `sprint` scopes the board: "all" (or undefined) for the whole project,
+// "active" for the active sprint, or a specific sprint id.
+export const listTasks = (projectKey: string, filter?: string, sprint?: string) => {
+  const qs = new URLSearchParams();
+  if (filter) qs.set("filter", filter);
+  if (sprint && sprint !== "all") qs.set("sprint", sprint);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return api<{ items: Task[] }>(
+    `/projects/${encodeURIComponent(projectKey)}/tasks${suffix}`,
   ).then((r) => r.items);
+};
 
 export const getTask = (taskKey: string) =>
   api<Task>(`/tasks/${encodeURIComponent(taskKey)}`);
@@ -79,11 +85,17 @@ export const moveTask = (
 
 // ─── Hooks ──────────────────────────────────────────────────────────────────
 
-export function useTasks(projectKey: string, projectId: string, filter?: string) {
+export function useTasks(
+  projectKey: string,
+  projectId: string,
+  filter?: string,
+  sprint?: string,
+  enabled = true,
+) {
   return useQuery({
-    queryKey: ["tasks", projectId, filter ?? null],
-    queryFn: () => listTasks(projectKey, filter),
-    enabled: !!projectKey && !!projectId,
+    queryKey: ["tasks", projectId, filter ?? null, sprint ?? null],
+    queryFn: () => listTasks(projectKey, filter, sprint),
+    enabled: enabled && !!projectKey && !!projectId,
   });
 }
 
@@ -128,7 +140,8 @@ export function useMoveTask(projectId: string) {
 // Compute the new list after a move, without contacting the server. Used as
 // the optimistic update in useMoveTask. Mirrors the server's resolve_position
 // logic closely enough for the UI to feel right; server is still authoritative.
-function applyOptimisticMove(
+// Exported for unit testing.
+export function applyOptimisticMove(
   list: Task[],
   {
     taskKey,

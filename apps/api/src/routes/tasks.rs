@@ -139,6 +139,11 @@ pub struct MoveTaskReq {
 pub struct ListTasksQuery {
     /// Tiny DSL: "assignee:me+status:in_progress+label:backend".
     pub filter: Option<String>,
+    /// Sprint scope for the board:
+    ///   omitted | "all"   → every top-level task (the backlog + every sprint)
+    ///   "active"          → the active sprint's tasks (falls back to all if none)
+    ///   "<uuid>"          → a specific sprint's tasks
+    pub sprint: Option<String>,
 }
 
 // ─── handlers ───────────────────────────────────────────────────────────────
@@ -392,6 +397,22 @@ async fn list_tasks(
         Some(crate::domain::fields::matching_task_ids(&state.db, ctx.id, &filter.fields).await?)
     };
 
+    // Sprint scope (F10). Resolves to an optional sprint id; `None` means "no
+    // scoping" — i.e. the whole project. "active" with no active sprint also
+    // falls back to None so the board stays useful before a sprint starts.
+    let scope_sprint: Option<Uuid> = match q.sprint.as_deref() {
+        None | Some("all") => None,
+        Some("active") => sprint_domain::active_sprint_id(&state.db, ctx.id).await?,
+        Some(raw) => {
+            let id = Uuid::parse_str(raw)
+                .map_err(|_| AppError::Validation("invalid sprint scope".into()))?;
+            if !sprint_domain::sprint_belongs_to_project(&state.db, id, ctx.id).await? {
+                return Err(AppError::NotFound);
+            }
+            Some(id)
+        }
+    };
+
     let rows = sqlx::query!(
         r#"
         SELECT t.id              AS "id!: Uuid",
@@ -429,6 +450,8 @@ async fn list_tasks(
           AND  ($4::text  IS NULL OR t.priority = $4)
           AND  ($5::text  IS NULL OR t.type     = $5)
           AND  ($6::text[] IS NULL OR t.labels @> $6)
+          -- Board scope (F10): when a sprint is selected, show only its tasks.
+          AND  ($7::uuid  IS NULL OR t.sprint_id = $7)
         ORDER  BY t.column_id, t.order_in_column ASC
         "#,
         ctx.id,
@@ -436,7 +459,8 @@ async fn list_tasks(
         filter.status,
         filter.priority,
         filter.r#type,
-        filter.labels.as_deref()
+        filter.labels.as_deref(),
+        scope_sprint
     )
     .fetch_all(&state.db)
     .await?;

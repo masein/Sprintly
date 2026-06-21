@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Rows3, Save, Trash2, X } from "lucide-react";
+import { Rows3, Save, Target, Trash2, X } from "lucide-react";
 import {
   createBoardView,
   deleteBoardView,
@@ -14,6 +14,7 @@ import {
   type BoardView,
   type GroupBy,
 } from "@/lib/boardViews";
+import type { Sprint } from "@/lib/sprints";
 import type { Chip } from "./BoardFilters";
 import type { ApiError } from "@/lib/api";
 
@@ -26,6 +27,10 @@ export function BoardViewBar({
   activeViewId,
   onApplyView,
   onGroupByChange,
+  sprints,
+  activeSprintId,
+  scope,
+  onScopeChange,
 }: {
   projectKey: string;
   chips: Chip[];
@@ -33,6 +38,10 @@ export function BoardViewBar({
   activeViewId: string | null;
   onApplyView: (v: BoardView) => void;
   onGroupByChange: (g: GroupBy) => void;
+  sprints: Sprint[];
+  activeSprintId: string | null;
+  scope: string;
+  onScopeChange: (s: string) => void;
 }) {
   const qc = useQueryClient();
   const q = useQuery({
@@ -68,8 +77,35 @@ export function BoardViewBar({
   const views = q.data ?? [];
   const active = views.find((v) => v.id === activeViewId) ?? null;
 
+  const activeSprint = sprints.find((s) => s.id === activeSprintId) ?? null;
+  // Specific sprints to pin to, excluding the running one (it's the dynamic
+  // "active sprint" entry already).
+  const pinnable = sprints.filter((s) => s.id !== activeSprintId);
+
   return (
     <div className="mb-2 flex flex-wrap items-center gap-2">
+      <label className="mono flex items-center gap-1 text-[11px] text-chrome-dim">
+        <Target size={12} /> scope
+        <select
+          aria-label="board scope"
+          value={scope}
+          onChange={(e) => onScopeChange(e.target.value)}
+          className="mono rounded border border-white/10 bg-ink px-1.5 py-0.5 text-[11px] text-chrome"
+        >
+          {activeSprint && (
+            <option value="active">active sprint · {activeSprint.name}</option>
+          )}
+          <option value="all">
+            {activeSprint ? "all tasks" : "all tasks (no active sprint)"}
+          </option>
+          {pinnable.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name} · {s.state}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <label className="mono flex items-center gap-1 text-[11px] text-chrome-dim">
         view
         <select
