@@ -8,6 +8,8 @@ export {
   me,
   twoFactorLogin,
   isTwoFactorChallenge,
+  isMustChangePassword,
+  changePasswordForced,
   type Me,
   type AuthResponse,
   type LoginResult,

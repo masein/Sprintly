@@ -579,7 +579,10 @@ comments. The Jira issue key is stored as `tasks.external_ref`, so a re-import
 dedupes/updates instead of duplicating. CSV is shipped; the REST/JSON export is
 the next slice (same `JiraPlan` model). Robust RFC-4180 reader (the `csv` crate)
 handles multi-line cells; the `JIRA-TO-SPRINTLY.md` manual bridge is now
-superseded.
+superseded. Tuned for a faithful **historical** migration: imported sprints land
+`completed` (with real dates/state, the in-flight one left active), and an opt-in
+provisions Sprintly users for unmatched assignees/reporters with a force-reset
+temp password (`users.must_change_password`).
 
 ---
 

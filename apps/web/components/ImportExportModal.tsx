@@ -30,6 +30,9 @@ export function ImportExportModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  // Jira: provision a user for each unmatched assignee/reporter (off by default).
+  const [createUsers, setCreateUsers] = useState(false);
+  const [tempPassword, setTempPassword] = useState("123456");
 
   async function readFile(file: File) {
     setError(null);
@@ -47,7 +50,13 @@ export function ImportExportModal({
     setBusy(true);
     setError(null);
     try {
-      const res = await importProject(projectKey, { format, content, dry_run: dryRun });
+      const res = await importProject(projectKey, {
+        format,
+        content,
+        dry_run: dryRun,
+        create_missing_users: createUsers,
+        temp_password: createUsers ? tempPassword : undefined,
+      });
       if (dryRun) {
         setReport(res);
       } else {
@@ -145,6 +154,37 @@ export function ImportExportModal({
             </div>
           )}
 
+          {/* Jira: optional user provisioning. */}
+          <label className="mono flex items-start gap-2 text-[11px] text-chrome-dim">
+            <input
+              type="checkbox"
+              checked={createUsers}
+              onChange={(e) => {
+                setCreateUsers(e.target.checked);
+                setReport(null);
+              }}
+              className="mt-0.5"
+            />
+            <span>
+              create missing users (Jira) — provision a Sprintly account for each
+              unmatched assignee/reporter, add them to the project, and assign
+              their tasks. They sign in with the temp password below and must set
+              a new one.
+            </span>
+          </label>
+          {createUsers && (
+            <label className="mono flex items-center gap-2 pl-6 text-[11px] text-chrome-dim">
+              temp password
+              <input
+                type="text"
+                value={tempPassword}
+                onChange={(e) => setTempPassword(e.target.value)}
+                aria-label="temporary password"
+                className="rounded border border-white/10 bg-ink px-1.5 py-0.5 text-[11px] text-chrome"
+              />
+            </label>
+          )}
+
           {report && (
             <div className="space-y-1 rounded border border-white/10 bg-ink p-2 text-[11px] text-chrome-dim">
               <div className="mono uppercase tracking-widest text-chrome-dim">
@@ -175,6 +215,12 @@ export function ImportExportModal({
               )}
               {report.comments_created > 0 && (
                 <div>{report.comments_created} comment{report.comments_created === 1 ? "" : "s"} imported</div>
+              )}
+              {(report.users_created > 0 || report.users_matched > 0) && (
+                <div>
+                  users: <span className="text-chrome">{report.users_created} created</span>,{" "}
+                  {report.users_matched} matched
+                </div>
               )}
               {report.warnings.map((w, i) => (
                 <div key={i} className="text-amber-300">{w}</div>

@@ -11,6 +11,8 @@ import {
   register,
   twoFactorLogin,
   isTwoFactorChallenge,
+  isMustChangePassword,
+  changePasswordForced,
   type ApiError,
 } from "@/lib/auth-bundle";
 
@@ -28,6 +30,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
   // Set once the password step succeeds but the account needs a second factor.
   const [challenge, setChallenge] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  // Set when a provisioned account must set a new password before getting in.
+  const [resetChallenge, setResetChallenge] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState("");
 
   function done() {
     router.push("/");
@@ -44,6 +49,11 @@ export function AuthForm({ mode }: { mode: Mode }) {
         if (isTwoFactorChallenge(res)) {
           // Hold here — switch to the code step instead of navigating.
           setChallenge(res.challenge);
+          return;
+        }
+        if (isMustChangePassword(res)) {
+          // Provisioned account — force a new password before any session.
+          setResetChallenge(res.challenge);
           return;
         }
       } else {
@@ -81,6 +91,62 @@ export function AuthForm({ mode }: { mode: Mode }) {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function onSubmitNewPassword(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await changePasswordForced(resetChallenge!, newPassword);
+      done();
+    } catch (err) {
+      const apiErr = err as unknown as ApiError;
+      setError(
+        apiErr.code === "validation"
+          ? "Pick a password of at least 10 characters."
+          : "That didn't work — your reset link may have expired. Sign in again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Force-reset step: a provisioned account must set its own password first.
+  if (resetChallenge) {
+    return (
+      <form onSubmit={onSubmitNewPassword} className="space-y-5">
+        <p className="text-sm text-chrome-dim">
+          This account was set up with a temporary password. Choose your own (at
+          least 10 characters) to finish signing in.
+        </p>
+        <Field
+          label="New password"
+          type="password"
+          value={newPassword}
+          onChange={setNewPassword}
+          autoComplete="new-password"
+          minLength={10}
+          autoFocus
+          required
+        />
+        {error && (
+          <div
+            role="alert"
+            className="mono rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200"
+          >
+            {error}
+          </div>
+        )}
+        <button
+          type="submit"
+          disabled={submitting || newPassword.length < 10}
+          className="mono w-full rounded bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {submitting ? "setting…" : "$ set password"}
+        </button>
+      </form>
+    );
   }
 
   // Second-factor step: shown after a correct password on a 2FA account.

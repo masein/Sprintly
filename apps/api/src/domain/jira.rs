@@ -53,6 +53,7 @@ pub struct JiraIssue {
     pub priority: Option<String>,
     pub labels: Vec<String>,
     pub assignee: Option<String>,
+    pub reporter: Option<String>,
     /// Sub-task parent (Jira "Parent" column).
     pub parent_key: Option<String>,
     /// Epic association (Jira "Epic Link" key, or an epic name).
@@ -130,6 +131,24 @@ pub fn match_user(raw: &str, users: &[(Uuid, String, String)]) -> Option<Uuid> {
         .find(|(_, email, _)| *email == r)
         .or_else(|| users.iter().find(|(_, _, name)| *name == r))
         .map(|(id, _, _)| *id)
+}
+
+/// Derive a Sprintly handle from a raw Jira name/email: lowercase, keep
+/// `[a-z0-9]`, and clamp to 3–32 chars. Uniqueness is the caller's job (it
+/// appends a suffix on collision). Empty input → "user".
+pub fn slug_handle(raw: &str) -> String {
+    // If it's an email, slug the local part only.
+    let base = raw.split('@').next().unwrap_or(raw);
+    let mut s: String = base
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .take(32)
+        .collect();
+    if s.len() < 3 {
+        s = format!("user{s}");
+    }
+    s
 }
 
 /// Jira CSV comment cell is `created;author;body` (body may itself contain `;`).
@@ -335,6 +354,7 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
     let status_i = idxs_exact(&by, &["status"]);
     let priority_i = idxs_exact(&by, &["priority"]);
     let assignee_i = idxs_exact(&by, &["assignee"]);
+    let reporter_i = idxs_exact(&by, &["reporter", "creator"]);
     let labels_i = idxs_exact(&by, &["labels"]);
     let sprint_i = idxs_exact(&by, &["sprint"]);
     let comment_i = idxs_exact(&by, &["comment"]);
@@ -412,6 +432,7 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
             priority: first(&rec, &priority_i),
             labels,
             assignee: first(&rec, &assignee_i),
+            reporter: first(&rec, &reporter_i),
             parent_key: first(&rec, &parent_i),
             epic: first(&rec, &epic_i),
             sprint: current_sprint,
@@ -458,6 +479,15 @@ mod tests {
         assert_eq!(map_issue_type("Spike"), "spike");
         assert_eq!(map_issue_type("Incident"), "incident");
         assert_eq!(map_issue_type("Epic"), "feature"); // epics handled separately
+    }
+
+    #[test]
+    fn handle_slugging() {
+        assert_eq!(slug_handle("Sam Adams"), "samadams");
+        assert_eq!(slug_handle("jo.march@x.test"), "jomarch"); // email → local part
+        assert_eq!(slug_handle("J"), "userj"); // padded to >= 3 chars
+        assert_eq!(slug_handle(""), "user");
+        assert!(slug_handle("a-very-long-name-that-keeps-on-going-forever").len() <= 32);
     }
 
     #[test]

@@ -35,6 +35,8 @@ const EXEMPT_PATHS: &[&str] = &[
     "/api/v1/auth/refresh",
     "/api/v1/auth/password/reset/request",
     "/api/v1/auth/password/reset/confirm",
+    // Force-reset spends a signed challenge (no cookie session yet), like 2FA.
+    "/api/v1/auth/password/change",
     // Inbound webhook authenticates via HMAC signature, not a cookie.
     "/api/v1/integrations/github/webhook",
     // probes are GETs, but defense in depth:

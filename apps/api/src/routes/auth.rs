@@ -49,6 +49,8 @@ pub fn router() -> Router<AppState> {
         .route("/auth/refresh", post(refresh))
         .route("/auth/password/reset/request", post(password_reset_request))
         .route("/auth/password/reset/confirm", post(password_reset_confirm))
+        // Force-reset: spend the challenge from a must-change-password login.
+        .route("/auth/password/change", post(password_change))
         // OIDC SSO (F10).
         .route("/auth/oidc/status", get(oidc_status))
         .route("/auth/oidc/start", get(oidc_start))
@@ -219,11 +221,12 @@ async fn login(
 
     let row = sqlx::query!(
         r#"
-        SELECT id               AS "id!: Uuid",
-               password_hash    AS "password_hash!: String",
-               role             AS "role!: String",
-               status           AS "status!: String",
-               totp_enrolled_at AS "totp_enrolled_at?: chrono::DateTime<chrono::Utc>"
+        SELECT id                   AS "id!: Uuid",
+               password_hash        AS "password_hash!: String",
+               role                 AS "role!: String",
+               status               AS "status!: String",
+               must_change_password AS "must_change_password!: bool",
+               totp_enrolled_at     AS "totp_enrolled_at?: chrono::DateTime<chrono::Utc>"
         FROM   users
         WHERE  email = $1 AND deleted_at IS NULL
         "#,
@@ -257,6 +260,18 @@ async fn login(
 
     if user.status != "active" {
         return Err(AppError::Forbidden);
+    }
+
+    // Force-reset step-up: a provisioned account (e.g. from a Jira import) must
+    // set its own password before it gets a session. Hand back a short-lived
+    // challenge the client spends at POST /auth/password/change.
+    if user.must_change_password {
+        let challenge = tokens::mint_pwchange_challenge(&state.cfg.auth, user.id, &user.role)?;
+        return Ok(Json(json!({
+            "must_change_password_required": true,
+            "challenge": challenge,
+        }))
+        .into_response());
     }
 
     // 2FA step-up: if the account has a confirmed second factor, the password
@@ -505,6 +520,47 @@ async fn password_reset_confirm(
     tx.commit().await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct PasswordChangeReq {
+    /// The challenge token returned by /auth/login for a must-change account.
+    #[validate(length(min = 1))]
+    pub challenge: String,
+    #[validate(length(min = 10, max = 200))]
+    pub new_password: String,
+}
+
+/// Spend a force-reset challenge: set a fresh password, clear the flag, and hand
+/// back a normal session. This is the only way a provisioned must-change account
+/// gets in.
+async fn password_change(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<PasswordChangeReq>,
+) -> AppResult<Response> {
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
+
+    let claims = tokens::verify_pwchange_challenge(&state.cfg.auth, &req.challenge)?;
+    let hash = password::hash(&state.cfg.auth, &req.new_password)?;
+    let updated = sqlx::query(
+        r#"UPDATE users SET password_hash = $1, must_change_password = false
+            WHERE id = $2 AND deleted_at IS NULL"#,
+    )
+    .bind(&hash)
+    .bind(claims.sub)
+    .execute(&state.db)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(AppError::Unauthorized);
+    }
+
+    Ok(
+        issue_session_response(&state, claims.sub, &claims.role, &headers)
+            .await?
+            .into_response(),
+    )
 }
 
 // ─── OIDC SSO (F10) ───────────────────────────────────────────────────────────

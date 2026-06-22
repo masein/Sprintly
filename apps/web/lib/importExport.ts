@@ -19,12 +19,20 @@ export type ImportReport = {
   tasks_created: number;
   tasks_updated: number;
   comments_created: number;
+  users_created: number;
+  users_matched: number;
   warnings: string[];
 };
 
 export const importProject = (
   key: string,
-  body: { format: ImportFormat; content: string; dry_run: boolean },
+  body: {
+    format: ImportFormat;
+    content: string;
+    dry_run: boolean;
+    create_missing_users?: boolean;
+    temp_password?: string;
+  },
 ) =>
   api<ImportReport>(`/projects/${encodeURIComponent(key)}/import`, {
     method: "POST",
