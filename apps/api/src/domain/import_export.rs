@@ -677,32 +677,65 @@ pub async fn apply_jira_import(
         .into_iter()
         .map(|(id, n)| (n, id))
         .collect();
-    for issue in &plan.issues {
-        if let Some(name) = issue
-            .sprint
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            let key = name.to_lowercase();
-            if sprint_by_name.contains_key(&key) {
-                continue;
-            }
-            let id = Uuid::now_v7();
-            // Jira CSV gives a sprint name but no reliable window/state — create
-            // a planned sprint with a default fortnight; the lead can adjust.
-            sqlx::query(
-                r#"INSERT INTO sprints (id, project_id, name, starts_at, ends_at)
-                   VALUES ($1, $2, $3, now(), now() + interval '14 days')"#,
-            )
-            .bind(id)
-            .bind(project_id)
-            .bind(name)
-            .execute(&mut *tx)
-            .await?;
-            sprint_by_name.insert(key, id);
-            report.sprints_created.push(name.to_string());
+    // At most one active sprint per project — track whether one already exists.
+    let mut active_taken: bool = {
+        let existing: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM sprints WHERE project_id = $1 AND state = 'active' AND deleted_at IS NULL LIMIT 1",
+        )
+        .bind(project_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        existing.is_some()
+    };
+    for sp in &plan.sprints {
+        let name = sp.name.trim();
+        let key = name.to_lowercase();
+        if key.is_empty() || sprint_by_name.contains_key(&key) {
+            continue;
         }
+        // Jira sprint state → Sprintly state, honouring the one-active rule.
+        let mut state = match sp.state.as_deref() {
+            Some("active") => "active",
+            Some("closed") | Some("completed") => "completed",
+            _ => "planned",
+        };
+        if state == "active" {
+            if active_taken {
+                report.warnings.push(format!(
+                    "sprint '{name}' was active in Jira but another sprint is already active — imported as planned"
+                ));
+                state = "planned";
+            } else {
+                active_taken = true;
+            }
+        }
+        let started_at = if state == "active" || state == "completed" {
+            sp.start
+        } else {
+            None
+        };
+        let completed_at = if state == "completed" { sp.end } else { None };
+        let id = Uuid::now_v7();
+        // Carry the Jira window when present; otherwise default to a fortnight.
+        sqlx::query(
+            r#"INSERT INTO sprints (id, project_id, name, state, starts_at, ends_at, started_at, completed_at)
+               VALUES ($1, $2, $3, $4,
+                       COALESCE($5, now()),
+                       COALESCE($6, COALESCE($5, now()) + interval '14 days'),
+                       $7, $8)"#,
+        )
+        .bind(id)
+        .bind(project_id)
+        .bind(name)
+        .bind(state)
+        .bind(sp.start)
+        .bind(sp.end)
+        .bind(started_at)
+        .bind(completed_at)
+        .execute(&mut *tx)
+        .await?;
+        sprint_by_name.insert(key, id);
+        report.sprints_created.push(name.to_string());
     }
 
     // ── story-points custom field (created once, if any issue carries points) ──
@@ -830,18 +863,27 @@ pub async fn apply_jira_import(
             // Comments only land when the task is first created — keeps a
             // re-import idempotent (no duplicate comment trails).
             for c in &issue.comments {
-                let author = c
+                let matched = c
                     .author
                     .as_deref()
                     .and_then(|a| jira::match_user(a, &users));
+                // If the author has no Sprintly account, preserve their name in
+                // the body so attribution survives the migration.
+                let body = match (&matched, c.author.as_deref()) {
+                    (None, Some(author)) if !author.trim().is_empty() => {
+                        format!("> imported from Jira — {}\n\n{}", author.trim(), c.body)
+                    }
+                    _ => c.body.clone(),
+                };
                 sqlx::query(
-                    r#"INSERT INTO task_comments (id, task_id, author_id, body)
-                       VALUES ($1, $2, $3, $4)"#,
+                    r#"INSERT INTO task_comments (id, task_id, author_id, body, created_at)
+                       VALUES ($1, $2, $3, $4, COALESCE($5, now()))"#,
                 )
                 .bind(Uuid::now_v7())
                 .bind(id)
-                .bind(author)
-                .bind(&c.body)
+                .bind(matched)
+                .bind(body)
+                .bind(c.created)
                 .execute(&mut *tx)
                 .await?;
                 report.comments_created += 1;
@@ -871,36 +913,59 @@ pub async fn apply_jira_import(
         }
     }
 
-    // ── pass 2: parent / epic / sprint links (all task ids now known) ──
+    // ── pass 2: hierarchy (epic membership + sub-task nesting) + sprint ──
+    // All task ids are known now. Jira carries the parent relationship two ways:
+    // classic projects use a separate "Epic Link", while team-managed projects
+    // fold everything into "Parent" (a story's Parent *is* its epic). So we
+    // resolve epic membership from either, and treat a Parent that points at a
+    // real task as sub-task nesting.
+    let mut missing_parents: Vec<String> = Vec::new();
     for issue in plan.issues.iter().filter(|i| !i.is_epic()) {
         let Some(&task_id) = key_to_task.get(&issue.key) else {
             continue;
         };
-        // Sub-task parent (only if the parent was itself imported as a task).
-        if let Some(parent_key) = issue.parent_key.as_deref() {
-            if let Some(&parent_id) = key_to_task.get(parent_key) {
+
+        // Epic membership (J2): an explicit Epic Link, else a Parent that is an
+        // epic in this import (by Jira key).
+        let epic_id = issue
+            .epic
+            .as_deref()
+            .and_then(|r| {
+                epic_by_key
+                    .get(r)
+                    .copied()
+                    .or_else(|| epic_by_name.get(&r.trim().to_lowercase()).copied())
+            })
+            .or_else(|| {
+                issue
+                    .parent_key
+                    .as_deref()
+                    .and_then(|p| epic_by_key.get(p).copied())
+            });
+        if let Some(eid) = epic_id {
+            sqlx::query("UPDATE tasks SET epic_id = $2 WHERE id = $1")
+                .bind(task_id)
+                .bind(eid)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        // Sub-task nesting (J1): a Parent that points at a non-epic task we
+        // imported. If the parent is missing from this import, stay top-level
+        // and warn (don't silently flatten).
+        if let Some(pk) = issue.parent_key.as_deref() {
+            if let Some(&parent_id) = key_to_task.get(pk) {
                 sqlx::query("UPDATE tasks SET parent_task_id = $2 WHERE id = $1")
                     .bind(task_id)
                     .bind(parent_id)
                     .execute(&mut *tx)
                     .await?;
+            } else if !epic_by_key.contains_key(pk) {
+                missing_parents.push(format!("{} → {}", issue.key, pk));
             }
         }
-        // Epic: by Jira epic key, else by name.
-        if let Some(epic_ref) = issue.epic.as_deref() {
-            let epic_id = epic_by_key
-                .get(epic_ref)
-                .copied()
-                .or_else(|| epic_by_name.get(&epic_ref.trim().to_lowercase()).copied());
-            if let Some(eid) = epic_id {
-                sqlx::query("UPDATE tasks SET epic_id = $2 WHERE id = $1")
-                    .bind(task_id)
-                    .bind(eid)
-                    .execute(&mut *tx)
-                    .await?;
-            }
-        }
-        // Sprint.
+
+        // Sprint (current).
         if let Some(name) = issue
             .sprint
             .as_deref()
@@ -915,6 +980,13 @@ pub async fn apply_jira_import(
                     .await?;
             }
         }
+    }
+    if !missing_parents.is_empty() {
+        report.warnings.push(format!(
+            "{} sub-task(s) kept top-level — their Jira parent wasn't in this import: {}",
+            missing_parents.len(),
+            missing_parents.join(", ")
+        ));
     }
 
     if !unmatched.is_empty() {

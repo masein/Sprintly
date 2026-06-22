@@ -2,6 +2,11 @@
 
 **Status:** accepted · **Date:** 2026-06-22 · **Scope:** F16 (Jira importer)
 
+**Revision (2026-06-22):** hardened the structural mapping against real exports —
+see *Hierarchy* below. Unified epic/sub-task resolution across the classic
+`Epic Link` and the team-managed `Parent` model, warn on absent parents, carry
+sprint window + state, preserve comment author/date, and remap `Task → feature`.
+
 ## Context
 
 F16 shipped Trello-JSON and a minimal CSV importer that kept only
@@ -53,6 +58,37 @@ use. Mapping rules:
 - **Sprints** are created from distinct Sprint names with a placeholder
   fortnight window and `planned` state — Jira's CSV doesn't reliably carry a
   sprint's dates or open/closed state, so the lead adjusts after import.
+
+## Hierarchy (revision)
+
+A real "all fields" export carries the parent relationship two different ways,
+and the first cut only handled one:
+
+- **Classic / company-managed** projects use a separate **`Epic Link`** column
+  (the epic's key) plus **`Parent`** for sub-tasks.
+- **Team-managed** projects fold everything into one **`Parent`** column: a
+  sub-task's `Parent` is its story, but a *story's* `Parent` is its **epic**.
+
+So resolution is unified in a second pass once every task id is known:
+
+- **Epic membership** comes from `Epic Link` **or** a `Parent` that points at an
+  epic in the import (matched by Jira key) → `tasks.epic_id` is set, making epic
+  progress (done/total) real. An epic parent is *not* treated as task nesting.
+- **Sub-task nesting** comes from a `Parent` that points at a non-epic task we
+  imported → `tasks.parent_task_id`. If the parent is **absent** from the
+  import, the task stays **top-level** and is collected into a warning (never
+  silently flattened, never dangling).
+- **Comments:** the author is matched to a Sprintly user; when there's no
+  account, the original name is preserved in the comment body (`> imported from
+  Jira — Name`) rather than dropped, and the Jira timestamp becomes `created_at`.
+- **Sprints:** a bare name still defaults to a planned fortnight, but the rich
+  GreenHopper `...[state=…,startDate=…,endDate=…]` cell some exports emit is
+  parsed for the real **window + state** (`active`/`closed`→`completed`). The
+  one-active-sprint constraint is respected — a second "active" imports as
+  planned with a warning.
+- **Issue type:** a generic **`Task` → `feature`** (Sprintly's neutral default),
+  not `chore`; for many teams the Task is the primary work item. `Sub-task` has
+  no real sub-type in CSV, so it stays `chore` and gets its link from the pass.
 
 ## Consequences
 

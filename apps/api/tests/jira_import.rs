@@ -5,6 +5,7 @@
 //! comments, and a multi-line quoted description — maps to the right Sprintly
 //! entities; a second identical import dedupes by Jira key (updates, no dupes).
 
+use chrono::{DateTime, TimeZone, Utc};
 use sprintly_api::{
     config::AuthConfig,
     domain::{import_export as ie, jira, password},
@@ -266,4 +267,135 @@ async fn dry_run_writes_nothing_and_warns_unmatched(pool: PgPool) {
         .unwrap();
         assert_eq!(n, 0, "dry run wrote {table}");
     }
+}
+
+// A *team-managed* Jira export: the epic relationship is folded into the unified
+// "Parent" column (no separate "Epic Link"), and one sub-task's parent is absent
+// from the export. Also exercises a rich Sprint cell (state + window) and a
+// comment from someone with no Sprintly account.
+const HIERARCHY_CSV: &str = "Issue key,Issue Type,Summary,Status,Parent,Sprint,Comment\n\
+EPIC-1,Epic,Checkout revamp,To Do,,,\n\
+PROJ-1,Story,Build the cart,In Progress,EPIC-1,\"com.atlassian.greenhopper.service.sprint.Sprint@9[id=5,state=ACTIVE,name=Sprint 9,startDate=2024-02-01T09:00:00.000Z,endDate=2024-02-14T09:00:00.000Z]\",\"1/Feb/24 9:00 AM;Casey External;ext note\"\n\
+PROJ-2,Sub-task,Wire the totals,To Do,PROJ-1,,\n\
+PROJ-3,Sub-task,Orphaned bit,To Do,GHOST-9,,\n";
+
+#[sqlx::test(migrations = "./migrations")]
+async fn epic_via_parent_subtask_nesting_and_absent_parent(pool: PgPool) {
+    let owner = make_user(&pool, "owner4@x.test", "Owner").await;
+    let (pid, board) = make_project(&pool, "HIER", owner).await;
+
+    let plan = jira::parse_jira_csv(HIERARCHY_CSV).unwrap();
+    let report = ie::apply_jira_import(&pool, pid, board, &plan, false)
+        .await
+        .unwrap();
+
+    assert_eq!(report.tasks_created, 3, "3 tasks (epic is not a task)");
+    assert_eq!(report.epics_created, vec!["Checkout revamp"]);
+
+    // J2: the Story's epic came via "Parent" (team-managed) → epic_id is set,
+    // and it is NOT nested under the epic as a task.
+    let (epic_name, parent_task): (Option<String>, Option<Uuid>) = sqlx::query_as(
+        r#"SELECT e.name, t.parent_task_id
+             FROM tasks t LEFT JOIN epics e ON e.id = t.epic_id
+            WHERE t.project_id = $1 AND t.external_ref = 'PROJ-1'"#,
+    )
+    .bind(pid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(epic_name.as_deref(), Some("Checkout revamp"));
+    assert_eq!(parent_task, None, "epic membership is not task nesting");
+
+    // J1: the present-parent sub-task nests under PROJ-1.
+    let nested_under: Option<String> = sqlx::query_scalar(
+        r#"SELECT p.external_ref FROM tasks c
+             JOIN tasks p ON p.id = c.parent_task_id
+            WHERE c.project_id = $1 AND c.external_ref = 'PROJ-2'"#,
+    )
+    .bind(pid)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert_eq!(nested_under.as_deref(), Some("PROJ-1"));
+
+    // J1: the absent-parent sub-task stays top-level and is warned about.
+    let orphan_parent: Option<Uuid> = sqlx::query_scalar(
+        "SELECT parent_task_id FROM tasks WHERE project_id = $1 AND external_ref = 'PROJ-3'",
+    )
+    .bind(pid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(orphan_parent, None, "absent parent → top-level");
+    assert!(
+        report.warnings.iter().any(|w| w.contains("GHOST-9")),
+        "missing parent is warned: {:?}",
+        report.warnings
+    );
+
+    // Sprint carried its state + window from the rich cell.
+    let (state, starts_at, started_at): (String, DateTime<Utc>, Option<DateTime<Utc>>) =
+        sqlx::query_as(
+            "SELECT state, starts_at, started_at FROM sprints WHERE project_id = $1 AND name = 'Sprint 9'",
+        )
+        .bind(pid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(state, "active");
+    assert_eq!(
+        starts_at,
+        Utc.with_ymd_and_hms(2024, 2, 1, 9, 0, 0).unwrap()
+    );
+    assert!(started_at.is_some());
+
+    // The comment from a non-user kept its attribution + Jira timestamp.
+    let (c_author, c_body, c_created): (Option<Uuid>, String, DateTime<Utc>) = sqlx::query_as(
+        r#"SELECT c.author_id, c.body, c.created_at FROM task_comments c
+             JOIN tasks t ON t.id = c.task_id
+            WHERE t.external_ref = 'PROJ-1'"#,
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(c_author, None, "external author has no Sprintly account");
+    assert!(
+        c_body.contains("Casey External"),
+        "attribution preserved: {c_body}"
+    );
+    assert!(c_body.contains("ext note"));
+    assert_eq!(
+        c_created,
+        Utc.with_ymd_and_hms(2024, 2, 1, 9, 0, 0).unwrap()
+    );
+
+    // Idempotent re-import: updates in place, no new tasks/epics, links hold.
+    let report2 = ie::apply_jira_import(&pool, pid, board, &plan, false)
+        .await
+        .unwrap();
+    assert_eq!(report2.tasks_created, 0);
+    assert_eq!(report2.tasks_updated, 3);
+    let tasks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE project_id = $1")
+        .bind(pid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(tasks, 3);
+    let epics: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM epics WHERE project_id = $1")
+        .bind(pid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(epics, 1);
+    // The nesting still holds after re-import.
+    let still_nested: Option<String> = sqlx::query_scalar(
+        r#"SELECT p.external_ref FROM tasks c
+             JOIN tasks p ON p.id = c.parent_task_id
+            WHERE c.project_id = $1 AND c.external_ref = 'PROJ-2'"#,
+    )
+    .bind(pid)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert_eq!(still_nested.as_deref(), Some("PROJ-1"));
 }
