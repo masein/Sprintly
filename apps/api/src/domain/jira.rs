@@ -14,15 +14,31 @@
 
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use uuid::Uuid;
 
 use crate::{AppError, AppResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JiraComment {
+    /// Raw Jira author (display name or accountId) — matched to a Sprintly user
+    /// where possible, otherwise preserved in the comment body for attribution.
     pub author: Option<String>,
     pub body: String,
+    /// When the comment was posted in Jira (the cell's leading timestamp).
+    pub created: Option<DateTime<Utc>>,
+}
+
+/// A Jira sprint as it appears in the CSV — either a bare name, or the rich
+/// `...Sprint@..[id=..,state=CLOSED,name=..,startDate=..,endDate=..]` toString
+/// that some exports emit. We carry the window + state when present.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JiraSprint {
+    pub name: String,
+    /// Lowercased Jira state: `active` | `closed` | `future` (None if unknown).
+    pub state: Option<String>,
+    pub start: Option<DateTime<Utc>>,
+    pub end: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -62,6 +78,9 @@ impl JiraIssue {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct JiraPlan {
     pub issues: Vec<JiraIssue>,
+    /// Every distinct sprint seen across the export (richest cell wins), so the
+    /// importer can create each with its real window + state.
+    pub sprints: Vec<JiraSprint>,
     pub warnings: Vec<String>,
 }
 
@@ -80,16 +99,20 @@ pub fn map_priority(jira: &str) -> &'static str {
     }
 }
 
-/// Jira issue type → one of Sprintly's `feature|bug|chore|spike|incident`. Epics
-/// are handled separately (they become Sprintly epics, not tasks); a `Sub-task`
-/// is a chore that also gets linked to its parent.
+/// Jira issue type → one of Sprintly's `feature|bug|chore|spike|incident`.
+///
+/// Epics are handled separately (they become Sprintly epics, not tasks). A
+/// `Sub-task` has no real sub-type in the CSV, so it maps to `chore` and gets
+/// its parent link from the hierarchy pass. A generic `Task` maps to `feature`
+/// — Sprintly's neutral default — rather than `chore`, since for many teams the
+/// Task is the primary work item, not a side errand.
 pub fn map_issue_type(jira: &str) -> &'static str {
     match jira.trim().to_lowercase().as_str() {
         "bug" | "defect" => "bug",
         "spike" => "spike",
         "incident" => "incident",
-        "task" | "sub-task" | "subtask" | "chore" => "chore",
-        // story / epic / new feature / improvement / feature → feature
+        "sub-task" | "subtask" | "chore" => "chore",
+        // story / task / epic / new feature / improvement / feature → feature
         _ => "feature",
     }
 }
@@ -110,7 +133,8 @@ pub fn match_user(raw: &str, users: &[(Uuid, String, String)]) -> Option<Uuid> {
 }
 
 /// Jira CSV comment cell is `created;author;body` (body may itself contain `;`).
-/// We keep author + body; an unparseable cell becomes a bodied, author-less note.
+/// We keep the timestamp + author + body; an unparseable cell becomes a bodied,
+/// author-less note.
 pub fn parse_comment(cell: &str) -> Option<JiraComment> {
     let cell = cell.trim();
     if cell.is_empty() {
@@ -126,11 +150,13 @@ pub fn parse_comment(cell: &str) -> Option<JiraComment> {
         Some(JiraComment {
             author: (!author.is_empty()).then(|| author.to_string()),
             body: body.to_string(),
+            created: parse_datetime(parts[0]),
         })
     } else {
         Some(JiraComment {
             author: None,
             body: cell.to_string(),
+            created: None,
         })
     }
 }
@@ -149,6 +175,72 @@ pub fn parse_date(cell: &str) -> Option<NaiveDate> {
         }
     }
     None
+}
+
+/// Parse a Jira timestamp (comment / sprint dates) to UTC. Handles Jira's
+/// `d/MMM/yy h:mm AM`, ISO-8601 with offset/`Z`, and bare dates (→ midnight).
+pub fn parse_datetime(cell: &str) -> Option<DateTime<Utc>> {
+    let s = cell.trim();
+    if s.is_empty() {
+        return None;
+    }
+    // ISO-8601 with a timezone (e.g. 2024-01-14T11:00:00.000Z).
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    // Naive datetimes (no zone) — assume UTC.
+    for fmt in [
+        "%d/%b/%y %I:%M %p",
+        "%d/%b/%Y %I:%M %p",
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S",
+        "%d/%b/%y %H:%M",
+    ] {
+        if let Ok(ndt) = NaiveDateTime::parse_from_str(s, fmt) {
+            return Some(Utc.from_utc_datetime(&ndt));
+        }
+    }
+    // Date only → midnight UTC.
+    parse_date(s).map(|d| Utc.from_utc_datetime(&d.and_hms_opt(0, 0, 0).unwrap()))
+}
+
+/// Parse a Jira "Sprint" cell. Bare names pass through; the rich GreenHopper
+/// `...Sprint@..[id=..,state=CLOSED,name=Foo,startDate=..,endDate=..]` toString
+/// is unpacked into name + state + window.
+pub fn parse_sprint_cell(cell: &str) -> Option<JiraSprint> {
+    let cell = cell.trim();
+    if cell.is_empty() {
+        return None;
+    }
+    // Rich form: pull the key=value pairs out of the bracketed body.
+    if let (Some(open), Some(close)) = (cell.find('['), cell.rfind(']')) {
+        if close > open {
+            let mut kv: HashMap<&str, &str> = HashMap::new();
+            for pair in cell[open + 1..close].split(',') {
+                if let Some((k, v)) = pair.split_once('=') {
+                    kv.insert(k.trim(), v.trim());
+                }
+            }
+            if let Some(name) = kv.get("name").filter(|n| !n.is_empty() && **n != "<null>") {
+                return Some(JiraSprint {
+                    name: name.to_string(),
+                    state: kv
+                        .get("state")
+                        .filter(|s| !s.is_empty() && **s != "<null>")
+                        .map(|s| s.to_lowercase()),
+                    start: kv.get("startDate").and_then(|s| parse_datetime(s)),
+                    end: kv.get("endDate").and_then(|s| parse_datetime(s)),
+                });
+            }
+        }
+    }
+    // Bare name.
+    Some(JiraSprint {
+        name: cell.to_string(),
+        state: None,
+        start: None,
+        end: None,
+    })
 }
 
 // ─── CSV parsing ─────────────────────────────────────────────────────────────
@@ -256,6 +348,8 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
 
     let mut issues = Vec::new();
     let mut warnings = Vec::new();
+    // Distinct sprints across the whole export, richest cell winning per name.
+    let mut sprints: HashMap<String, JiraSprint> = HashMap::new();
     // Row numbers for error messages start at 2 — the header is row 1.
     for (row, result) in (2..).zip(rdr.records()) {
         let rec = result
@@ -286,6 +380,29 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
             .filter_map(|c| parse_comment(c))
             .collect();
 
+        // Sprints: parse every cell, remember the richest per name, and keep the
+        // last as this issue's current sprint.
+        let mut current_sprint = None;
+        for cell in all(&rec, &sprint_i) {
+            if let Some(sp) = parse_sprint_cell(&cell) {
+                current_sprint = Some(sp.name.clone());
+                let lname = sp.name.to_lowercase();
+                let incoming_rich = sp.state.is_some() || sp.start.is_some() || sp.end.is_some();
+                match sprints.get(&lname) {
+                    Some(existing)
+                        if existing.state.is_some()
+                            || existing.start.is_some()
+                            || existing.end.is_some() => {}
+                    _ if incoming_rich => {
+                        sprints.insert(lname, sp);
+                    }
+                    _ => {
+                        sprints.entry(lname).or_insert(sp);
+                    }
+                }
+            }
+        }
+
         issues.push(JiraIssue {
             key,
             issue_type: first(&rec, &type_i).unwrap_or_else(|| "Task".into()),
@@ -297,8 +414,7 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
             assignee: first(&rec, &assignee_i),
             parent_key: first(&rec, &parent_i),
             epic: first(&rec, &epic_i),
-            // Jira lists every sprint the issue touched; the last is the current.
-            sprint: all(&rec, &sprint_i).pop(),
+            sprint: current_sprint,
             story_points: first(&rec, &sp_i).and_then(|s| s.parse::<f64>().ok()),
             due_date: first(&rec, &due_i).and_then(|s| parse_date(&s)),
             comments,
@@ -310,7 +426,11 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
             "no importable Jira issues found".into(),
         ));
     }
-    Ok(JiraPlan { issues, warnings })
+    Ok(JiraPlan {
+        issues,
+        sprints: sprints.into_values().collect(),
+        warnings,
+    })
 }
 
 #[cfg(test)]
@@ -333,8 +453,8 @@ mod tests {
     fn type_mapping() {
         assert_eq!(map_issue_type("Story"), "feature");
         assert_eq!(map_issue_type("Bug"), "bug");
-        assert_eq!(map_issue_type("Task"), "chore");
-        assert_eq!(map_issue_type("Sub-task"), "chore");
+        assert_eq!(map_issue_type("Task"), "feature"); // generic Task → neutral default
+        assert_eq!(map_issue_type("Sub-task"), "chore"); // no real sub-type in CSV
         assert_eq!(map_issue_type("Spike"), "spike");
         assert_eq!(map_issue_type("Incident"), "incident");
         assert_eq!(map_issue_type("Epic"), "feature"); // epics handled separately
@@ -359,10 +479,39 @@ mod tests {
         let c = parse_comment("12/Jan/24 3:45 PM;Sam Adams;Looks good; ship it").unwrap();
         assert_eq!(c.author.as_deref(), Some("Sam Adams"));
         assert_eq!(c.body, "Looks good; ship it"); // body keeps its semicolons
+        assert_eq!(
+            c.created,
+            Some(Utc.with_ymd_and_hms(2024, 1, 12, 15, 45, 0).unwrap())
+        );
         let bare = parse_comment("just a note").unwrap();
         assert_eq!(bare.author, None);
         assert_eq!(bare.body, "just a note");
+        assert_eq!(bare.created, None);
         assert!(parse_comment("   ").is_none());
+    }
+
+    #[test]
+    fn sprint_cell_parsing() {
+        // Bare name.
+        let bare = parse_sprint_cell("Sprint 7").unwrap();
+        assert_eq!(bare.name, "Sprint 7");
+        assert_eq!(bare.state, None);
+        // Rich GreenHopper toString.
+        let rich = parse_sprint_cell(
+            "com.atlassian.greenhopper.service.sprint.Sprint@1[id=5,rapidViewId=1,state=CLOSED,name=Sprint 7,startDate=2024-01-01T10:00:00.000Z,endDate=2024-01-14T10:00:00.000Z]",
+        )
+        .unwrap();
+        assert_eq!(rich.name, "Sprint 7");
+        assert_eq!(rich.state.as_deref(), Some("closed"));
+        assert_eq!(
+            rich.start,
+            Some(Utc.with_ymd_and_hms(2024, 1, 1, 10, 0, 0).unwrap())
+        );
+        assert_eq!(
+            rich.end,
+            Some(Utc.with_ymd_and_hms(2024, 1, 14, 10, 0, 0).unwrap())
+        );
+        assert!(parse_sprint_cell("   ").is_none());
     }
 
     #[test]
