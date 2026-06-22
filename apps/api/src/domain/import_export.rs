@@ -560,13 +560,16 @@ pub async fn apply_jira_import(
     } else {
         HashSet::new()
     };
-    // Distinct raw people in first-seen order (assignees before reporters).
+    // Distinct raw people in first-seen order (assignee, reporter, watchers).
     let mut distinct: Vec<String> = Vec::new();
     for issue in &plan.issues {
-        for raw in [issue.assignee.as_deref(), issue.reporter.as_deref()]
+        let people = issue
+            .assignee
+            .as_deref()
             .into_iter()
-            .flatten()
-        {
+            .chain(issue.reporter.as_deref())
+            .chain(issue.watchers.iter().map(String::as_str));
+        for raw in people {
             let r = raw.trim();
             if !r.is_empty() && !distinct.iter().any(|d| d.eq_ignore_ascii_case(r)) {
                 distinct.push(r.to_string());
@@ -1060,6 +1063,21 @@ pub async fn apply_jira_import(
             .bind(value)
             .execute(&mut *tx)
             .await?;
+        }
+
+        // Watchers — resolved (matched or provisioned) like assignee/reporter;
+        // ON CONFLICT keeps a re-import from duplicating the watch.
+        for watcher in &issue.watchers {
+            if let Some(uid) = resolve_person(Some(watcher)) {
+                sqlx::query(
+                    r#"INSERT INTO task_watchers (task_id, user_id)
+                       VALUES ($1, $2) ON CONFLICT DO NOTHING"#,
+                )
+                .bind(task_id)
+                .bind(uid)
+                .execute(&mut *tx)
+                .await?;
+            }
         }
     }
 

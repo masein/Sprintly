@@ -14,6 +14,11 @@ test.describe("Jira import — user provisioning", () => {
   test("provisions a missing assignee and shows their avatar on the card", async ({ page }) => {
     const handle = `e2e${rand()}`;
     const key = `JP${rand().slice(0, 3).toUpperCase()}`;
+    // Unique assignee per run so the dev DB (shared across runs) always has to
+    // *provision* them rather than matching a leftover from a prior run.
+    const suffix = rand();
+    const who = `Dana${suffix}`;
+    const whoHandle = who.toLowerCase();
 
     await test.step("register + create a project", async () => {
       await page.goto("/register");
@@ -33,10 +38,10 @@ test.describe("Jira import — user provisioning", () => {
       await expect(page).toHaveURL(new RegExp(`/projects/${key}$`));
     });
 
-    // Assignee "Dana Imported" is not a Sprintly user → provisioned on import.
+    // The assignee is not a Sprintly user → provisioned on import.
     const csv =
       "Issue key,Issue Type,Summary,Status,Assignee\n" +
-      "JIRA-1,Story,Imported with a new user,In Progress,Dana Imported\n";
+      `JIRA-1,Story,Imported with a new user,In Progress,${who}\n`;
 
     await test.step("import with provisioning on", async () => {
       await page.getByRole("button", { name: /import \/ export/i }).click();
@@ -59,8 +64,8 @@ test.describe("Jira import — user provisioning", () => {
     await test.step("the card shows the provisioned assignee's avatar", async () => {
       await page.goto(`/projects/${key}`);
       await expect(page.getByText("Imported with a new user")).toBeVisible();
-      // The provisioned handle is derived from the name: "danaimported".
-      await expect(page.getByText("@danaimported").first()).toBeVisible();
+      // The provisioned handle is the slug of the display name.
+      await expect(page.getByText(`@${whoHandle}`).first()).toBeVisible();
     });
   });
 });

@@ -535,8 +535,9 @@ async fn name_only_sprints_default_to_completed(pool: PgPool) {
 
 // ── Part 2: user provisioning ───────────────────────────────────────────────
 
-const PROVISION_CSV: &str = "Issue key,Issue Type,Summary,Status,Assignee,Reporter\n\
-P-1,Story,Do the thing,In Progress,Dana Imported,Erin Imported\n";
+const PROVISION_CSV: &str =
+    "Issue key,Issue Type,Summary,Status,Assignee,Reporter,Watchers,Watchers\n\
+P-1,Story,Do the thing,In Progress,Dana Imported,Erin Imported,Fran Watcher,2\n";
 
 fn provision_opts(added_by: Uuid) -> ie::JiraImportOptions {
     ie::JiraImportOptions {
@@ -556,7 +557,10 @@ async fn provisions_users_assigns_and_is_idempotent(pool: PgPool) {
         .await
         .unwrap();
 
-    assert_eq!(report.users_created, 2, "Dana + Erin provisioned");
+    assert_eq!(
+        report.users_created, 3,
+        "Dana + Erin + Fran (watcher) provisioned"
+    );
     assert_eq!(report.users_matched, 0);
 
     // Both users exist with the force-reset flag set and a synthetic email.
@@ -593,12 +597,26 @@ async fn provisions_users_assigns_and_is_idempotent(pool: PgPool) {
     assert_eq!(assignee, Some(dana_id));
     assert_eq!(reporter_name.as_deref(), Some("Erin Imported"));
 
+    // The watcher (Fran) was provisioned and added as a task watcher (the bare
+    // count cell "2" was ignored).
+    let watcher_name: Option<String> = sqlx::query_scalar(
+        r#"SELECT u.display_name FROM task_watchers w
+             JOIN tasks t ON t.id = w.task_id
+             JOIN users u ON u.id = w.user_id
+            WHERE t.project_id = $1 AND t.external_ref = 'P-1'"#,
+    )
+    .bind(pid)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert_eq!(watcher_name.as_deref(), Some("Fran Watcher"));
+
     // Idempotent re-import: no new users (now matched), no new tasks.
     let report2 = ie::apply_jira_import(&pool, pid, board, &plan, false, &provision_opts(owner))
         .await
         .unwrap();
     assert_eq!(report2.users_created, 0, "no duplicate users");
-    assert_eq!(report2.users_matched, 2, "both matched on re-import");
+    assert_eq!(report2.users_matched, 3, "all three matched on re-import");
     assert_eq!(report2.tasks_created, 0);
     let users: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM users WHERE email::text LIKE '%@jira-import.local'",
@@ -606,7 +624,7 @@ async fn provisions_users_assigns_and_is_idempotent(pool: PgPool) {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(users, 2, "still exactly two provisioned users");
+    assert_eq!(users, 3, "still exactly three provisioned users");
 }
 
 #[sqlx::test(migrations = "./migrations")]

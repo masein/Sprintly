@@ -110,10 +110,11 @@ A Jira import is a migration of *finished* work, which changes two defaults:
   completed. The one-active-per-project rule still holds (a second would-be
   active imports as completed + warns).
 - **Opt-in user provisioning.** Off by default (match-only + warn, unchanged).
-  When on, each unmatched assignee/reporter gets a Sprintly account — display
-  name from Jira, a slugged unique handle, the raw value as email if it is one
-  else a synthetic `@jira-import.local` address — added to the project as a
-  contributor, and their cards assigned (reporter too). Accounts are created
+  When on, each unmatched assignee/reporter/watcher gets a Sprintly account —
+  display name from Jira, a slugged unique handle, the raw value as email if it
+  is one else a synthetic `@jira-import.local` address — added to the project as
+  a contributor and wired to their cards (assignee, reporter, and watchers; a
+  bare Jira watcher *count* cell is ignored). Accounts are created
   with an **operator-supplied temp password** (hashed in the route so the
   plaintext never reaches the domain layer or the logs) and a
   **`must_change_password`** flag. Re-import is idempotent: provisioned users

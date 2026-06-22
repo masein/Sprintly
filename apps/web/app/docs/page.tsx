@@ -261,11 +261,12 @@ export default function DocsPage() {
             </p>
             <p>
               <span className="text-chrome">Create missing users</span> (a checkbox
-              on the Jira import, off by default): for each assignee/reporter with
-              no Sprintly match, it provisions an account (display name, derived
-              handle, synthetic <span className="mono">@jira-import.local</span>{" "}
-              email if there isn&apos;t one), adds them to the project, and assigns
-              their cards. Each is set with an operator-supplied{" "}
+              on the Jira import, off by default): for each assignee, reporter, or
+              watcher with no Sprintly match, it provisions an account (display
+              name, derived handle, synthetic{" "}
+              <span className="mono">@jira-import.local</span> email if there
+              isn&apos;t one), adds them to the project, and wires them up —
+              assignee, reporter, and watchers on each card. Each is set with an operator-supplied{" "}
               <span className="mono">temporary password</span> and a{" "}
               <span className="mono">force-reset</span> flag — at first login they
               get a challenge to set their own password before any session is

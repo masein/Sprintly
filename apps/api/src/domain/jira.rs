@@ -54,6 +54,8 @@ pub struct JiraIssue {
     pub labels: Vec<String>,
     pub assignee: Option<String>,
     pub reporter: Option<String>,
+    /// Jira repeats "Watchers" columns (one name each); a bare count is dropped.
+    pub watchers: Vec<String>,
     /// Sub-task parent (Jira "Parent" column).
     pub parent_key: Option<String>,
     /// Epic association (Jira "Epic Link" key, or an epic name).
@@ -355,6 +357,7 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
     let priority_i = idxs_exact(&by, &["priority"]);
     let assignee_i = idxs_exact(&by, &["assignee"]);
     let reporter_i = idxs_exact(&by, &["reporter", "creator"]);
+    let watchers_i = idxs_exact(&by, &["watchers", "watcher"]);
     let labels_i = idxs_exact(&by, &["labels"]);
     let sprint_i = idxs_exact(&by, &["sprint"]);
     let comment_i = idxs_exact(&by, &["comment"]);
@@ -433,6 +436,11 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
             labels,
             assignee: first(&rec, &assignee_i),
             reporter: first(&rec, &reporter_i),
+            // Drop a bare watcher *count* cell (a number); keep the names.
+            watchers: all(&rec, &watchers_i)
+                .into_iter()
+                .filter(|w| w.parse::<i64>().is_err())
+                .collect(),
             parent_key: first(&rec, &parent_i),
             epic: first(&rec, &epic_i),
             sprint: current_sprint,
