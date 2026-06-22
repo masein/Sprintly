@@ -7,6 +7,11 @@ see *Hierarchy* below. Unified epic/sub-task resolution across the classic
 `Epic Link` and the team-managed `Parent` model, warn on absent parents, carry
 sprint window + state, preserve comment author/date, and remap `Task → feature`.
 
+**Revision (2026-06-23):** faithful historical migration — see *Historical
+sprints & user provisioning* below. Imported sprints default to **completed**
+(not planned), and an opt-in provisions Sprintly users for unmatched
+assignees/reporters with a force-reset temp password.
+
 ## Context
 
 F16 shipped Trello-JSON and a minimal CSV importer that kept only
@@ -89,6 +94,38 @@ So resolution is unified in a second pass once every task id is known:
 - **Issue type:** a generic **`Task` → `feature`** (Sprintly's neutral default),
   not `chore`; for many teams the Task is the primary work item. `Sub-task` has
   no real sub-type in CSV, so it stays `chore` and gets its link from the pass.
+
+## Historical sprints & user provisioning (revision)
+
+A Jira import is a migration of *finished* work, which changes two defaults:
+
+- **Sprints default to `completed`, not `planned`.** A planned sprint shows a
+  "start sprint" button and an empty fortnight — wrong for a sprint that ended a
+  year ago. Imported sprints are `completed`, carrying the real `startDate` /
+  `endDate` and `completed_at` when the export's Sprint cell encodes them.
+  Explicit Jira state is honoured (`ACTIVE`→active, `CLOSED`→completed,
+  `FUTURE`→planned). When nothing is marked active, the **most-recent
+  *dated*, open-ended** sprint is promoted to active so the in-flight sprint
+  stays live; name-only sprints (no dates) are never promoted — they all stay
+  completed. The one-active-per-project rule still holds (a second would-be
+  active imports as completed + warns).
+- **Opt-in user provisioning.** Off by default (match-only + warn, unchanged).
+  When on, each unmatched assignee/reporter/watcher gets a Sprintly account —
+  display name from Jira, a slugged unique handle, the raw value as email if it
+  is one else a synthetic `@jira-import.local` address — added to the project as
+  a contributor and wired to their cards (assignee, reporter, and watchers; a
+  bare Jira watcher *count* cell is ignored). Accounts are created
+  with an **operator-supplied temp password** (hashed in the route so the
+  plaintext never reaches the domain layer or the logs) and a
+  **`must_change_password`** flag. Re-import is idempotent: provisioned users
+  match by name/email on the next run, so no duplicates.
+
+**Force-reset enforcement.** `must_change_password` is a new (reversible) column.
+Login mirrors the 2FA step-up: a flagged account's correct password yields a
+short-lived **challenge**, not a session. The user spends it at
+`POST /auth/password/change` to set a real password (which clears the flag) and
+*then* gets a session. So a provisioned account can't reach anything with the
+shared temp password.
 
 ## Consequences
 

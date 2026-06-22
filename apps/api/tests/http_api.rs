@@ -82,13 +82,20 @@ async fn send(
     if let Some(t) = token {
         builder = builder.header(header::AUTHORIZATION, format!("Bearer {t}"));
     }
-    let req = match body {
+    let mut req = match body {
         Some(j) => builder
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(j.to_string()))
             .unwrap(),
         None => builder.body(Body::empty()).unwrap(),
     };
+    // Some handlers (login, rate-limited routes) extract ConnectInfo — the real
+    // server injects it; for `oneshot` we add a loopback peer ourselves.
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            8080,
+        ))));
     let resp = app.clone().oneshot(req).await.unwrap();
     let status = resp.status();
     let bytes = to_bytes(resp.into_body(), 1 << 20).await.unwrap();
@@ -181,6 +188,63 @@ async fn register_returns_a_session_and_me_requires_auth(pool: PgPool) {
     // No token → 401 from the auth middleware.
     let (status, _) = send(&app, "GET", "/api/v1/users/me", None, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn must_change_password_forces_reset_at_login(pool: PgPool) {
+    // A provisioned-style account: real password hash + the force-reset flag.
+    let hash = sprintly_api::domain::password::hash(&test_config().auth, "123456").unwrap();
+    sqlx::query(
+        r#"INSERT INTO users (id, email, handle, display_name, password_hash, role, must_change_password)
+           VALUES ($1, 'reset@x.test', 'resetme', 'Reset Me', $2, 'member', true)"#,
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(&hash)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let app = app(pool);
+
+    // Login with the temp password → a force-reset challenge, NOT a session.
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": "reset@x.test", "password": "123456" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["must_change_password_required"], true);
+    assert!(body["access_token"].is_null(), "no session yet");
+    let challenge = body["challenge"].as_str().unwrap().to_string();
+
+    // Spend the challenge to set a new password → a real session.
+    let (status, changed) = send(
+        &app,
+        "POST",
+        "/api/v1/auth/password/change",
+        None,
+        Some(json!({ "challenge": challenge, "new_password": "a-fresh-strong-pass" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed:?}");
+    assert!(changed["access_token"].is_string());
+
+    // Logging in with the new password now succeeds normally (flag cleared).
+    let (status, ok) = send(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": "reset@x.test", "password": "a-fresh-strong-pass" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        ok["access_token"].is_string(),
+        "normal session, no challenge"
+    );
 }
 
 #[sqlx::test(migrations = "./migrations")]

@@ -322,6 +322,9 @@ pub struct ImportReport {
     /// Jira-only: existing tasks matched by external ref and updated in place.
     pub tasks_updated: i64,
     pub comments_created: i64,
+    /// Jira-only: users provisioned (create-missing-users) vs matched to existing.
+    pub users_created: i64,
+    pub users_matched: i64,
     pub warnings: Vec<String>,
 }
 
@@ -341,7 +344,34 @@ impl ImportReport {
             tasks_created: 0,
             tasks_updated: 0,
             comments_created: 0,
+            users_created: 0,
+            users_matched: 0,
             warnings: Vec::new(),
+        }
+    }
+}
+
+/// Options for a Jira import that go beyond the plan itself.
+#[derive(Debug, Clone)]
+pub struct JiraImportOptions {
+    /// When true, provision a Sprintly user for every Jira assignee/reporter
+    /// with no match (force-reset on first login), add them to the project, and
+    /// assign their tasks. When false, the importer matches only and warns.
+    pub create_missing_users: bool,
+    /// Pre-hashed temporary password for provisioned users (the route hashes the
+    /// operator-supplied value so the plaintext never reaches the domain layer).
+    pub temp_password_hash: Option<String>,
+    /// The importing user, recorded as `project_members.added_by`.
+    pub added_by: Uuid,
+}
+
+impl JiraImportOptions {
+    /// Match-only (today's behaviour) — no provisioning.
+    pub fn match_only() -> Self {
+        JiraImportOptions {
+            create_missing_users: false,
+            temp_password_hash: None,
+            added_by: Uuid::nil(),
         }
     }
 }
@@ -499,6 +529,7 @@ pub async fn apply_jira_import(
     board_id: Uuid,
     plan: &crate::domain::jira::JiraPlan,
     dry_run: bool,
+    opts: &JiraImportOptions,
 ) -> AppResult<ImportReport> {
     use crate::domain::jira;
     use std::collections::{HashMap, HashSet};
@@ -508,12 +539,103 @@ pub async fn apply_jira_import(
     report.warnings = plan.warnings.clone();
 
     // Users for assignee matching: (id, lowercased email, lowercased display_name).
-    let users: Vec<(Uuid, String, String)> = sqlx::query_as(
+    // Mutable so newly-provisioned users join the pool for later matches.
+    let mut users: Vec<(Uuid, String, String)> = sqlx::query_as(
         r#"SELECT id, lower(email::text), lower(display_name)
              FROM users WHERE deleted_at IS NULL"#,
     )
     .fetch_all(&mut *tx)
     .await?;
+
+    // ── resolve people: match every Jira assignee/reporter, optionally
+    //    provisioning a new Sprintly user (+ project member) for the unmatched. ──
+    let mut name_to_user: HashMap<String, Uuid> = HashMap::new();
+    let mut unmatched: Vec<String> = Vec::new();
+    let mut taken_handles: HashSet<String> = if opts.create_missing_users {
+        sqlx::query_scalar::<_, String>("SELECT lower(handle) FROM users WHERE deleted_at IS NULL")
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .collect()
+    } else {
+        HashSet::new()
+    };
+    // Distinct raw people in first-seen order (assignee, reporter, watchers).
+    let mut distinct: Vec<String> = Vec::new();
+    for issue in &plan.issues {
+        let people = issue
+            .assignee
+            .as_deref()
+            .into_iter()
+            .chain(issue.reporter.as_deref())
+            .chain(issue.watchers.iter().map(String::as_str));
+        for raw in people {
+            let r = raw.trim();
+            if !r.is_empty() && !distinct.iter().any(|d| d.eq_ignore_ascii_case(r)) {
+                distinct.push(r.to_string());
+            }
+        }
+    }
+    for raw in &distinct {
+        let lname = raw.to_lowercase();
+        if let Some(id) = jira::match_user(raw, &users) {
+            name_to_user.insert(lname, id);
+            report.users_matched += 1;
+        } else if opts.create_missing_users {
+            // Provision: clean unique handle, an email (the raw value if it is
+            // one, else synthetic), the temp password, and force-reset.
+            let mut handle = jira::slug_handle(raw);
+            if taken_handles.contains(&handle) {
+                let mut n = 2;
+                while taken_handles.contains(&format!("{handle}{n}")) {
+                    n += 1;
+                }
+                handle = format!("{handle}{n}");
+            }
+            taken_handles.insert(handle.clone());
+            let email = if raw.contains('@') {
+                raw.to_lowercase()
+            } else {
+                format!("{handle}@jira-import.local")
+            };
+            let hash = opts
+                .temp_password_hash
+                .clone()
+                .ok_or_else(|| AppError::Internal(anyhow::anyhow!("missing temp password hash")))?;
+            let id = Uuid::now_v7();
+            sqlx::query(
+                r#"INSERT INTO users
+                     (id, email, handle, display_name, password_hash, role, status, must_change_password)
+                   VALUES ($1, $2, $3, $4, $5, 'member', 'active', true)"#,
+            )
+            .bind(id)
+            .bind(&email)
+            .bind(&handle)
+            .bind(raw)
+            .bind(&hash)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                r#"INSERT INTO project_members (project_id, user_id, role, added_by)
+                   VALUES ($1, $2, 'contributor', $3)
+                   ON CONFLICT (project_id, user_id) DO NOTHING"#,
+            )
+            .bind(project_id)
+            .bind(id)
+            .bind(opts.added_by)
+            .execute(&mut *tx)
+            .await?;
+            users.push((id, email.to_lowercase(), raw.to_lowercase()));
+            name_to_user.insert(lname, id);
+            report.users_created += 1;
+        } else {
+            unmatched.push(raw.clone());
+        }
+    }
+    // Add any provisioned users to the project as members happens above; report
+    // unmatched (match-only mode) at the end alongside other warnings.
+    let resolve_person =
+        |raw: Option<&str>| raw.and_then(|r| name_to_user.get(&r.trim().to_lowercase()).copied());
 
     // ── columns (from issue statuses) ──
     let existing_cols: Vec<(Uuid, String, f64)> = sqlx::query_as(
@@ -677,8 +799,7 @@ pub async fn apply_jira_import(
         .into_iter()
         .map(|(id, n)| (n, id))
         .collect();
-    // At most one active sprint per project — track whether one already exists.
-    let mut active_taken: bool = {
+    let db_has_active: bool = {
         let existing: Option<Uuid> = sqlx::query_scalar(
             "SELECT id FROM sprints WHERE project_id = $1 AND state = 'active' AND deleted_at IS NULL LIMIT 1",
         )
@@ -687,28 +808,67 @@ pub async fn apply_jira_import(
         .await?;
         existing.is_some()
     };
+
+    // Decide each imported sprint's Sprintly state. A Jira import is a historical
+    // migration, so the default is `completed`, not `planned` — a finished sprint
+    // shouldn't show a "start sprint" button. Explicit Jira state is honoured
+    // (active→active, closed→completed, future→planned). When nothing is marked
+    // active, the most-recent *dated, open-ended* sprint is promoted to active so
+    // the in-flight sprint stays live; the one-active-per-project rule is kept.
+    let now = Utc::now();
+    let mut states: Vec<&'static str> = Vec::with_capacity(plan.sprints.len());
+    let mut any_explicit_active = false;
     for sp in &plan.sprints {
+        let st = match sp.state.as_deref() {
+            Some("active") => {
+                any_explicit_active = true;
+                "active"
+            }
+            Some("future") => "planned",
+            // closed / completed / name-only → completed (historical default).
+            _ => "completed",
+        };
+        states.push(st);
+    }
+    if !any_explicit_active && !db_has_active {
+        // Promote the most-recent open-ended sprint (latest start, no end or an
+        // end still in the future). Name-only sprints (no dates) are never
+        // promoted — we can't tell which is current, so they all stay completed.
+        let mut best: Option<(usize, DateTime<Utc>)> = None;
+        for (i, sp) in plan.sprints.iter().enumerate() {
+            let Some(start) = sp.start else { continue };
+            let open_ended = sp.end.map(|e| e > now).unwrap_or(true);
+            if open_ended && best.map(|(_, b)| start > b).unwrap_or(true) {
+                best = Some((i, start));
+            }
+        }
+        if let Some((i, _)) = best {
+            states[i] = "active";
+        }
+    }
+    // Enforce one active sprint (an existing active in the DB also counts).
+    let mut active_taken = db_has_active;
+    for (i, sp) in plan.sprints.iter().enumerate() {
+        if states[i] == "active" {
+            if active_taken {
+                report.warnings.push(format!(
+                    "sprint '{}' would be active but another sprint already is — imported as completed",
+                    sp.name.trim()
+                ));
+                states[i] = "completed";
+            } else {
+                active_taken = true;
+            }
+        }
+    }
+
+    for (i, sp) in plan.sprints.iter().enumerate() {
         let name = sp.name.trim();
         let key = name.to_lowercase();
         if key.is_empty() || sprint_by_name.contains_key(&key) {
             continue;
         }
-        // Jira sprint state → Sprintly state, honouring the one-active rule.
-        let mut state = match sp.state.as_deref() {
-            Some("active") => "active",
-            Some("closed") | Some("completed") => "completed",
-            _ => "planned",
-        };
-        if state == "active" {
-            if active_taken {
-                report.warnings.push(format!(
-                    "sprint '{name}' was active in Jira but another sprint is already active — imported as planned"
-                ));
-                state = "planned";
-            } else {
-                active_taken = true;
-            }
-        }
+        let state = states[i];
         let started_at = if state == "active" || state == "completed" {
             sp.start
         } else {
@@ -769,7 +929,6 @@ pub async fn apply_jira_import(
     // ── pass 1: upsert tasks (Epic-type issues become epics, not tasks) ──
     let mut key_to_task: HashMap<String, Uuid> = HashMap::new();
     let mut next_order = 1024.0_f64;
-    let mut unmatched: Vec<String> = Vec::new();
     for issue in plan.issues.iter().filter(|i| !i.is_epic()) {
         let column = col_id
             .get(&issue.status.trim().to_lowercase())
@@ -778,16 +937,8 @@ pub async fn apply_jira_import(
         let category = infer_category(&issue.status);
         let priority = jira::map_priority(issue.priority.as_deref().unwrap_or(""));
         let r#type = jira::map_issue_type(&issue.issue_type);
-        let assignee = match issue.assignee.as_deref() {
-            Some(raw) if !raw.trim().is_empty() => {
-                let m = jira::match_user(raw, &users);
-                if m.is_none() && !unmatched.iter().any(|u| u.eq_ignore_ascii_case(raw.trim())) {
-                    unmatched.push(raw.trim().to_string());
-                }
-                m
-            }
-            _ => None,
-        };
+        let assignee = resolve_person(issue.assignee.as_deref());
+        let reporter = resolve_person(issue.reporter.as_deref());
 
         // Dedupe by external ref → update in place, else mint a new task.
         let existing: Option<Uuid> = sqlx::query_scalar(
@@ -803,8 +954,8 @@ pub async fn apply_jira_import(
             sqlx::query(
                 r#"UPDATE tasks SET
                        title = $2, description = $3, status = $4, column_id = $5,
-                       priority = $6, type = $7, assignee_id = $8, due_date = $9,
-                       labels = $10, updated_at = now()
+                       priority = $6, type = $7, assignee_id = $8, reporter_id = $9,
+                       due_date = $10, labels = $11, updated_at = now()
                      WHERE id = $1"#,
             )
             .bind(id)
@@ -815,6 +966,7 @@ pub async fn apply_jira_import(
             .bind(priority)
             .bind(r#type)
             .bind(assignee)
+            .bind(reporter)
             .bind(issue.due_date)
             .bind(&issue.labels)
             .execute(&mut *tx)
@@ -836,9 +988,9 @@ pub async fn apply_jira_import(
             sqlx::query(
                 r#"INSERT INTO tasks
                      (id, project_id, board_id, column_id, key, title, description, status,
-                      type, priority, assignee_id, due_date, labels, order_in_column,
-                      external_ref)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)"#,
+                      type, priority, assignee_id, reporter_id, due_date, labels,
+                      order_in_column, external_ref)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)"#,
             )
             .bind(id)
             .bind(project_id)
@@ -851,6 +1003,7 @@ pub async fn apply_jira_import(
             .bind(r#type)
             .bind(priority)
             .bind(assignee)
+            .bind(reporter)
             .bind(issue.due_date)
             .bind(&issue.labels)
             .bind(next_order)
@@ -910,6 +1063,21 @@ pub async fn apply_jira_import(
             .bind(value)
             .execute(&mut *tx)
             .await?;
+        }
+
+        // Watchers — resolved (matched or provisioned) like assignee/reporter;
+        // ON CONFLICT keeps a re-import from duplicating the watch.
+        for watcher in &issue.watchers {
+            if let Some(uid) = resolve_person(Some(watcher)) {
+                sqlx::query(
+                    r#"INSERT INTO task_watchers (task_id, user_id)
+                       VALUES ($1, $2) ON CONFLICT DO NOTHING"#,
+                )
+                .bind(task_id)
+                .bind(uid)
+                .execute(&mut *tx)
+                .await?;
+            }
         }
     }
 
@@ -991,7 +1159,7 @@ pub async fn apply_jira_import(
 
     if !unmatched.is_empty() {
         report.warnings.push(format!(
-            "{} assignee(s) had no Sprintly match (left unassigned): {}",
+            "{} person(s) had no Sprintly match (left unassigned — enable \"create missing users\" to provision them): {}",
             unmatched.len(),
             unmatched.join(", ")
         ));

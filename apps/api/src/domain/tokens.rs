@@ -123,6 +123,55 @@ pub fn verify_2fa_challenge(cfg: &AuthConfig, token: &str) -> AppResult<TwoFacto
     Ok(claims)
 }
 
+/// Claims for the "you passed the password but must set a new one" challenge
+/// (force-reset, used for Jira-provisioned users). Same shape + guard as the
+/// 2FA challenge, with its own `purpose` so the two can't be confused.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PwChangeChallenge {
+    pub sub: Uuid, // user_id
+    pub role: String,
+    pub purpose: String, // always "pwchange"
+    pub iat: i64,
+    pub exp: i64,
+}
+
+const PWCHANGE_CHALLENGE_TTL_SECS: i64 = 600; // 10 minutes to pick a new password
+
+/// Mint a force-reset challenge for `user_id`.
+pub fn mint_pwchange_challenge(cfg: &AuthConfig, user_id: Uuid, role: &str) -> AppResult<String> {
+    let now = Utc::now();
+    let claims = PwChangeChallenge {
+        sub: user_id,
+        role: role.to_string(),
+        purpose: "pwchange".into(),
+        iat: now.timestamp(),
+        exp: (now + Duration::seconds(PWCHANGE_CHALLENGE_TTL_SECS)).timestamp(),
+    };
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(&cfg.jwt_secret),
+    )
+    .map_err(|_| AppError::Crypto("jwt encode failed"))
+}
+
+/// Verify a force-reset challenge token.
+pub fn verify_pwchange_challenge(cfg: &AuthConfig, token: &str) -> AppResult<PwChangeChallenge> {
+    let mut validation = Validation::default();
+    validation.leeway = 60;
+    let claims = decode::<PwChangeChallenge>(
+        token,
+        &DecodingKey::from_secret(&cfg.jwt_secret),
+        &validation,
+    )
+    .map(|d| d.claims)
+    .map_err(|_| AppError::Unauthorized)?;
+    if claims.purpose != "pwchange" {
+        return Err(AppError::Unauthorized);
+    }
+    Ok(claims)
+}
+
 /// A freshly minted refresh token: the plaintext to hand the client, and the
 /// hash to store.
 #[derive(Debug, Clone)]

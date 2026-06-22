@@ -15,7 +15,8 @@ use uuid::Uuid;
 
 use crate::{
     domain::{
-        import_export::{self, ImportFormat},
+        import_export::{self, ImportFormat, JiraImportOptions},
+        password,
         permissions::{can, Action},
         projects as project_ctx,
     },
@@ -32,7 +33,7 @@ pub fn router() -> Router<AppState> {
 
 #[derive(Debug, Deserialize)]
 struct ImportReq {
-    /// "trello" | "csv" | "auto" (default auto).
+    /// "trello" | "csv" | "jira" | "auto" (default auto).
     #[serde(default)]
     format: Option<String>,
     /// Raw file contents.
@@ -40,6 +41,14 @@ struct ImportReq {
     /// When true, resolve + report but don't persist.
     #[serde(default)]
     dry_run: bool,
+    /// Jira: provision a Sprintly user for each unmatched assignee/reporter and
+    /// assign their tasks (default off — match-only). Operator-gated.
+    #[serde(default)]
+    create_missing_users: bool,
+    /// Jira: the temporary password set on provisioned users (force-reset on
+    /// first login). Defaults to a weak migration default; never logged.
+    #[serde(default)]
+    temp_password: Option<String>,
 }
 
 async fn import(
@@ -58,8 +67,22 @@ async fn import(
 
     let board_id = default_board(&state.db, ctx.id).await?;
     let report = if format == ImportFormat::Jira {
+        // Hash the temp password here so the plaintext never reaches the domain
+        // layer (and is never logged). Default to a weak migration password —
+        // it's force-reset on first login regardless.
+        let opts = JiraImportOptions {
+            create_missing_users: req.create_missing_users,
+            temp_password_hash: if req.create_missing_users {
+                let pw = req.temp_password.as_deref().unwrap_or("123456");
+                Some(password::hash(&state.cfg.auth, pw)?)
+            } else {
+                None
+            },
+            added_by: user.id,
+        };
         let plan = crate::domain::jira::parse_jira_csv(&req.content)?;
-        import_export::apply_jira_import(&state.db, ctx.id, board_id, &plan, req.dry_run).await?
+        import_export::apply_jira_import(&state.db, ctx.id, board_id, &plan, req.dry_run, &opts)
+            .await?
     } else {
         let plan = import_export::parse(&req.content, format)?;
         import_export::apply_import(&state.db, ctx.id, board_id, &plan, req.dry_run).await?

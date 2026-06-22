@@ -100,9 +100,16 @@ async fn imports_full_jira_shape(pool: PgPool) {
     let (pid, board) = make_project(&pool, "JIRA", owner).await;
 
     let plan = jira::parse_jira_csv(JIRA_CSV).unwrap();
-    let report = ie::apply_jira_import(&pool, pid, board, &plan, false)
-        .await
-        .unwrap();
+    let report = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(report.source, "jira");
     assert_eq!(report.tasks_created, 2, "epic is not a task");
@@ -200,14 +207,28 @@ async fn reimport_dedupes_by_jira_key(pool: PgPool) {
     let (pid, board) = make_project(&pool, "JRA", owner).await;
 
     let plan = jira::parse_jira_csv(JIRA_CSV).unwrap();
-    ie::apply_jira_import(&pool, pid, board, &plan, false)
-        .await
-        .unwrap();
+    ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
 
     // Re-import the same export: must update in place, not duplicate.
-    let report2 = ie::apply_jira_import(&pool, pid, board, &plan, false)
-        .await
-        .unwrap();
+    let report2 = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
     assert_eq!(report2.tasks_created, 0, "no new tasks on re-import");
     assert_eq!(report2.tasks_updated, 2, "both tasks matched + updated");
     assert_eq!(report2.comments_created, 0, "comments not re-added");
@@ -241,9 +262,16 @@ async fn dry_run_writes_nothing_and_warns_unmatched(pool: PgPool) {
     let (pid, board) = make_project(&pool, "DRY", owner).await;
 
     let plan = jira::parse_jira_csv(JIRA_CSV).unwrap();
-    let report = ie::apply_jira_import(&pool, pid, board, &plan, true)
-        .await
-        .unwrap();
+    let report = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        true,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
 
     assert!(report.dry_run);
     assert_eq!(report.tasks_created, 2);
@@ -285,9 +313,16 @@ async fn epic_via_parent_subtask_nesting_and_absent_parent(pool: PgPool) {
     let (pid, board) = make_project(&pool, "HIER", owner).await;
 
     let plan = jira::parse_jira_csv(HIERARCHY_CSV).unwrap();
-    let report = ie::apply_jira_import(&pool, pid, board, &plan, false)
-        .await
-        .unwrap();
+    let report = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(report.tasks_created, 3, "3 tasks (epic is not a task)");
     assert_eq!(report.epics_created, vec!["Checkout revamp"]);
@@ -370,9 +405,16 @@ async fn epic_via_parent_subtask_nesting_and_absent_parent(pool: PgPool) {
     );
 
     // Idempotent re-import: updates in place, no new tasks/epics, links hold.
-    let report2 = ie::apply_jira_import(&pool, pid, board, &plan, false)
-        .await
-        .unwrap();
+    let report2 = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
     assert_eq!(report2.tasks_created, 0);
     assert_eq!(report2.tasks_updated, 3);
     let tasks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE project_id = $1")
@@ -398,4 +440,230 @@ async fn epic_via_parent_subtask_nesting_and_absent_parent(pool: PgPool) {
     .await
     .unwrap();
     assert_eq!(still_nested.as_deref(), Some("PROJ-1"));
+}
+
+// ── Part 1: historical sprints ──────────────────────────────────────────────
+
+// Rich Sprint cells: one CLOSED (older) + one ACTIVE (newer).
+const SPRINT_STATE_CSV: &str = "Issue key,Issue Type,Summary,Status,Sprint\n\
+P-1,Story,Old work,Done,\"com.atlassian.greenhopper.service.sprint.Sprint@1[id=1,state=CLOSED,name=Sprint 1,startDate=2024-01-01T09:00:00.000Z,endDate=2024-01-14T09:00:00.000Z]\"\n\
+P-2,Story,New work,In Progress,\"com.atlassian.greenhopper.service.sprint.Sprint@2[id=2,state=ACTIVE,name=Sprint 2,startDate=2024-02-01T09:00:00.000Z,endDate=2099-02-14T09:00:00.000Z]\"\n";
+
+#[sqlx::test(migrations = "./migrations")]
+async fn sprints_import_with_real_state_and_dates(pool: PgPool) {
+    let owner = make_user(&pool, "o5@x.test", "Owner").await;
+    let (pid, board) = make_project(&pool, "SPS", owner).await;
+
+    let plan = jira::parse_jira_csv(SPRINT_STATE_CSV).unwrap();
+    ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
+
+    // The closed sprint imports completed, with its real window + completed_at.
+    let (state1, s1, e1, done1): (
+        String,
+        DateTime<Utc>,
+        DateTime<Utc>,
+        Option<DateTime<Utc>>,
+    ) = sqlx::query_as(
+        "SELECT state, starts_at, ends_at, completed_at FROM sprints WHERE project_id = $1 AND name = 'Sprint 1'",
+    )
+    .bind(pid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(state1, "completed");
+    assert_eq!(s1, Utc.with_ymd_and_hms(2024, 1, 1, 9, 0, 0).unwrap());
+    assert_eq!(e1, Utc.with_ymd_and_hms(2024, 1, 14, 9, 0, 0).unwrap());
+    assert!(done1.is_some());
+
+    // The active sprint stays active (the in-flight one).
+    let state2: String =
+        sqlx::query_scalar("SELECT state FROM sprints WHERE project_id = $1 AND name = 'Sprint 2'")
+            .bind(pid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(state2, "active");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn name_only_sprints_default_to_completed(pool: PgPool) {
+    let owner = make_user(&pool, "o6@x.test", "Owner").await;
+    let (pid, board) = make_project(&pool, "SPN", owner).await;
+
+    // No state/dates — just names. A historical migration → all completed.
+    let csv = "Issue key,Issue Type,Summary,Status,Sprint\n\
+               P-1,Story,a,Done,Sprint A\n\
+               P-2,Story,b,Done,Sprint B\n";
+    let plan = jira::parse_jira_csv(csv).unwrap();
+    ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
+
+    let states: Vec<String> =
+        sqlx::query_scalar("SELECT state FROM sprints WHERE project_id = $1 ORDER BY name")
+            .bind(pid)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(states, vec!["completed", "completed"]);
+    // None left planned (no "start sprint" button), none active.
+    let active: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sprints WHERE project_id = $1 AND state != 'completed'",
+    )
+    .bind(pid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(active, 0);
+}
+
+// ── Part 2: user provisioning ───────────────────────────────────────────────
+
+const PROVISION_CSV: &str =
+    "Issue key,Issue Type,Summary,Status,Assignee,Reporter,Watchers,Watchers\n\
+P-1,Story,Do the thing,In Progress,Dana Imported,Erin Imported,Fran Watcher,2\n";
+
+fn provision_opts(added_by: Uuid) -> ie::JiraImportOptions {
+    ie::JiraImportOptions {
+        create_missing_users: true,
+        temp_password_hash: Some(sprintly_api::domain::password::hash(&cfg(), "123456").unwrap()),
+        added_by,
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn provisions_users_assigns_and_is_idempotent(pool: PgPool) {
+    let owner = make_user(&pool, "o7@x.test", "Owner").await;
+    let (pid, board) = make_project(&pool, "PRV", owner).await;
+
+    let plan = jira::parse_jira_csv(PROVISION_CSV).unwrap();
+    let report = ie::apply_jira_import(&pool, pid, board, &plan, false, &provision_opts(owner))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        report.users_created, 3,
+        "Dana + Erin + Fran (watcher) provisioned"
+    );
+    assert_eq!(report.users_matched, 0);
+
+    // Both users exist with the force-reset flag set and a synthetic email.
+    let (dana_id, must_change, email): (Uuid, bool, String) = sqlx::query_as(
+        "SELECT id, must_change_password, email::text FROM users WHERE display_name = 'Dana Imported'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(must_change, "provisioned user must change password");
+    assert!(email.ends_with("@jira-import.local"));
+
+    // Added as a project member.
+    let is_member: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM project_members WHERE project_id = $1 AND user_id = $2",
+    )
+    .bind(pid)
+    .bind(dana_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(is_member, 1);
+
+    // The task is assigned to Dana (assignee) and reported by Erin.
+    let (assignee, reporter_name): (Option<Uuid>, Option<String>) = sqlx::query_as(
+        r#"SELECT t.assignee_id, r.display_name
+             FROM tasks t LEFT JOIN users r ON r.id = t.reporter_id
+            WHERE t.project_id = $1 AND t.external_ref = 'P-1'"#,
+    )
+    .bind(pid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(assignee, Some(dana_id));
+    assert_eq!(reporter_name.as_deref(), Some("Erin Imported"));
+
+    // The watcher (Fran) was provisioned and added as a task watcher (the bare
+    // count cell "2" was ignored).
+    let watcher_name: Option<String> = sqlx::query_scalar(
+        r#"SELECT u.display_name FROM task_watchers w
+             JOIN tasks t ON t.id = w.task_id
+             JOIN users u ON u.id = w.user_id
+            WHERE t.project_id = $1 AND t.external_ref = 'P-1'"#,
+    )
+    .bind(pid)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert_eq!(watcher_name.as_deref(), Some("Fran Watcher"));
+
+    // Idempotent re-import: no new users (now matched), no new tasks.
+    let report2 = ie::apply_jira_import(&pool, pid, board, &plan, false, &provision_opts(owner))
+        .await
+        .unwrap();
+    assert_eq!(report2.users_created, 0, "no duplicate users");
+    assert_eq!(report2.users_matched, 3, "all three matched on re-import");
+    assert_eq!(report2.tasks_created, 0);
+    let users: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM users WHERE email::text LIKE '%@jira-import.local'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(users, 3, "still exactly three provisioned users");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn provisioning_off_keeps_match_only_warning(pool: PgPool) {
+    let owner = make_user(&pool, "o8@x.test", "Owner").await;
+    let (pid, board) = make_project(&pool, "MOF", owner).await;
+
+    let plan = jira::parse_jira_csv(PROVISION_CSV).unwrap();
+    let report = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.users_created, 0);
+    assert!(report
+        .warnings
+        .iter()
+        .any(|w| w.contains("no Sprintly match")));
+    // No users provisioned.
+    let synthetic: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM users WHERE email::text LIKE '%@jira-import.local'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(synthetic, 0);
+    // Task left unassigned.
+    let assignee: Option<Uuid> = sqlx::query_scalar(
+        "SELECT assignee_id FROM tasks WHERE project_id = $1 AND external_ref = 'P-1'",
+    )
+    .bind(pid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(assignee, None);
 }

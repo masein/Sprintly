@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id               AS \"id!: Uuid\",\n               password_hash    AS \"password_hash!: String\",\n               role             AS \"role!: String\",\n               status           AS \"status!: String\",\n               totp_enrolled_at AS \"totp_enrolled_at?: chrono::DateTime<chrono::Utc>\"\n        FROM   users\n        WHERE  email = $1 AND deleted_at IS NULL\n        ",
+  "query": "\n        SELECT id                   AS \"id!: Uuid\",\n               password_hash        AS \"password_hash!: String\",\n               role                 AS \"role!: String\",\n               status               AS \"status!: String\",\n               must_change_password AS \"must_change_password!: bool\",\n               totp_enrolled_at     AS \"totp_enrolled_at?: chrono::DateTime<chrono::Utc>\"\n        FROM   users\n        WHERE  email = $1 AND deleted_at IS NULL\n        ",
   "describe": {
     "columns": [
       {
@@ -25,6 +25,11 @@
       },
       {
         "ordinal": 4,
+        "name": "must_change_password!: bool",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
         "name": "totp_enrolled_at?: chrono::DateTime<chrono::Utc>",
         "type_info": "Timestamptz"
       }
@@ -44,8 +49,9 @@
       false,
       false,
       false,
+      false,
       true
     ]
   },
-  "hash": "fd170a62486ec17ad0670dcfc7d34761bd72540d45abe37db13059bfae4a701d"
+  "hash": "ca146987e5aad08fb2f810e5205732d5057fe01e8126ea1f587832876e2807bf"
 }

@@ -44,10 +44,24 @@ export type AuthResponse = {
 /** Returned by /auth/login when the account has 2FA enabled — the password
  *  step passed, but a second factor is needed to finish. */
 export type TwoFactorChallenge = { two_factor_required: true; challenge: string };
-export type LoginResult = AuthResponse | TwoFactorChallenge;
+/** Returned by /auth/login for a provisioned account that must set its own
+ *  password before it gets a session (e.g. Jira-imported users). */
+export type MustChangePasswordChallenge = {
+  must_change_password_required: true;
+  challenge: string;
+};
+export type LoginResult =
+  | AuthResponse
+  | TwoFactorChallenge
+  | MustChangePasswordChallenge;
 
 export const isTwoFactorChallenge = (r: LoginResult): r is TwoFactorChallenge =>
   "two_factor_required" in r && r.two_factor_required === true;
+
+export const isMustChangePassword = (
+  r: LoginResult,
+): r is MustChangePasswordChallenge =>
+  "must_change_password_required" in r && r.must_change_password_required === true;
 
 export const login = (p: LoginPayload) =>
   api<LoginResult>("/auth/login", { method: "POST", body: p });
@@ -55,6 +69,13 @@ export const login = (p: LoginPayload) =>
 /** Complete a 2FA login with a TOTP or recovery code. */
 export const twoFactorLogin = (challenge: string, code: string) =>
   api<AuthResponse>("/auth/2fa", { method: "POST", body: { challenge, code } });
+
+/** Spend a force-reset challenge: set a new password and get a session. */
+export const changePasswordForced = (challenge: string, new_password: string) =>
+  api<AuthResponse>("/auth/password/change", {
+    method: "POST",
+    body: { challenge, new_password },
+  });
 
 export const register = (p: RegisterPayload) =>
   api<AuthResponse>("/auth/register", { method: "POST", body: p });

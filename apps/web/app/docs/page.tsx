@@ -252,6 +252,29 @@ export default function DocsPage() {
               </table>
             </div>
             <p>
+              A Jira import is a <span className="text-chrome">historical</span>{" "}
+              migration, so imported sprints land <span className="mono">completed</span>{" "}
+              — no &ldquo;start sprint&rdquo; button — carrying their real
+              start/end dates and open/closed state when the export encodes them.
+              The single in-flight sprint (active in Jira, or the most-recent
+              open-ended one) stays <span className="mono">active</span>.
+            </p>
+            <p>
+              <span className="text-chrome">Create missing users</span> (a checkbox
+              on the Jira import, off by default): for each assignee, reporter, or
+              watcher with no Sprintly match, it provisions an account (display
+              name, derived handle, synthetic{" "}
+              <span className="mono">@jira-import.local</span> email if there
+              isn&apos;t one), adds them to the project, and wires them up —
+              assignee, reporter, and watchers on each card. Each is set with an operator-supplied{" "}
+              <span className="mono">temporary password</span> and a{" "}
+              <span className="mono">force-reset</span> flag — at first login they
+              get a challenge to set their own password before any session is
+              issued (the temp password is never logged). Leave the box off to
+              keep today&apos;s match-only behaviour (unmatched people are warned
+              and left unassigned).
+            </p>
+            <p>
               Export the other way: a <span className="mono">JSON</span> bundle
               (tasks with comments and an attachment manifest — metadata, not the
               bytes) or a flat task <span className="mono">CSV</span>.
