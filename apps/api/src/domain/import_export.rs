@@ -1087,13 +1087,31 @@ pub async fn apply_jira_import(
     // fold everything into "Parent" (a story's Parent *is* its epic). So we
     // resolve epic membership from either, and treat a Parent that points at a
     // real task as sub-task nesting.
+    //
+    // Jira's "all fields" export references a parent by *numeric issue id* in the
+    // Parent column, not by key. Map every issue id back to its key so a numeric
+    // Parent resolves to the same row "Parent key" would have.
+    let id_to_key: HashMap<&str, &str> = plan
+        .issues
+        .iter()
+        .filter_map(|i| i.id.as_deref().map(|id| (id, i.key.as_str())))
+        .collect();
     let mut missing_parents: Vec<String> = Vec::new();
     for issue in plan.issues.iter().filter(|i| !i.is_epic()) {
         let Some(&task_id) = key_to_task.get(&issue.key) else {
             continue;
         };
 
-        // Epic membership (J2): an explicit Epic Link, else a Parent that is an
+        // Resolve this issue's parent to an imported Jira *key*: prefer the
+        // "Parent key", else map the numeric "Parent" id through id_to_key.
+        let parent_ref: Option<&str> = issue.parent_key.as_deref().or_else(|| {
+            issue
+                .parent_id
+                .as_deref()
+                .and_then(|pid| id_to_key.get(pid).copied())
+        });
+
+        // Epic membership (J2): an explicit Epic Link, else a parent that is an
         // epic in this import (by Jira key).
         let epic_id = issue
             .epic
@@ -1104,12 +1122,7 @@ pub async fn apply_jira_import(
                     .copied()
                     .or_else(|| epic_by_name.get(&r.trim().to_lowercase()).copied())
             })
-            .or_else(|| {
-                issue
-                    .parent_key
-                    .as_deref()
-                    .and_then(|p| epic_by_key.get(p).copied())
-            });
+            .or_else(|| parent_ref.and_then(|p| epic_by_key.get(p).copied()));
         if let Some(eid) = epic_id {
             sqlx::query("UPDATE tasks SET epic_id = $2 WHERE id = $1")
                 .bind(task_id)
@@ -1118,19 +1131,33 @@ pub async fn apply_jira_import(
                 .await?;
         }
 
-        // Sub-task nesting (J1): a Parent that points at a non-epic task we
-        // imported. If the parent is missing from this import, stay top-level
-        // and warn (don't silently flatten).
-        if let Some(pk) = issue.parent_key.as_deref() {
-            if let Some(&parent_id) = key_to_task.get(pk) {
-                sqlx::query("UPDATE tasks SET parent_task_id = $2 WHERE id = $1")
-                    .bind(task_id)
-                    .bind(parent_id)
-                    .execute(&mut *tx)
-                    .await?;
-            } else if !epic_by_key.contains_key(pk) {
-                missing_parents.push(format!("{} → {}", issue.key, pk));
+        // Sub-task nesting (J1): a parent that points at a non-epic task we
+        // imported. A parent that is an epic is handled above (not "missing");
+        // an unresolvable parent stays top-level and warns (never silently
+        // flattened).
+        match parent_ref {
+            Some(pk) => {
+                if let Some(&parent_id) = key_to_task.get(pk) {
+                    sqlx::query("UPDATE tasks SET parent_task_id = $2 WHERE id = $1")
+                        .bind(task_id)
+                        .bind(parent_id)
+                        .execute(&mut *tx)
+                        .await?;
+                } else if !epic_by_key.contains_key(pk) {
+                    missing_parents.push(format!("{} → {}", issue.key, pk));
+                }
             }
+            // A parent was referenced but couldn't be resolved to any imported
+            // key (e.g. a numeric Parent whose row isn't in this export).
+            None if issue.parent_key.is_some() || issue.parent_id.is_some() => {
+                let raw = issue
+                    .parent_key
+                    .as_deref()
+                    .or(issue.parent_id.as_deref())
+                    .unwrap_or("?");
+                missing_parents.push(format!("{} → {}", issue.key, raw));
+            }
+            None => {}
         }
 
         // Sprint (current).
@@ -1150,10 +1177,26 @@ pub async fn apply_jira_import(
         }
     }
     if !missing_parents.is_empty() {
+        // On a real migration this list can run to hundreds — show a count and
+        // the first few rather than flooding the report with every line.
+        const SHOWN: usize = 10;
+        let head = missing_parents
+            .iter()
+            .take(SHOWN)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        let more = missing_parents.len().saturating_sub(SHOWN);
+        let suffix = if more > 0 {
+            format!(", … (+{more} more)")
+        } else {
+            String::new()
+        };
         report.warnings.push(format!(
-            "{} sub-task(s) kept top-level — their Jira parent wasn't in this import: {}",
+            "{} sub-task(s) kept top-level — their Jira parent wasn't in this import: {}{}",
             missing_parents.len(),
-            missing_parents.join(", ")
+            head,
+            suffix
         ));
     }
 

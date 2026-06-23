@@ -46,6 +46,10 @@ pub struct JiraIssue {
     /// Jira "Issue key", e.g. `PROJ-12` — stored as the task's external ref so a
     /// re-import updates this card instead of duplicating it.
     pub key: String,
+    /// Jira numeric "Issue id", e.g. `18740`. Distinct from the key. The
+    /// "all fields" export references a parent by this id in the `Parent`
+    /// column, so we keep it to resolve `Parent`(id) → that row.
+    pub id: Option<String>,
     pub issue_type: String,
     pub summary: String,
     pub description: String,
@@ -56,8 +60,13 @@ pub struct JiraIssue {
     pub reporter: Option<String>,
     /// Jira repeats "Watchers" columns (one name each); a bare count is dropped.
     pub watchers: Vec<String>,
-    /// Sub-task parent (Jira "Parent" column).
+    /// Parent referenced by *issue key* (the "Parent key" column, e.g.
+    /// `CCTV-1740`), or a "Parent" cell that is itself a key (team-managed
+    /// exports). Resolved against issue keys directly.
     pub parent_key: Option<String>,
+    /// Parent referenced by *numeric issue id* (the "Parent" column, e.g.
+    /// `18740`). Resolved by mapping the id back to its row's issue key.
+    pub parent_id: Option<String>,
     /// Epic association (Jira "Epic Link" key, or an epic name).
     pub epic: Option<String>,
     /// Sprint name (Jira repeats Sprint columns; we keep the most recent).
@@ -71,10 +80,11 @@ impl JiraIssue {
     pub fn is_epic(&self) -> bool {
         self.issue_type.trim().eq_ignore_ascii_case("epic")
     }
-    /// A sub-task if Jira flagged the type as such, or it carries a parent key.
+    /// A sub-task if Jira flagged the type as such, or it carries any parent
+    /// reference (by key or by numeric id).
     pub fn is_subtask(&self) -> bool {
         let t = self.issue_type.trim().to_lowercase();
-        t == "sub-task" || t == "subtask" || self.parent_key.is_some()
+        t == "sub-task" || t == "subtask" || self.parent_key.is_some() || self.parent_id.is_some()
     }
 }
 
@@ -362,7 +372,13 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
     let sprint_i = idxs_exact(&by, &["sprint"]);
     let comment_i = idxs_exact(&by, &["comment"]);
     let due_i = idxs_exact(&by, &["due date"]);
-    let parent_i = idxs_exact(&by, &["parent", "parent key", "parent id"]);
+    let id_i = idxs_exact(&by, &["issue id"]);
+    // Jira references a parent two ways in the same export: "Parent key" holds
+    // the parent's *issue key* (CCTV-1740); "Parent" (or "Parent id") holds the
+    // parent's *numeric issue id* (18740). Keep them apart — matching a numeric
+    // id against issue keys is what flattened every sub-task before.
+    let parent_key_i = idxs_exact(&by, &["parent key"]);
+    let parent_raw_i = idxs_exact(&by, &["parent", "parent id"]);
     let mut epic_i = idxs_exact(&by, &["epic link", "epic name", "custom field (epic link)"]);
     if epic_i.is_empty() {
         epic_i = idxs_contains(&by, "epic link");
@@ -426,8 +442,22 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
             }
         }
 
+        // Parent resolution. "Parent key" is the issue key; "Parent" is usually
+        // the numeric issue id, but a team-managed export folds the key into the
+        // bare "Parent" cell — so a non-numeric "Parent" is treated as a key.
+        let mut parent_key = first(&rec, &parent_key_i);
+        let mut parent_id = None;
+        if let Some(raw) = first(&rec, &parent_raw_i) {
+            if raw.chars().all(|c| c.is_ascii_digit()) {
+                parent_id = Some(raw);
+            } else if parent_key.is_none() {
+                parent_key = Some(raw);
+            }
+        }
+
         issues.push(JiraIssue {
             key,
+            id: first(&rec, &id_i),
             issue_type: first(&rec, &type_i).unwrap_or_else(|| "Task".into()),
             summary,
             description: first(&rec, &desc_i).unwrap_or_default(),
@@ -441,7 +471,8 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
                 .into_iter()
                 .filter(|w| w.parse::<i64>().is_err())
                 .collect(),
-            parent_key: first(&rec, &parent_i),
+            parent_key,
+            parent_id,
             epic: first(&rec, &epic_i),
             sprint: current_sprint,
             story_points: first(&rec, &sp_i).and_then(|s| s.parse::<f64>().ok()),
@@ -594,6 +625,49 @@ mod tests {
         assert_eq!(p2.parent_key.as_deref(), Some("P-1"));
         assert!(p2.is_subtask());
         assert!(!p1.is_subtask());
+    }
+
+    #[test]
+    fn splits_numeric_parent_from_parent_key() {
+        // A real "all fields" export: numeric Issue id + numeric Parent + a
+        // separate Parent key. The numeric Parent must NOT land in parent_key
+        // (that's the bug that flattened every sub-task).
+        let csv = "Issue id,Issue key,Issue Type,Summary,Status,Parent,Parent key\n\
+                   18000,CCTV-1,Epic,Surveillance,To Do,,\n\
+                   18740,CCTV-2,Task,Install cams,In Progress,18000,CCTV-1\n\
+                   18999,CCTV-3,Sub-task,Mount bracket,To Do,18740,CCTV-2\n";
+        let plan = parse_jira_csv(csv).unwrap();
+        let sub = plan.issues.iter().find(|i| i.key == "CCTV-3").unwrap();
+        assert_eq!(sub.id.as_deref(), Some("18999"));
+        assert_eq!(sub.parent_key.as_deref(), Some("CCTV-2")); // by key, not "18740"
+        assert_eq!(sub.parent_id.as_deref(), Some("18740")); // numeric kept for fallback
+        assert!(sub.is_subtask());
+    }
+
+    #[test]
+    fn numeric_only_parent_keeps_id_for_fallback() {
+        // No "Parent key" column — only the numeric Parent. parent_key stays
+        // empty; the numeric id is retained so the apply can map it to a key.
+        let csv = "Issue id,Issue key,Issue Type,Summary,Status,Parent\n\
+                   200,CCTV-2,Task,a,To Do,\n\
+                   300,CCTV-3,Sub-task,b,To Do,200\n";
+        let plan = parse_jira_csv(csv).unwrap();
+        let sub = plan.issues.iter().find(|i| i.key == "CCTV-3").unwrap();
+        assert_eq!(sub.parent_key, None);
+        assert_eq!(sub.parent_id.as_deref(), Some("200"));
+        assert!(sub.is_subtask());
+    }
+
+    #[test]
+    fn team_managed_parent_holds_a_key() {
+        // Team-managed export folds the parent *key* into the bare Parent cell.
+        let csv = "Issue key,Issue Type,Summary,Status,Parent\n\
+                   TM-1,Story,a,To Do,\n\
+                   TM-2,Sub-task,b,To Do,TM-1\n";
+        let plan = parse_jira_csv(csv).unwrap();
+        let sub = plan.issues.iter().find(|i| i.key == "TM-2").unwrap();
+        assert_eq!(sub.parent_key.as_deref(), Some("TM-1")); // non-numeric → key
+        assert_eq!(sub.parent_id, None);
     }
 
     #[test]
