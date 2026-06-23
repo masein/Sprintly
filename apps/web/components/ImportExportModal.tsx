@@ -27,7 +27,10 @@ export function ImportExportModal({
   const [fileName, setFileName] = useState<string | null>(null);
   const [format, setFormat] = useState<ImportFormat>("auto");
   const [report, setReport] = useState<ImportReport | null>(null);
-  const [busy, setBusy] = useState(false);
+  // Which action is in flight — drives a per-button loading label so a slow
+  // large-file run never looks like a no-op. `null` means idle.
+  const [pending, setPending] = useState<null | "preview" | "apply">(null);
+  const busy = pending !== null;
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   // Jira: provision a user for each unmatched assignee/reporter (off by default).
@@ -46,9 +49,12 @@ export function ImportExportModal({
   }
 
   async function run(dryRun: boolean) {
-    if (!content.trim()) return;
-    setBusy(true);
+    // Guard: ignore re-entrant clicks (a second click while busy), but never
+    // bail just because the file is large — only a genuinely empty box stops us.
+    if (busy || !content.trim()) return;
+    setPending(dryRun ? "preview" : "apply");
     setError(null);
+    setDone(null);
     try {
       const res = await importProject(projectKey, {
         format,
@@ -65,9 +71,10 @@ export function ImportExportModal({
         onImported();
       }
     } catch (e) {
-      setError((e as ApiError).message ?? "import failed");
+      setError((e as ApiError).message ?? "import failed — check the logs and try again.");
     } finally {
-      setBusy(false);
+      // Always clear, on success and failure, so neither button can wedge.
+      setPending(null);
     }
   }
 
@@ -228,7 +235,14 @@ export function ImportExportModal({
             </div>
           )}
 
-          {error && <div className="mono text-[11px] text-red-300">{error}</div>}
+          {error && (
+            <div
+              role="alert"
+              className="mono rounded border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-[11px] text-red-200"
+            >
+              {error}
+            </div>
+          )}
           {done && <div className="mono text-[11px] text-emerald-300">{done}</div>}
 
           <div className="flex items-center gap-2">
@@ -238,17 +252,21 @@ export function ImportExportModal({
               onClick={() => run(true)}
               className="mono rounded border border-white/10 px-3 py-1 text-xs text-chrome-dim hover:text-chrome disabled:opacity-50"
             >
-              {busy ? "…" : "preview (dry-run)"}
+              {pending === "preview" ? "compiling vibes…" : "preview (dry-run)"}
             </button>
             <button
               type="button"
               disabled={busy || !report || !report.dry_run}
               onClick={() => run(false)}
               className="mono rounded bg-accent px-3 py-1 text-xs text-accent-fg disabled:opacity-50"
-              title={report?.dry_run ? "" : "preview first"}
+              title={report?.dry_run ? "" : "run a preview first"}
             >
-              apply import
+              {pending === "apply" ? "nudging electrons…" : "apply import"}
             </button>
+            {/* Make the gate explicit instead of a silently-dead button. */}
+            {!busy && content.trim() && (!report || !report.dry_run) && (
+              <span className="mono text-[10px] text-chrome-dim">preview first to apply</span>
+            )}
           </div>
         </section>
       </div>
