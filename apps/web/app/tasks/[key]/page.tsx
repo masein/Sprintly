@@ -19,6 +19,7 @@ import { SubtasksPanel, LinksPanel } from "@/components/Relations";
 import { FieldValuesPanel } from "@/components/FieldValuesPanel";
 import { GitLinksPanel } from "@/components/GitLinksPanel";
 import { TaskTimer } from "@/components/TaskTimer";
+import { Avatar } from "@/components/Avatar";
 import { deleteTask, editTask, getTask, moveTask, type Task } from "@/lib/tasks";
 import { assignTaskEpic, listEpics } from "@/lib/roadmap";
 import { me } from "@/lib/auth-bundle";
@@ -384,25 +385,50 @@ function AssigneeField({ task, canEdit }: { task: Task; canEdit: boolean }) {
   const members = membersQ.data ?? [];
   const current = members.find((m) => m.user_id === task.assignee_id);
 
+  const currentAvatar = current ? (
+    <Avatar
+      size={18}
+      user={{
+        userId: current.user_id,
+        displayName: current.display_name,
+        handle: current.handle,
+        avatarUrl: current.avatar_url,
+        avatarStyle: current.avatar_style,
+        avatarSeed: current.avatar_seed,
+      }}
+    />
+  ) : null;
+
   if (!canEdit) {
-    return current ? <Field label="assignee" value={`@${current.handle}`} /> : null;
+    if (!current) return null;
+    return (
+      <div className="flex items-center justify-between gap-3">
+        <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">assignee</span>
+        <span className="mono flex items-center gap-1.5 text-xs text-chrome">
+          {currentAvatar}@{current.handle}
+        </span>
+      </div>
+    );
   }
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">assignee</span>
-      <select
-        value={task.assignee_id ?? ""}
-        onChange={(e) => patch.mutate(e.target.value || null)}
-        aria-label="assignee"
-        className="mono max-w-[60%] truncate rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
-      >
-        <option value="">unassigned</option>
-        {members.map((m) => (
-          <option key={m.user_id} value={m.user_id}>
-            @{m.handle}
-          </option>
-        ))}
-      </select>
+      <div className="flex items-center gap-1.5">
+        {currentAvatar}
+        <select
+          value={task.assignee_id ?? ""}
+          onChange={(e) => patch.mutate(e.target.value || null)}
+          aria-label="assignee"
+          className="mono max-w-[55%] truncate rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
+        >
+          <option value="">unassigned</option>
+          {members.map((m) => (
+            <option key={m.user_id} value={m.user_id}>
+              @{m.handle}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }

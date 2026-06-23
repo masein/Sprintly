@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { me, logout, type Me } from "@/lib/auth-bundle";
+import { Avatar } from "./Avatar";
 
 export function SessionBadge() {
   const router = useRouter();
@@ -55,6 +56,17 @@ export function SessionBadge() {
   return (
     <div className="mono flex items-center gap-3 text-xs">
       <span className="text-chrome-dim">signed in as</span>
+      <Avatar
+        size={20}
+        user={{
+          userId: user.id,
+          displayName: user.display_name,
+          handle: user.handle,
+          avatarUrl: user.avatar_url,
+          avatarStyle: user.avatar_style,
+          avatarSeed: user.avatar_seed,
+        }}
+      />
       <span className="text-chrome">@{user.handle}</span>
       <span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-chrome-dim">
         {user.role}

@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT pm.user_id      AS \"user_id!: Uuid\",\n               u.handle        AS \"handle!: String\",\n               u.display_name  AS \"display_name!: String\",\n               u.avatar_url,\n               u.avatar_style,\n               u.avatar_seed,\n               pm.role         AS \"role!: String\",\n               pm.added_at     AS \"added_at!: DateTime<Utc>\"\n        FROM   project_members pm\n        JOIN   users u ON u.id = pm.user_id\n        WHERE  pm.project_id = $1 AND u.deleted_at IS NULL\n        ORDER BY pm.role, u.handle\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "avatar_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "avatar_style",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "avatar_seed",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "role!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "added_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "0604aef4e3a3d64494caf883f095392bb0818d9bf19fcd5ee8fab20aa893443c"
+}

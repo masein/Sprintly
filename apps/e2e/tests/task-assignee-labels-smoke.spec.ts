@@ -56,7 +56,7 @@ test.describe("QA F2/F3 — task assignee + labels", () => {
     });
 
     await test.step("assign to the member and add the label", async () => {
-      await page.getByLabel("assignee").selectOption({ label: `@${handle}` });
+      await page.getByLabel("assignee", { exact: true }).selectOption({ label: `@${handle}` });
       await page.getByLabel("add label").selectOption({ label: "backend" });
       // The label chip shows on the task immediately.
       await expect(page.getByLabel(/remove backend/i)).toBeVisible();
@@ -65,7 +65,7 @@ test.describe("QA F2/F3 — task assignee + labels", () => {
     await test.step("reload: both persist", async () => {
       await page.reload();
       // Assignee is no longer "unassigned".
-      await expect(page.getByLabel("assignee")).not.toHaveValue("");
+      await expect(page.getByLabel("assignee", { exact: true })).not.toHaveValue("");
       await expect(page.getByLabel(/remove backend/i)).toBeVisible();
     });
 

@@ -1,0 +1,3 @@
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_avatar_style_chk;
+ALTER TABLE users DROP COLUMN IF EXISTS avatar_seed;
+ALTER TABLE users DROP COLUMN IF EXISTS avatar_style;

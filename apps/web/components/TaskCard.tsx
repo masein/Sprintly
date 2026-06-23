@@ -13,6 +13,7 @@ import { Bug, Sparkles, Wrench, Beaker, Flame } from "lucide-react";
 import type { Task } from "@/lib/tasks";
 import { labelColorMap, listProjectLabels } from "@/lib/labels";
 import { listMembers } from "@/lib/projects";
+import { Avatar } from "./Avatar";
 
 const TYPE_ICON = {
   feature: Sparkles,
@@ -89,6 +90,7 @@ export function TaskCard({
       style={style}
       {...sortable.attributes}
       {...dragListeners}
+      data-task-card={task.key}
       role="button"
       tabIndex={0}
       onPointerDown={(e) => {
@@ -151,9 +153,17 @@ export function TaskCard({
       )}
       {assignee && (
         <div className="mt-2 flex items-center justify-end gap-1" title={`assigned to @${assignee.handle}`}>
-          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent/20 text-[8px] font-semibold text-accent">
-            {(assignee.display_name || assignee.handle).slice(0, 2).toUpperCase()}
-          </span>
+          <Avatar
+            size={16}
+            user={{
+              userId: assignee.user_id,
+              displayName: assignee.display_name,
+              handle: assignee.handle,
+              avatarUrl: assignee.avatar_url,
+              avatarStyle: assignee.avatar_style,
+              avatarSeed: assignee.avatar_seed,
+            }}
+          />
           <span className="mono text-[9px] text-chrome-dim">@{assignee.handle}</span>
         </div>
       )}

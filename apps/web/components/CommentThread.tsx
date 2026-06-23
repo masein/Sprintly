@@ -17,6 +17,7 @@ import {
 } from "@/lib/task-detail";
 import { me, type Me } from "@/lib/auth-bundle";
 import { Markdown } from "./Markdown";
+import { Avatar } from "./Avatar";
 
 const QUICK_EMOJI = ["👍", "🎉", "🚀", "❤️", "👀", "🙌"];
 
@@ -127,6 +128,18 @@ function CommentItem({
   return (
     <article className="rounded-lg border border-white/10 bg-ink-subtle p-3">
       <header className="mb-2 flex items-center gap-2">
+        {comment.author_id && (
+          <Avatar
+            size={18}
+            user={{
+              userId: comment.author_id,
+              handle: comment.author_handle,
+              avatarUrl: comment.author_avatar_url,
+              avatarStyle: comment.author_avatar_style,
+              avatarSeed: comment.author_avatar_seed,
+            }}
+          />
+        )}
         <span className="mono text-xs text-chrome">
           @{comment.author_handle ?? "?"}
         </span>

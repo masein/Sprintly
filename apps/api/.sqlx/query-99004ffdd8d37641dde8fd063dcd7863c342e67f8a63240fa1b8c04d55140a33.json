@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT pm.user_id      AS \"user_id!: Uuid\",\n               u.handle        AS \"handle!: String\",\n               u.display_name  AS \"display_name!: String\",\n               u.avatar_url,\n               pm.role         AS \"role!: String\",\n               pm.added_at     AS \"added_at!: DateTime<Utc>\"\n        FROM   project_members pm\n        JOIN   users u ON u.id = pm.user_id\n        WHERE  pm.project_id = $1 AND u.deleted_at IS NULL\n        ORDER BY pm.role, u.handle\n        ",
+  "query": "\n        SELECT w.user_id      AS \"user_id!: Uuid\",\n               u.handle       AS \"handle!: String\",\n               u.display_name AS \"display_name!: String\",\n               u.avatar_url,\n               u.avatar_style,\n               u.avatar_seed,\n               w.added_at     AS \"added_at!: DateTime<Utc>\"\n        FROM   task_watchers w\n        JOIN   users u ON u.id = w.user_id\n        WHERE  w.task_id = $1 AND u.deleted_at IS NULL\n        ORDER  BY u.handle\n        ",
   "describe": {
     "columns": [
       {
@@ -25,11 +25,16 @@
       },
       {
         "ordinal": 4,
-        "name": "role!: String",
+        "name": "avatar_style",
         "type_info": "Text"
       },
       {
         "ordinal": 5,
+        "name": "avatar_seed",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
         "name": "added_at!: DateTime<Utc>",
         "type_info": "Timestamptz"
       }
@@ -44,9 +49,10 @@
       false,
       false,
       true,
-      false,
+      true,
+      true,
       false
     ]
   },
-  "hash": "29df180bbe9e5be9777e253e2797304d21401f5984f80413dc3f765a9c055676"
+  "hash": "99004ffdd8d37641dde8fd063dcd7863c342e67f8a63240fa1b8c04d55140a33"
 }

@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, ListTree, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, ListTree, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, Smile, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -366,6 +366,29 @@ export default function DocsPage() {
               alongside SSO unless you set{" "}
               <span className="mono">SPRINTLY_LOCAL_LOGIN_DISABLED=true</span> to
               go SSO-only.
+            </p>
+          </Section>
+
+          <Section icon={Smile} title="Avatars">
+            <p>
+              Everyone gets a deterministic generated avatar — drawn as inline
+              SVG from your user id, so it&apos;s the same everywhere and needs
+              no network call (works offline and on an air-gapped box). It shows
+              on board cards, the task assignee, watchers, comment authors, and
+              the nav, always next to your <span className="mono">@handle</span>{" "}
+              — the picture is never the only cue.
+            </p>
+            <p>
+              In <span className="mono">/settings</span> pick a style —{" "}
+              <span className="mono">beaver</span> (the mascot),{" "}
+              <span className="mono">robot</span>,{" "}
+              <span className="mono">identicon</span>, or{" "}
+              <span className="mono">emoji</span> — hit{" "}
+              <span className="mono">regenerate</span> to reroll the seed, or
+              upload your own image (it&apos;s downscaled to a small inline PNG;
+              no object storage required). <span className="mono">Use
+              generated</span> drops the upload and falls back to the generated
+              avatar.
             </p>
           </Section>
 

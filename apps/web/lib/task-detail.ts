@@ -7,6 +7,9 @@ export type Comment = {
   task_id: string;
   author_id: string | null;
   author_handle: string | null;
+  author_avatar_url: string | null;
+  author_avatar_style: string | null;
+  author_avatar_seed: string | null;
   parent_comment_id: string | null;
   body: string;
   created_at: string;
@@ -34,6 +37,9 @@ export type Watcher = {
   user_id: string;
   handle: string;
   display_name: string;
+  avatar_url: string | null;
+  avatar_style: string | null;
+  avatar_seed: string | null;
   added_at: string;
 };
 

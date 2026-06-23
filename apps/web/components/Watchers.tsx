@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff } from "lucide-react";
 import { addWatcher, listWatchers, removeWatcher } from "@/lib/task-detail";
 import { me } from "@/lib/auth-bundle";
+import { Avatar } from "./Avatar";
 
 export function Watchers({ taskKey }: { taskKey: string }) {
   const qc = useQueryClient();
@@ -42,6 +43,17 @@ export function Watchers({ taskKey }: { taskKey: string }) {
       <ul className="space-y-1">
         {(w.data ?? []).map((w) => (
           <li key={w.user_id} className="mono flex items-center gap-2 text-xs">
+            <Avatar
+              size={18}
+              user={{
+                userId: w.user_id,
+                displayName: w.display_name,
+                handle: w.handle,
+                avatarUrl: w.avatar_url,
+                avatarStyle: w.avatar_style,
+                avatarSeed: w.avatar_seed,
+              }}
+            />
             <span className="text-chrome">@{w.handle}</span>
             <span className="text-chrome-dim">{w.display_name}</span>
           </li>
