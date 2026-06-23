@@ -442,6 +442,92 @@ async fn epic_via_parent_subtask_nesting_and_absent_parent(pool: PgPool) {
     assert_eq!(still_nested.as_deref(), Some("PROJ-1"));
 }
 
+// A real company-managed "all fields" export: a numeric Issue id + a numeric
+// "Parent" (the parent's id) *and* a "Parent key" column. The numeric Parent
+// must resolve via id→key, not be matched against issue keys (the bug that kept
+// 764 sub-tasks flat). Sub-task → task and task → epic must both link.
+const ALL_FIELDS_PARENT_CSV: &str =
+    "Issue id,Issue key,Issue Type,Summary,Status,Parent,Parent key\n\
+18000,CCTV-1,Epic,Surveillance rollout,To Do,,\n\
+18740,CCTV-2,Task,Install cameras,In Progress,18000,CCTV-1\n\
+18999,CCTV-3,Sub-task,Mount the bracket,To Do,18740,CCTV-2\n";
+
+#[sqlx::test(migrations = "./migrations")]
+async fn all_fields_numeric_parent_links_subtask_and_epic(pool: PgPool) {
+    let owner = make_user(&pool, "owner-af@x.test", "Owner").await;
+    let (pid, board) = make_project(&pool, "CCTV", owner).await;
+
+    let plan = jira::parse_jira_csv(ALL_FIELDS_PARENT_CSV).unwrap();
+    let report = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.tasks_created, 2, "2 tasks (the epic is not a task)");
+    assert_eq!(report.epics_created, vec!["Surveillance rollout"]);
+    // Nothing flattened — the numeric Parent resolved.
+    assert!(
+        !report.warnings.iter().any(|w| w.contains("kept top-level")),
+        "no sub-task should be flattened: {:?}",
+        report.warnings
+    );
+
+    // The Task links to its Epic (so epic progress is real), and is NOT nested.
+    let (epic_name, parent_task): (Option<String>, Option<Uuid>) = sqlx::query_as(
+        r#"SELECT e.name, t.parent_task_id
+             FROM tasks t LEFT JOIN epics e ON e.id = t.epic_id
+            WHERE t.project_id = $1 AND t.external_ref = 'CCTV-2'"#,
+    )
+    .bind(pid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(epic_name.as_deref(), Some("Surveillance rollout"));
+    assert_eq!(parent_task, None);
+
+    // The Sub-task nests under the Task (resolved through Parent id 18740).
+    let nested_under: Option<String> = sqlx::query_scalar(
+        r#"SELECT p.external_ref FROM tasks c
+             JOIN tasks p ON p.id = c.parent_task_id
+            WHERE c.project_id = $1 AND c.external_ref = 'CCTV-3'"#,
+    )
+    .bind(pid)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert_eq!(nested_under.as_deref(), Some("CCTV-2"));
+
+    // Idempotent re-import: links hold, no duplicates.
+    let report2 = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report2.tasks_created, 0);
+    assert_eq!(report2.tasks_updated, 2);
+    let still_nested: Option<String> = sqlx::query_scalar(
+        r#"SELECT p.external_ref FROM tasks c
+             JOIN tasks p ON p.id = c.parent_task_id
+            WHERE c.project_id = $1 AND c.external_ref = 'CCTV-3'"#,
+    )
+    .bind(pid)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert_eq!(still_nested.as_deref(), Some("CCTV-2"));
+}
+
 // ── Part 1: historical sprints ──────────────────────────────────────────────
 
 // Rich Sprint cells: one CLOSED (older) + one ACTIVE (newer).

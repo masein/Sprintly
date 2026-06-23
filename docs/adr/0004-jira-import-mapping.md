@@ -70,19 +70,32 @@ A real "all fields" export carries the parent relationship two different ways,
 and the first cut only handled one:
 
 - **Classic / company-managed** projects use a separate **`Epic Link`** column
-  (the epic's key) plus **`Parent`** for sub-tasks.
-- **Team-managed** projects fold everything into one **`Parent`** column: a
-  sub-task's `Parent` is its story, but a *story's* `Parent` is its **epic**.
+  (the epic's key) plus a parent reference for sub-tasks. Crucially, the "all
+  fields" export gives that reference **two ways**: a numeric **`Parent`** (the
+  parent's *issue id*, e.g. `18740`) **and** a **`Parent key`** (the parent's
+  *issue key*, e.g. `CCTV-1740`).
+- **Team-managed** projects fold everything into one bare **`Parent`** column
+  holding the parent **key**: a sub-task's `Parent` is its story, but a
+  *story's* `Parent` is its **epic**.
 
-So resolution is unified in a second pass once every task id is known:
+So the parser keeps the parent reference **by key** and **by numeric id**
+separately (a non-numeric `Parent` cell is taken as a key, covering the
+team-managed shape), plus each row's own numeric **`Issue id`**. Resolution is
+unified in a second pass once every task id is known:
 
-- **Epic membership** comes from `Epic Link` **or** a `Parent` that points at an
-  epic in the import (matched by Jira key) → `tasks.epic_id` is set, making epic
-  progress (done/total) real. An epic parent is *not* treated as task nesting.
-- **Sub-task nesting** comes from a `Parent` that points at a non-epic task we
-  imported → `tasks.parent_task_id`. If the parent is **absent** from the
+- **Parent → key.** Each row's parent is resolved to an imported **issue key**:
+  the `Parent key` column wins; otherwise the numeric `Parent` is mapped through
+  an `issue id → key` table built from the export. (Matching the numeric `Parent`
+  *against keys* — the original bug — resolves nothing, so every sub-task fell
+  to top-level.)
+- **Epic membership** comes from `Epic Link` **or** a resolved parent that points
+  at an epic in the import (matched by Jira key) → `tasks.epic_id` is set, making
+  epic progress (done/total) real. An epic parent is *not* treated as task nesting.
+- **Sub-task nesting** comes from a resolved parent that points at a non-epic task
+  we imported → `tasks.parent_task_id`. If the parent is **absent** from the
   import, the task stays **top-level** and is collected into a warning (never
-  silently flattened, never dangling).
+  silently flattened, never dangling). The warning is **summarised** — a count
+  plus the first ten — so a large migration doesn't print hundreds of lines.
 - **Comments:** the author is matched to a Sprintly user; when there's no
   account, the original name is preserved in the comment body (`> imported from
   Jira — Name`) rather than dropped, and the Jira timestamp becomes `created_at`.
