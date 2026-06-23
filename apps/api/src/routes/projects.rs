@@ -123,6 +123,8 @@ pub struct MemberDto {
     pub handle: String,
     pub display_name: String,
     pub avatar_url: Option<String>,
+    pub avatar_style: Option<String>,
+    pub avatar_seed: Option<String>,
     pub role: String,
     pub added_at: DateTime<Utc>,
 }
@@ -398,6 +400,8 @@ async fn list_members(
                u.handle        AS "handle!: String",
                u.display_name  AS "display_name!: String",
                u.avatar_url,
+               u.avatar_style,
+               u.avatar_seed,
                pm.role         AS "role!: String",
                pm.added_at     AS "added_at!: DateTime<Utc>"
         FROM   project_members pm
@@ -416,6 +420,8 @@ async fn list_members(
             handle: r.handle,
             display_name: r.display_name,
             avatar_url: r.avatar_url,
+            avatar_style: r.avatar_style,
+            avatar_seed: r.avatar_seed,
             role: r.role,
             added_at: r.added_at,
         })

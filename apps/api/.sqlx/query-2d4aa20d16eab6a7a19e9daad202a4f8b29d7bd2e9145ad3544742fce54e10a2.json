@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id           AS \"id!: Uuid\",\n               email        AS \"email!: String\",\n               handle       AS \"handle!: String\",\n               display_name AS \"display_name!: String\",\n               avatar_url,\n               role         AS \"role!: String\",\n               status       AS \"status!: String\",\n               timezone     AS \"timezone!: String\",\n               currency     AS \"currency!: String\",\n               settings     AS \"settings!: JsonValue\",\n               created_at   AS \"created_at!: chrono::DateTime<chrono::Utc>\",\n               last_seen_at\n        FROM   users\n        WHERE  id = $1 AND deleted_at IS NULL\n        ",
+  "query": "\n        SELECT id           AS \"id!: Uuid\",\n               email        AS \"email!: String\",\n               handle       AS \"handle!: String\",\n               display_name AS \"display_name!: String\",\n               avatar_url,\n               avatar_style,\n               avatar_seed,\n               role         AS \"role!: String\",\n               status       AS \"status!: String\",\n               timezone     AS \"timezone!: String\",\n               currency     AS \"currency!: String\",\n               settings     AS \"settings!: JsonValue\",\n               created_at   AS \"created_at!: chrono::DateTime<chrono::Utc>\",\n               last_seen_at\n        FROM   users\n        WHERE  id = $1 AND deleted_at IS NULL\n        ",
   "describe": {
     "columns": [
       {
@@ -35,36 +35,46 @@
       },
       {
         "ordinal": 5,
-        "name": "role!: String",
+        "name": "avatar_style",
         "type_info": "Text"
       },
       {
         "ordinal": 6,
-        "name": "status!: String",
+        "name": "avatar_seed",
         "type_info": "Text"
       },
       {
         "ordinal": 7,
-        "name": "timezone!: String",
+        "name": "role!: String",
         "type_info": "Text"
       },
       {
         "ordinal": 8,
-        "name": "currency!: String",
+        "name": "status!: String",
         "type_info": "Text"
       },
       {
         "ordinal": 9,
+        "name": "timezone!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "currency!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
         "name": "settings!: JsonValue",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "created_at!: chrono::DateTime<chrono::Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "last_seen_at",
         "type_info": "Timestamptz"
       }
@@ -80,6 +90,8 @@
       false,
       false,
       true,
+      true,
+      true,
       false,
       false,
       false,
@@ -89,5 +101,5 @@
       true
     ]
   },
-  "hash": "bbe20db7a12002f96f9ef1a5e5fd316c07a9169ae27c665f9d2e5d924375855f"
+  "hash": "2d4aa20d16eab6a7a19e9daad202a4f8b29d7bd2e9145ad3544742fce54e10a2"
 }

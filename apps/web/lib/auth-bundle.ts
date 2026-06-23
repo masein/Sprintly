@@ -6,11 +6,13 @@ export {
   register,
   logout,
   me,
+  setMyAvatar,
   twoFactorLogin,
   isTwoFactorChallenge,
   isMustChangePassword,
   changePasswordForced,
   type Me,
+  type AvatarPayload,
   type AuthResponse,
   type LoginResult,
 } from "./auth";

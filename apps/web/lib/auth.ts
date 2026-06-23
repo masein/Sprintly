@@ -12,6 +12,8 @@ export type Me = {
   handle: string;
   display_name: string;
   avatar_url: string | null;
+  avatar_style: string | null;
+  avatar_seed: string | null;
   role: "admin" | "member" | "viewer";
   status: "active" | "invited" | "suspended";
   timezone: string;
@@ -83,6 +85,17 @@ export const register = (p: RegisterPayload) =>
 export const logout = () => api<void>("/auth/logout", { method: "POST" });
 
 export const me = () => api<Me>("/users/me");
+
+// Replace the whole avatar in one shot. `url` is an uploaded/linked image
+// (data: or https:), `style`/`seed` describe the generated avatar. Send all
+// null to revert to the deterministic default.
+export type AvatarPayload = {
+  url?: string | null;
+  style?: string | null;
+  seed?: string | null;
+};
+export const setMyAvatar = (p: AvatarPayload) =>
+  api<Me>("/users/me/avatar", { method: "PUT", body: p });
 
 export const requestPasswordReset = (email: string) =>
   api<{ message: string; dev_token?: string }>(

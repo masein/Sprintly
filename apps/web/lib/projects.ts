@@ -40,6 +40,8 @@ export type Member = {
   handle: string;
   display_name: string;
   avatar_url: string | null;
+  avatar_style: string | null;
+  avatar_seed: string | null;
   role: "lead" | "contributor" | "watcher";
   added_at: string;
 };
