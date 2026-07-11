@@ -8,20 +8,24 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { ThroughputChart } from "@/components/ThroughputChart";
+import { TimeReportPanel } from "@/components/TimeReportPanel";
 import { fmtHours, getMetrics } from "@/lib/metrics";
 import type { ApiError } from "@/lib/api";
 
 const WINDOWS = [4, 8, 12, 26];
+type Tab = "flow" | "time";
 
 export default function MetricsPage() {
   const params = useParams<{ key: string }>();
   const key = params.key;
   const router = useRouter();
   const [weeks, setWeeks] = useState(8);
+  const [tab, setTab] = useState<Tab>("flow");
 
   const q = useQuery({
     queryKey: ["metrics", key, weeks],
     queryFn: () => getMetrics(key, weeks),
+    enabled: tab === "flow",
     retry: (n, e) =>
       (e as unknown as ApiError)?.status !== 401 &&
       (e as unknown as ApiError)?.status !== 403 &&
@@ -51,27 +55,50 @@ export default function MetricsPage() {
       <header className="mb-6 flex items-end justify-between">
         <div>
           <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-            {key} · flow metrics
+            {key} · {tab === "flow" ? "flow metrics" : "time report"}
           </div>
-          <h1 className="text-3xl font-semibold">How work flows.</h1>
+          <h1 className="text-3xl font-semibold">
+            {tab === "flow" ? "How work flows." : "Where time went."}
+          </h1>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1">
-            {WINDOWS.map((w) => (
+          {/* Flow | Time tab switcher. */}
+          <div className="flex items-center gap-1" role="tablist" aria-label="metrics view">
+            {(["flow", "time"] as Tab[]).map((tb) => (
               <button
-                key={w}
+                key={tb}
                 type="button"
-                onClick={() => setWeeks(w)}
+                role="tab"
+                aria-selected={tab === tb}
+                onClick={() => setTab(tb)}
                 className={`mono rounded border px-2 py-1 text-xs ${
-                  weeks === w
+                  tab === tb
                     ? "border-accent text-chrome"
                     : "border-white/10 text-chrome-dim hover:border-white/20 hover:text-chrome"
                 }`}
               >
-                {w}w
+                {tb}
               </button>
             ))}
           </div>
+          {tab === "flow" && (
+            <div className="flex items-center gap-1">
+              {WINDOWS.map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => setWeeks(w)}
+                  className={`mono rounded border px-2 py-1 text-xs ${
+                    weeks === w
+                      ? "border-accent text-chrome"
+                      : "border-white/10 text-chrome-dim hover:border-white/20 hover:text-chrome"
+                  }`}
+                >
+                  {w}w
+                </button>
+              ))}
+            </div>
+          )}
           <Link
             href={`/projects/${key}/dashboard`}
             className="mono text-xs text-accent hover:underline"
@@ -81,11 +108,13 @@ export default function MetricsPage() {
         </div>
       </header>
 
-      {q.isLoading && (
+      {tab === "time" && <TimeReportPanel projectKey={key} />}
+
+      {tab === "flow" && q.isLoading && (
         <div className="mono text-sm text-chrome-dim">compiling vibes…</div>
       )}
 
-      {m && (
+      {tab === "flow" && m && (
         <div className="space-y-6">
           <section className="space-y-2">
             <div className="mono flex items-center justify-between text-xs uppercase tracking-widest text-chrome-dim">

@@ -41,6 +41,7 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::task_detail::router())
         .merge(routes::search::router())
         .merge(routes::time_logs::router())
+        .merge(routes::time_reports::router())
         .merge(routes::timesheets::router())
         .merge(routes::sprints::router())
         .merge(routes::retros::router())
