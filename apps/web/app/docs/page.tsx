@@ -308,6 +308,19 @@ export default function DocsPage() {
               aggregates billable minutes × your hourly rate (cents math, no
               floats). PDF + CSV exports.
             </p>
+            <p>
+              The <span className="mono">Time</span> tab on a project&apos;s{" "}
+              <span className="mono">metrics</span> page reports logged time over
+              an arbitrary date range <em>and/or</em> a sprint — presets for last
+              7/30 days, this month, and this sprint, plus a custom picker. It
+              totals <span className="mono">time</span>,{" "}
+              <span className="mono">billable</span>, and{" "}
+              <span className="mono">pay</span>, broken down{" "}
+              <span className="mono">by person</span>,{" "}
+              <span className="mono">by task</span>, and{" "}
+              <span className="mono">by sprint</span>, with a matching CSV export.
+              Leads see the whole team; everyone else sees only their own time.
+            </p>
           </Section>
 
           <Section icon={GitBranch} title="Git integration">
