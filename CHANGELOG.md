@@ -5,6 +5,12 @@ All notable changes to Sprintly are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Jira worklog import** — the native Jira importer now maps the repeated `Log Work` columns (`comment;started;author;timeSpentSeconds`) into `time_logs`: author matched like comments and assignees (unmatched → skipped with a warning, never invents a user), start time and duration preserved. Idempotent on re-import (deduped on task + user + start + duration); the dry-run preview reports the worklog count that would land.
+
 ## [1.0.0] — 2026-06-14
 
 First stable release. Sprintly is a self-hosted, developer-themed project

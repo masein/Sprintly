@@ -11,7 +11,7 @@
 //!    (columns, labels, tasks + comments + an attachments manifest); the bytes
 //!    themselves are not included, only metadata.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -322,6 +322,9 @@ pub struct ImportReport {
     /// Jira-only: existing tasks matched by external ref and updated in place.
     pub tasks_updated: i64,
     pub comments_created: i64,
+    /// Jira-only: time logs imported from "Log Work" columns (deduped on
+    /// re-import). In a dry run this is the count that *would* be imported.
+    pub worklogs_imported: i64,
     /// Jira-only: users provisioned (create-missing-users) vs matched to existing.
     pub users_created: i64,
     pub users_matched: i64,
@@ -344,6 +347,7 @@ impl ImportReport {
             tasks_created: 0,
             tasks_updated: 0,
             comments_created: 0,
+            worklogs_imported: 0,
             users_created: 0,
             users_matched: 0,
             warnings: Vec::new(),
@@ -929,6 +933,8 @@ pub async fn apply_jira_import(
     // ── pass 1: upsert tasks (Epic-type issues become epics, not tasks) ──
     let mut key_to_task: HashMap<String, Uuid> = HashMap::new();
     let mut next_order = 1024.0_f64;
+    // Worklogs whose Jira author matched no Sprintly user — skipped, warned once.
+    let mut worklog_skips = 0i64;
     for issue in plan.issues.iter().filter(|i| !i.is_epic()) {
         let column = col_id
             .get(&issue.status.trim().to_lowercase())
@@ -1079,6 +1085,59 @@ pub async fn apply_jira_import(
                 .await?;
             }
         }
+
+        // Worklogs → time_logs. The Jira author is matched the same way comments
+        // and assignees are (email, then display name); a worklog by someone with
+        // no Sprintly account is skipped — we never invent a user for one. Runs
+        // for created *and* updated tasks, deduped on (task, user, started_at,
+        // duration) so a re-import doesn't stack duplicate logs. `duration_minutes`
+        // is a generated column, so we persist `ended_at = started_at + seconds`
+        // and let Postgres derive the minutes.
+        for wl in &issue.worklogs {
+            let Some(user_id) = wl
+                .author
+                .as_deref()
+                .and_then(|a| jira::match_user(a, &users))
+            else {
+                worklog_skips += 1;
+                continue;
+            };
+            let ended = wl.started + Duration::seconds(wl.seconds);
+            let dur_min = (wl.seconds / 60) as i32;
+            let exists: bool = sqlx::query_scalar(
+                r#"SELECT EXISTS(
+                       SELECT 1 FROM time_logs
+                        WHERE task_id = $1 AND user_id = $2 AND started_at = $3
+                          AND duration_minutes = $4 AND deleted_at IS NULL)"#,
+            )
+            .bind(task_id)
+            .bind(user_id)
+            .bind(wl.started)
+            .bind(dur_min)
+            .fetch_one(&mut *tx)
+            .await?;
+            if exists {
+                continue;
+            }
+            sqlx::query(
+                r#"INSERT INTO time_logs (id, task_id, user_id, started_at, ended_at, note)
+                   VALUES ($1, $2, $3, $4, $5, $6)"#,
+            )
+            .bind(Uuid::now_v7())
+            .bind(task_id)
+            .bind(user_id)
+            .bind(wl.started)
+            .bind(ended)
+            .bind(&wl.comment)
+            .execute(&mut *tx)
+            .await?;
+            report.worklogs_imported += 1;
+        }
+    }
+    if worklog_skips > 0 {
+        report.warnings.push(format!(
+            "{worklog_skips} worklog(s) skipped — their Jira author had no Sprintly match (worklogs never provision users)"
+        ));
     }
 
     // ── pass 2: hierarchy (epic membership + sub-task nesting) + sprint ──

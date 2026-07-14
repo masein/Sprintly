@@ -713,6 +713,140 @@ async fn provisions_users_assigns_and_is_idempotent(pool: PgPool) {
     assert_eq!(users, 3, "still exactly three provisioned users");
 }
 
+// ── Part 3: worklogs (Log Work → time_logs) ─────────────────────────────────
+
+// One issue, two "Log Work" columns: a matched author (imported) and an
+// unmatched one (skipped + warned). The good entry keeps its comment's `;`.
+const WORKLOG_CSV: &str = "Issue key,Issue Type,Summary,Status,Assignee,Log Work,Log Work\n\
+WL-1,Story,Do the thing,In Progress,sam@x.test,\"paired; then merged;12/Jan/24 3:45 PM;Sam Adams;3600\",\"solo run;13/Jan/24 10:00 AM;Ghost Person;1800\"\n";
+
+#[sqlx::test(migrations = "./migrations")]
+async fn imports_worklogs_into_time_logs(pool: PgPool) {
+    let owner = make_user(&pool, "ow-wl@x.test", "Owner").await;
+    let sam = make_user(&pool, "sam@x.test", "Sam Adams").await;
+    let (pid, board) = make_project(&pool, "WLG", owner).await;
+
+    let plan = jira::parse_jira_csv(WORKLOG_CSV).unwrap();
+    let report = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report.worklogs_imported, 1, "only the matched author lands");
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("worklog") && w.contains("no Sprintly match")),
+        "unmatched worklog author is warned: {:?}",
+        report.warnings
+    );
+
+    // The imported log: right task + user, generated duration, comment as note,
+    // and ended_at = started_at + timeSpentSeconds.
+    let (log_user, note, dur, started, ended): (Uuid, String, i32, DateTime<Utc>, DateTime<Utc>) =
+        sqlx::query_as(
+            r#"SELECT tl.user_id, tl.note, tl.duration_minutes, tl.started_at, tl.ended_at
+             FROM time_logs tl
+             JOIN tasks t ON t.id = tl.task_id
+            WHERE t.project_id = $1 AND t.external_ref = 'WL-1'"#,
+        )
+        .bind(pid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(log_user, sam);
+    assert_eq!(note, "paired; then merged", "comment semicolons preserved");
+    assert_eq!(dur, 60, "3600s → 60 min (generated column)");
+    assert_eq!(
+        started,
+        Utc.with_ymd_and_hms(2024, 1, 12, 15, 45, 0).unwrap()
+    );
+    assert_eq!(ended, started + chrono::Duration::seconds(3600));
+
+    // Exactly one time log exists (the unmatched author's was skipped).
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM time_logs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn reimport_does_not_duplicate_worklogs(pool: PgPool) {
+    let owner = make_user(&pool, "ow-wl2@x.test", "Owner").await;
+    make_user(&pool, "sam@x.test", "Sam Adams").await;
+    let (pid, board) = make_project(&pool, "WLR", owner).await;
+
+    let plan = jira::parse_jira_csv(WORKLOG_CSV).unwrap();
+    ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
+
+    // Re-import: the log is deduped on (task, user, started_at, duration).
+    let report2 = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report2.worklogs_imported, 0, "no duplicate time logs");
+
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM time_logs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 1, "still exactly one time log after re-import");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn dry_run_reports_worklog_count_writes_nothing(pool: PgPool) {
+    let owner = make_user(&pool, "ow-wl3@x.test", "Owner").await;
+    make_user(&pool, "sam@x.test", "Sam Adams").await;
+    let (pid, board) = make_project(&pool, "WLD", owner).await;
+
+    let plan = jira::parse_jira_csv(WORKLOG_CSV).unwrap();
+    let report = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        true, // dry-run
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
+
+    assert!(report.dry_run);
+    assert_eq!(
+        report.worklogs_imported, 1,
+        "dry-run reports what would land"
+    );
+
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM time_logs")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "dry-run persists no time logs");
+}
+
 #[sqlx::test(migrations = "./migrations")]
 async fn provisioning_off_keeps_match_only_warning(pool: PgPool) {
     let owner = make_user(&pool, "o8@x.test", "Owner").await;

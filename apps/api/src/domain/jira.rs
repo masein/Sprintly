@@ -29,6 +29,24 @@ pub struct JiraComment {
     pub created: Option<DateTime<Utc>>,
 }
 
+/// A Jira "Log Work" entry as it appears in the CSV. Jira's `Log Work` cell
+/// toString is `comment;started;author;timeSpentSeconds` (the comment itself may
+/// contain `;`). `started` and `seconds` are required to persist a time log —
+/// an entry we can't pin to a start time or a positive duration is dropped by
+/// the parser (the row is warned about, never aborted).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JiraWorklog {
+    /// Free-text worklog comment (may be empty).
+    pub comment: String,
+    /// When the work started (the log's anchor; `ended_at = started + seconds`).
+    pub started: DateTime<Utc>,
+    /// Raw Jira author — matched to a Sprintly user at apply time; a worklog by
+    /// an unmatched author is skipped (never invents a user).
+    pub author: Option<String>,
+    /// Time spent, in seconds (always > 0).
+    pub seconds: i64,
+}
+
 /// A Jira sprint as it appears in the CSV — either a bare name, or the rich
 /// `...Sprint@..[id=..,state=CLOSED,name=..,startDate=..,endDate=..]` toString
 /// that some exports emit. We carry the window + state when present.
@@ -74,6 +92,8 @@ pub struct JiraIssue {
     pub story_points: Option<f64>,
     pub due_date: Option<NaiveDate>,
     pub comments: Vec<JiraComment>,
+    /// Worklogs from the repeated "Log Work" columns (empty when none/unparsed).
+    pub worklogs: Vec<JiraWorklog>,
 }
 
 impl JiraIssue {
@@ -190,6 +210,35 @@ pub fn parse_comment(cell: &str) -> Option<JiraComment> {
             created: None,
         })
     }
+}
+
+/// Jira CSV "Log Work" cell toString is `comment;started;author;timeSpentSeconds`
+/// (the comment may itself contain `;`). We peel the three trailing fields off
+/// the right so the comment keeps its semicolons. Returns `None` for an empty
+/// cell, one with fewer than the required fields, an unparseable/`≤0` duration,
+/// or an unparseable start time — all of which the caller records as a per-row
+/// warning and skips (never aborts the import).
+pub fn parse_worklog(cell: &str) -> Option<JiraWorklog> {
+    let cell = cell.trim();
+    if cell.is_empty() {
+        return None;
+    }
+    // From the right: timeSpentSeconds, author, started, then the comment (which
+    // may still contain `;`). A missing leading comment field → empty comment.
+    let mut it = cell.rsplitn(4, ';');
+    let seconds: i64 = it.next()?.trim().parse().ok()?;
+    if seconds <= 0 {
+        return None;
+    }
+    let author = it.next()?.trim();
+    let started = parse_datetime(it.next()?)?;
+    let comment = it.next().unwrap_or("").trim();
+    Some(JiraWorklog {
+        comment: comment.to_string(),
+        started,
+        author: (!author.is_empty()).then(|| author.to_string()),
+        seconds,
+    })
 }
 
 /// Parse a Jira date cell. Jira exports dates as `d/MMM/yy[ h:mm AM]` (e.g.
@@ -371,6 +420,7 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
     let labels_i = idxs_exact(&by, &["labels"]);
     let sprint_i = idxs_exact(&by, &["sprint"]);
     let comment_i = idxs_exact(&by, &["comment"]);
+    let worklog_i = idxs_exact(&by, &["log work"]);
     let due_i = idxs_exact(&by, &["due date"]);
     let id_i = idxs_exact(&by, &["issue id"]);
     // Jira references a parent two ways in the same export: "Parent key" holds
@@ -418,6 +468,16 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
             .iter()
             .filter_map(|c| parse_comment(c))
             .collect();
+
+        // Worklogs: parse each non-empty "Log Work" cell; a malformed one is
+        // skipped with a per-row warning rather than failing the whole import.
+        let mut worklogs = Vec::new();
+        for cell in all(&rec, &worklog_i) {
+            match parse_worklog(&cell) {
+                Some(wl) => worklogs.push(wl),
+                None => warnings.push(format!("{key}: unparseable Log Work entry — skipped")),
+            }
+        }
 
         // Sprints: parse every cell, remember the richest per name, and keep the
         // last as this issue's current sprint.
@@ -478,6 +538,7 @@ pub fn parse_jira_csv(content: &str) -> AppResult<JiraPlan> {
             story_points: first(&rec, &sp_i).and_then(|s| s.parse::<f64>().ok()),
             due_date: first(&rec, &due_i).and_then(|s| parse_date(&s)),
             comments,
+            worklogs,
         });
     }
 
@@ -557,6 +618,62 @@ mod tests {
         assert_eq!(bare.body, "just a note");
         assert_eq!(bare.created, None);
         assert!(parse_comment("   ").is_none());
+    }
+
+    #[test]
+    fn worklog_parsing() {
+        // Well-formed: comment;started;author;timeSpentSeconds.
+        let wl = parse_worklog("Paired on the fix;12/Jan/24 3:45 PM;Sam Adams;3600").unwrap();
+        assert_eq!(wl.comment, "Paired on the fix");
+        assert_eq!(wl.author.as_deref(), Some("Sam Adams"));
+        assert_eq!(wl.seconds, 3600);
+        assert_eq!(
+            wl.started,
+            Utc.with_ymd_and_hms(2024, 1, 12, 15, 45, 0).unwrap()
+        );
+
+        // The comment keeps its own semicolons (only the 3 trailing fields peel).
+        let semis = parse_worklog("split; then merged;12/Jan/24 3:45 PM;Sam;900").unwrap();
+        assert_eq!(semis.comment, "split; then merged");
+        assert_eq!(semis.seconds, 900);
+
+        // Empty comment (Jira emits a leading `;`) is valid.
+        let no_comment = parse_worklog(";12/Jan/24 3:45 PM;Sam;120").unwrap();
+        assert_eq!(no_comment.comment, "");
+        assert_eq!(no_comment.author.as_deref(), Some("Sam"));
+
+        // A 3-field cell (no comment field at all) still parses — comment empty.
+        let three = parse_worklog("12/Jan/24 3:45 PM;Sam;60").unwrap();
+        assert_eq!(three.comment, "");
+        assert_eq!(three.seconds, 60);
+
+        // Empty / whitespace-only → None.
+        assert!(parse_worklog("").is_none());
+        assert!(parse_worklog("   ").is_none());
+
+        // Malformed: non-numeric or non-positive duration, or too few fields.
+        assert!(parse_worklog("just a note").is_none());
+        assert!(parse_worklog("Sam;3600").is_none()); // no start time field
+        assert!(parse_worklog("note;12/Jan/24 3:45 PM;Sam;lots").is_none()); // seconds NaN
+        assert!(parse_worklog("note;12/Jan/24 3:45 PM;Sam;0").is_none()); // zero seconds
+        assert!(parse_worklog("note;not-a-date;Sam;3600").is_none()); // bad start time
+    }
+
+    #[test]
+    fn parses_repeated_log_work_columns() {
+        // Two "Log Work" columns per row — one good, one malformed (skipped +
+        // warned), plus a blank cell (silently ignored).
+        let csv = "Issue key,Issue Type,Summary,Status,Log Work,Log Work,Log Work\n\
+                   P-1,Story,Do it,In Progress,\"fix;12/Jan/24 3:45 PM;Sam;3600\",\"broken\",\n";
+        let plan = parse_jira_csv(csv).unwrap();
+        let p1 = &plan.issues[0];
+        assert_eq!(p1.worklogs.len(), 1);
+        assert_eq!(p1.worklogs[0].seconds, 3600);
+        assert!(
+            plan.warnings.iter().any(|w| w.contains("Log Work")),
+            "malformed worklog warns: {:?}",
+            plan.warnings
+        );
     }
 
     #[test]
