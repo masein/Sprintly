@@ -129,9 +129,10 @@ export function ImportExportModal({
             <span className="mono">.csv</span> with a <span className="mono">name</span>{" "}
             column, or a <span className="mono">Jira</span> &ldquo;Export Excel CSV
             (all fields)&rdquo; export. Jira files are auto-detected and map richly —
-            assignee, priority, type, sub-tasks, epics, sprints, story points, and
-            comments. Re-importing the same Jira export updates cards instead of
-            duplicating them (matched by issue key).
+            assignee, priority, type, sub-tasks, epics, sprints, story points,
+            comments, and worklogs (Log Work → the timesheet). Re-importing the
+            same Jira export updates cards instead of duplicating them (matched by
+            issue key).
           </p>
           <label className="mono flex cursor-pointer items-center gap-2 text-xs text-chrome-dim">
             <input
@@ -222,6 +223,12 @@ export function ImportExportModal({
               )}
               {report.comments_created > 0 && (
                 <div>{report.comments_created} comment{report.comments_created === 1 ? "" : "s"} imported</div>
+              )}
+              {report.worklogs_imported > 0 && (
+                <div>
+                  {report.worklogs_imported} worklog{report.worklogs_imported === 1 ? "" : "s"}
+                  {report.dry_run ? " would land on the timesheet" : " logged to the timesheet"}
+                </div>
               )}
               {(report.users_created > 0 || report.users_matched > 0) && (
                 <div>

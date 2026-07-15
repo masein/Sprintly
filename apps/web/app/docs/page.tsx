@@ -241,6 +241,7 @@ export default function DocsPage() {
                     ["Sprint (+ window / state)", "sprint (created with dates + open/closed where given)"],
                     ["Story Points", "a “Story Points” number custom field"],
                     ["Comment (date;author;body)", "task comment (author matched, else attributed in body)"],
+                    ["Log Work (comment;started;author;secs)", "time log on the task (author matched, else skipped + warned)"],
                     ["Due date", "due date"],
                     ["Issue key", "external ref → idempotent re-import"],
                   ].map(([j, s]) => (

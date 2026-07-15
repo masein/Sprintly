@@ -19,6 +19,7 @@ export type ImportReport = {
   tasks_created: number;
   tasks_updated: number;
   comments_created: number;
+  worklogs_imported: number;
   users_created: number;
   users_matched: number;
   warnings: string[];
