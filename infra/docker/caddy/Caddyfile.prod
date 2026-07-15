@@ -1,0 +1,63 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Sprintly — Caddy config for the air-gapped / private-registry deployment.
+#
+# This box has no route to the public internet, so Caddy CANNOT complete an
+# ACME (Let's Encrypt) challenge. Auto-HTTPS is therefore OFF and Caddy serves
+# plain HTTP on :80 — the single published port for the whole stack. Everything
+# else (api, web, postgres, redis, minio) stays on the internal compose network.
+#
+# ┌─ TLS caveat ───────────────────────────────────────────────────────────────┐
+# │ Traffic is UNENCRYPTED between the client and this box. That's acceptable    │
+# │ only on a trusted, isolated network. To add TLS without public ACME, pick    │
+# │ one:                                                                         │
+# │   • Terminate TLS at an upstream appliance / load balancer you control and   │
+# │     forward cleartext to this port.                                          │
+# │   • Mount an internally-issued cert+key into the container and replace the   │
+# │     `:80` site below with `https://your.internal.host` + a `tls <cert>       │
+# │     <key>` directive (and publish 443 in docker-compose.prod.yml).           │
+# │   • Use Caddy's internal CA (`tls internal`) and distribute its root to      │
+# │     clients.                                                                  │
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# Routes (same as dev, same-origin so the web bundle needs no absolute host):
+#   /api/*   → api:8081   (REST)
+#   /ws      → api:8081   (WebSocket)
+#   /*       → web:3000   (Next.js)
+# ─────────────────────────────────────────────────────────────────────────────
+
+{
+    # No email / no ACME issuer: we never provision public certs here.
+    auto_https off
+}
+
+:80 {
+    encode gzip zstd
+
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        -Server
+        # No Strict-Transport-Security here: we're on plain HTTP, and sending
+        # HSTS would wrongly pin clients to HTTPS on this host.
+    }
+
+    # WebSocket upgrade.
+    @ws {
+        path /ws /ws/*
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    reverse_proxy @ws api:8081
+
+    # API.
+    handle /api/* {
+        reverse_proxy api:8081
+    }
+
+    # Frontend (catch-all).
+    handle {
+        reverse_proxy web:3000
+    }
+}

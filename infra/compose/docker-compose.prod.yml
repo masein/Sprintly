@@ -1,35 +1,207 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Prod overlay. Use:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Sprintly — production stack for an air-gapped host + private registry.
 #
-# Differences from dev:
-#   - No source mounts. Images are immutable.
-#   - No host port exposure for postgres/redis/minio (only caddy).
-#   - Caddy auto-TLS via Let's Encrypt using CADDY_DOMAIN + CADDY_EMAIL.
-#   - Stricter restart policies.
+# This file is SELF-CONTAINED — do not combine it with docker-compose.yml.
+# Run it alone:
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env pull
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d
+#
+# Model (see docs/RUNBOOK-PROD.md):
+#   • The host reaches only you (SSH) and the private registry $REGISTRY_HOST.
+#     Every image below is pulled from that registry — nothing builds here and
+#     nothing is fetched from Docker Hub. Third-party bases (postgres, redis,
+#     minio, mc, caddy) are mirrored into $REGISTRY_HOST ahead of time.
+#   • Only Caddy publishes a port (the web/frontend entrypoint). api, web,
+#     postgres, redis and minio stay on the internal compose network with no
+#     host ports.
+#   • Secrets are read from .env and are FAIL-FAST: a missing required var
+#     aborts `up`/`pull` with a named error instead of booting half-configured.
+#   • The api runs SQLx migrations itself at startup (SPRINTLY_AUTO_MIGRATE),
+#     so a `pull && up -d` converges the schema with no separate step.
+#
+# Never commit a real .env. See .env.prod.example for the template.
 # ─────────────────────────────────────────────────────────────────────────────
 
+name: sprintly
+
+# ── Shared app environment ──────────────────────────────────────────────────
+# api and the one-shot seed load identical config (both call Config::from_env),
+# so define it once. `${VAR:?msg}` fails fast on a missing/empty required var;
+# `${VAR:-default}` supplies a safe non-secret default.
+x-app-env: &app-env
+  SPRINTLY_ENV: ${SPRINTLY_ENV:-prod}
+  SPRINTLY_PUBLIC_URL: ${SPRINTLY_PUBLIC_URL:?set SPRINTLY_PUBLIC_URL to the URL users hit, e.g. http://sprintly.internal}
+  SPRINTLY_API_BIND: ${SPRINTLY_API_BIND:-0.0.0.0:8081}
+  SPRINTLY_OPEN_SIGNUP: ${SPRINTLY_OPEN_SIGNUP:-false}
+  SPRINTLY_REQUIRE_2FA: ${SPRINTLY_REQUIRE_2FA:-false}
+  SPRINTLY_LOCAL_LOGIN_DISABLED: ${SPRINTLY_LOCAL_LOGIN_DISABLED:-false}
+  SPRINTLY_AUTO_MIGRATE: ${SPRINTLY_AUTO_MIGRATE:-true}
+  SPRINTLY_JWT_SECRET: ${SPRINTLY_JWT_SECRET:?generate 64 random bytes base64 — see runbook}
+  SPRINTLY_ACCESS_TTL_SECS: ${SPRINTLY_ACCESS_TTL_SECS:-900}
+  SPRINTLY_REFRESH_TTL_SECS: ${SPRINTLY_REFRESH_TTL_SECS:-2592000}
+  SPRINTLY_ARGON2_M_COST_KIB: ${SPRINTLY_ARGON2_M_COST_KIB:-65536}
+  SPRINTLY_ARGON2_T_COST: ${SPRINTLY_ARGON2_T_COST:-3}
+  SPRINTLY_ARGON2_P_COST: ${SPRINTLY_ARGON2_P_COST:-1}
+  SPRINTLY_VAULT_MASTER_KEY: ${SPRINTLY_VAULT_MASTER_KEY:?generate 32 random bytes base64 — see runbook}
+  SPRINTLY_VAULT_KEY_VERSION: ${SPRINTLY_VAULT_KEY_VERSION:-1}
+  # Email is optional. Unset SPRINTLY_SMTP_URL → outbound mail is logged, not
+  # sent (password-reset / invite mails won't leave the box). See runbook.
+  SPRINTLY_SMTP_URL: ${SPRINTLY_SMTP_URL:-}
+  SPRINTLY_MAIL_FROM: ${SPRINTLY_MAIL_FROM:-Sprintly <noreply@localhost>}
+  SPRINTLY_GITHUB_WEBHOOK_SECRET: ${SPRINTLY_GITHUB_WEBHOOK_SECRET:-}
+  DATABASE_URL: ${DATABASE_URL:?e.g. postgres://sprintly:PASSWORD@postgres:5432/sprintly}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+  MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:?public URL for attachment links, e.g. http://sprintly.internal/s3}
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+  MINIO_BUCKET: ${MINIO_BUCKET:-sprintly}
+  MINIO_REGION: ${MINIO_REGION:-us-east-1}
+  RUST_LOG: ${RUST_LOG:-info,sprintly_api=info,sqlx=warn,tower_http=info}
+
 services:
+  # ─── Database ────────────────────────────────────────────────────────────
   postgres:
-    ports: []
+    image: ${REGISTRY_HOST:?set REGISTRY_HOST, e.g. docker.netixsystem.com}/postgres:16-alpine
     restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-sprintly}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-sprintly}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # No host port. Internal network only.
 
+  # ─── Cache / pub-sub ─────────────────────────────────────────────────────
   redis:
-    ports: []
+    image: ${REGISTRY_HOST:?set REGISTRY_HOST}/redis:7-alpine
     restart: always
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
+  # ─── Object storage (S3-compatible) ──────────────────────────────────────
   minio:
-    ports: []
+    image: ${REGISTRY_HOST:?set REGISTRY_HOST}/minio:RELEASE.2024-10-13T13-34-11Z
     restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
+  # ─── One-shot: create the bucket if it doesn't exist ─────────────────────
+  minio-init:
+    image: ${REGISTRY_HOST:?set REGISTRY_HOST}/mc:RELEASE.2024-10-08T09-37-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+        mc mb --ignore-existing local/${MINIO_BUCKET:-sprintly} &&
+        mc anonymous set download local/${MINIO_BUCKET:-sprintly} || true &&
+        echo 'MinIO bucket ready.'
+      "
+    restart: "no"
+
+  # ─── Rust API ────────────────────────────────────────────────────────────
+  # Runs migrations at startup (SPRINTLY_AUTO_MIGRATE, default true) before it
+  # binds, so no separate migrate step is needed on deploy.
   api:
+    image: ${REGISTRY_HOST:?set REGISTRY_HOST}/sprintly-api:${IMAGE_TAG:-latest}
     restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment: *app-env
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/sprintly-api", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
 
+  # ─── Next.js web ─────────────────────────────────────────────────────────
+  # NEXT_PUBLIC_* are baked into the image at build time (same-origin: /api/v1
+  # and /ws), so nothing API-related is passed here at runtime.
   web:
+    image: ${REGISTRY_HOST:?set REGISTRY_HOST}/sprintly-web:${IMAGE_TAG:-latest}
     restart: always
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
 
+  # ─── Reverse proxy — the ONLY published port ─────────────────────────────
+  # Routes /api + /ws → api, everything else → web. Plain HTTP on the host
+  # (no public ACME on an air-gapped box — see Caddyfile.prod for the TLS
+  # caveat and how to add internal TLS).
   caddy:
+    image: ${REGISTRY_HOST:?set REGISTRY_HOST}/caddy:2.8-alpine
     restart: always
+    depends_on:
+      - api
+      - web
+    volumes:
+      - ../docker/caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
     ports:
-      - "80:80"
-      - "443:443"
+      - "${SPRINTLY_HTTP_PORT:-80}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/api/v1/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ─── One-shot: idempotent demo/admin seed (profile: seed) ────────────────
+  # Not started by `up`. Run once after the first deploy:
+  #   docker compose -f docker-compose.prod.yml --env-file .env run --rm seed
+  # Safe to re-run — every write is guarded / ON CONFLICT DO NOTHING.
+  seed:
+    image: ${REGISTRY_HOST:?set REGISTRY_HOST}/sprintly-api:${IMAGE_TAG:-latest}
+    profiles: ["seed"]
+    # Wait for the API (not just Postgres) so migrations have run and the schema
+    # the seed writes into exists, no matter the order the operator runs things.
+    depends_on:
+      api:
+        condition: service_healthy
+    entrypoint: ["/usr/local/bin/sprintly-seed"]
+    restart: "no"
+    environment: *app-env
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  caddy_data:
+  caddy_config:

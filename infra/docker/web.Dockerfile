@@ -36,8 +36,19 @@ EXPOSE 3000
 CMD ["pnpm", "dev"]
 
 # ─── Builder: produce a standalone Next build ────────────────────────────
+# NEXT_PUBLIC_* are inlined into the client bundle at build time, so they must
+# be set here — not at container runtime. Defaults match the source fallbacks
+# so a plain `just up` build is unchanged. The prod/registry build overrides
+# them to same-origin values (API_BASE_URL=/api/v1, WS_URL=/ws) via --build-arg
+# so one image works behind any host/scheme without a rebuild (see release.yml).
 FROM base AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
+ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api/v1
+ARG NEXT_PUBLIC_WS_URL=ws://localhost:8080/ws
+ARG NEXT_PUBLIC_APP_NAME=Sprintly
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL \
+    NEXT_PUBLIC_WS_URL=$NEXT_PUBLIC_WS_URL \
+    NEXT_PUBLIC_APP_NAME=$NEXT_PUBLIC_APP_NAME
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY . .

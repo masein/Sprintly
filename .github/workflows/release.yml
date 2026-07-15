@@ -1,0 +1,116 @@
+name: release
+
+# Build the app images on every merge to main and push them to the private
+# registry. The air-gapped prod host then `docker compose pull`s them — it
+# never builds anything itself. See docs/RUNBOOK-PROD.md.
+#
+# Reachability caveat: GitHub-hosted runners live on the public internet. They
+# can only push here if $REGISTRY_HOST is reachable from them (e.g. the registry
+# is internet-facing with auth). If it is NOT — i.e. the registry is only
+# reachable from inside your network — change `runs-on` below to a self-hosted
+# runner that sits on that network. Everything else in this workflow is the same
+# either way.
+#
+# Required repo config (Settings → Secrets and variables → Actions):
+#   secrets.REGISTRY_USERNAME   registry login user
+#   secrets.REGISTRY_PASSWORD   registry login password/token
+#   vars.REGISTRY_HOST          optional; defaults to docker.netixsystem.com
+#   vars.NEXT_PUBLIC_APP_NAME   optional; defaults to "Sprintly"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  images:
+    name: build · push · ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: api
+            image: sprintly-api
+            dockerfile: infra/docker/api.Dockerfile
+          - app: web
+            image: sprintly-web
+            dockerfile: infra/docker/web.Dockerfile
+    env:
+      REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'docker.netixsystem.com' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Preflight — registry credentials present
+        run: |
+          if [ -z "${{ secrets.REGISTRY_USERNAME }}" ] || [ -z "${{ secrets.REGISTRY_PASSWORD }}" ]; then
+            echo "::error::REGISTRY_USERNAME / REGISTRY_PASSWORD secrets are not set. See workflow header."
+            exit 1
+          fi
+          echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ${{ env.REGISTRY_HOST }} (with retries)
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if echo "${{ secrets.REGISTRY_PASSWORD }}" \
+                | docker login "$REGISTRY_HOST" \
+                    -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin; then
+              echo "logged in to $REGISTRY_HOST"; exit 0
+            fi
+            echo "login attempt $attempt failed; retrying in $((attempt * 5))s"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not log in to $REGISTRY_HOST after 5 attempts"
+          exit 1
+
+      - name: Build ${{ matrix.image }} (linux/amd64)
+        run: |
+          args=(
+            --platform linux/amd64
+            --file "${{ matrix.dockerfile }}"
+            --target runtime
+            --tag "$REGISTRY_HOST/${{ matrix.image }}:latest"
+            --tag "$REGISTRY_HOST/${{ matrix.image }}:sha-${SHORT_SHA}"
+            --load
+          )
+          if [ "${{ matrix.app }}" = "web" ]; then
+            # Same-origin relative URLs so one image works behind any host/scheme
+            # (the reverse proxy fronts /api and /ws). Baked at build time.
+            args+=(--build-arg NEXT_PUBLIC_API_BASE_URL=/api/v1)
+            args+=(--build-arg NEXT_PUBLIC_WS_URL=/ws)
+            args+=(--build-arg "NEXT_PUBLIC_APP_NAME=${{ vars.NEXT_PUBLIC_APP_NAME || 'Sprintly' }}")
+          fi
+          docker buildx build "${args[@]}" .
+
+      - name: Push tags to ${{ env.REGISTRY_HOST }} (with retries)
+        run: |
+          for tag in "latest" "sha-${SHORT_SHA}"; do
+            ref="$REGISTRY_HOST/${{ matrix.image }}:${tag}"
+            pushed=0
+            for attempt in 1 2 3 4 5; do
+              if docker push "$ref"; then pushed=1; break; fi
+              echo "push $ref attempt $attempt failed; retrying in $((attempt * 5))s"
+              sleep $((attempt * 5))
+            done
+            if [ "$pushed" != 1 ]; then
+              echo "::error::could not push $ref after 5 attempts"
+              exit 1
+            fi
+            echo "pushed $ref"
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### ${{ matrix.image }}"
+            echo ""
+            echo "- \`$REGISTRY_HOST/${{ matrix.image }}:latest\`"
+            echo "- \`$REGISTRY_HOST/${{ matrix.image }}:sha-${SHORT_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

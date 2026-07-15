@@ -19,8 +19,20 @@ export type ServerEvent =
 
 type Listener = (e: ServerEvent) => void;
 
-const WS_URL =
-  process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/ws";
+// NEXT_PUBLIC_WS_URL is inlined at build time, but a prod image is built once
+// in CI and pulled onto whatever host the operator runs it on — so we can't
+// bake an absolute ws:// host there. When the configured value is absolute
+// (dev: `ws://localhost:8080/ws`) we use it verbatim; otherwise we treat it as
+// a path ("/ws" by default) and resolve scheme+host from the page origin at
+// connect time. Same-origin behind the reverse proxy, so this "just works"
+// over both http/ws and https/wss without a rebuild.
+function resolveWsUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_WS_URL;
+  if (configured && /^wss?:\/\//i.test(configured)) return configured;
+  const path = configured && configured.startsWith("/") ? configured : "/ws";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}${path}`;
+}
 
 let socket: WebSocket | null = null;
 let backoffMs = 1000;
@@ -54,7 +66,7 @@ export function sendPresence(projectId: string, taskId: string | null, active: b
 function open(qc: QueryClient) {
   if (typeof window === "undefined") return;
   try {
-    socket = new WebSocket(WS_URL);
+    socket = new WebSocket(resolveWsUrl());
   } catch (e) {
     scheduleReconnect(qc);
     return;
