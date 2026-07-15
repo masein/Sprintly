@@ -53,9 +53,10 @@ five base images must be copied into `REGISTRY_HOST` first.
 > dual-access machine is Apple Silicon / arm64, force amd64 on pull so the
 > mirrored image runs on the server. The `--platform` flag below does that.
 
+The registry needs no authentication, so there's no `docker login` — just push.
+
 ```sh
 export REGISTRY_HOST=docker.netixsystem.com
-docker login "$REGISTRY_HOST"      # you enter registry creds; do not script this
 
 # Flat-named bases (repo name unchanged):
 for img in postgres:16-alpine redis:7-alpine caddy:2.8-alpine; do
@@ -86,9 +87,9 @@ You only repeat this if you bump one of these base-image tags in
 `sprintly-api` and `sprintly-web` for `linux/amd64`, tags each `latest` +
 `sha-<short>`, and pushes to `REGISTRY_HOST` with retries.
 
-Configure once in GitHub → *Settings → Secrets and variables → Actions*:
+The registry requires no authentication, so no credential secrets are needed.
+Optionally configure in GitHub → *Settings → Secrets and variables → Actions*:
 
-- `secrets.REGISTRY_USERNAME`, `secrets.REGISTRY_PASSWORD` — registry login.
 - `vars.REGISTRY_HOST` — optional (defaults to `docker.netixsystem.com`).
 - `vars.NEXT_PUBLIC_APP_NAME` — optional (defaults to `Sprintly`).
 
@@ -185,12 +186,10 @@ Then edit the non-secret settings in `.env` by hand:
 > Sanity check without booting: `grep -c __GENERATE_ON_SERVER__ .env` must print
 > `0`. Any leftover placeholder means a secret wasn't filled in.
 
-Finally, log the server's Docker in to the registry once (creds persist in
-`~/.docker/config.json`) so it can pull:
-
-```sh
-docker login "$REGISTRY_HOST"     # you enter registry creds
-```
+The registry needs no login, so the server can pull straight away. (If the
+registry is served over plain HTTP rather than HTTPS, add it to the Docker
+daemon's `insecure-registries` in `/etc/docker/daemon.json` and restart Docker —
+this is the one registry-side setup the daemon needs.)
 
 ---
 
