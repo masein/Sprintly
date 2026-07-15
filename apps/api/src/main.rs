@@ -68,6 +68,16 @@ async fn cmd_serve() -> anyhow::Result<()> {
         "sprintly-api booting"
     );
 
+    // Apply pending migrations before serving. This is what makes a
+    // `docker compose up -d` of a freshly pulled image converge the schema
+    // with no separate migrate step. Idempotent: SQLx records applied
+    // migrations in `_sqlx_migrations` and skips them on re-run, so a restart
+    // (or a second replica) is a no-op. Set SPRINTLY_AUTO_MIGRATE=false to
+    // manage migrations out of band (e.g. `sprintly-api migrate` by hand).
+    if env_flag("SPRINTLY_AUTO_MIGRATE", true) {
+        apply_migrations(&cfg.database_url).await?;
+    }
+
     let state = infra::AppState::connect(&cfg).await?;
     // Background worker: achievement scans, backups, and webhook delivery. The
     // vault master key lets it decrypt webhook signing secrets.
@@ -97,11 +107,32 @@ async fn cmd_migrate() -> anyhow::Result<()> {
     sprintly_api::logging::init_basic();
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| anyhow::anyhow!("missing required env var: DATABASE_URL"))?;
+    apply_migrations(&database_url).await
+}
+
+/// Run SQLx migrations against `database_url`. Shared by the `migrate`
+/// subcommand and the auto-migrate-on-boot path in `cmd_serve`. The migration
+/// set is embedded into the binary at compile time by `sqlx::migrate!`, so the
+/// runtime image needs no migration files on disk.
+async fn apply_migrations(database_url: &str) -> anyhow::Result<()> {
     info!("running migrations");
-    let pool = infra::db::connect_url(&database_url).await?;
+    let pool = infra::db::connect_url(database_url).await?;
     sqlx::migrate!("./migrations").run(&pool).await?;
     info!("migrations applied");
     Ok(())
+}
+
+/// Read a boolean-ish env var. Absent → `default`. Present → false only for an
+/// explicit off value (`0`/`false`/`no`/`off`, case-insensitive); anything else
+/// is true. Keeps operator overrides forgiving without pulling in a parser.
+fn env_flag(name: &str, default: bool) -> bool {
+    match std::env::var(name) {
+        Ok(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        Err(_) => default,
+    }
 }
 
 async fn cmd_healthcheck() -> anyhow::Result<()> {

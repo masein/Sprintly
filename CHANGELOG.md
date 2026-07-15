@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Jira worklog import** — the native Jira importer now maps the repeated `Log Work` columns (`comment;started;author;timeSpentSeconds`) into `time_logs`: author matched like comments and assignees (unmatched → skipped with a warning, never invents a user), start time and duration preserved. Idempotent on re-import (deduped on task + user + start + duration); the dry-run preview reports the worklog count that would land.
+- **Air-gapped production deployment** — a self-contained `infra/compose/docker-compose.prod.yml` where every image is pulled from a private registry (`REGISTRY_HOST`), only the reverse-proxy (web) port is published, all other services stay internal, and secrets are read fail-fast from `.env`. New `release.yml` workflow builds the `sprintly-api`/`sprintly-web` images (`linux/amd64`) on merge to `main`, tags `latest` + `sha-<short>`, and pushes to the registry with retries. Runbook in [`docs/RUNBOOK-PROD.md`](docs/RUNBOOK-PROD.md) covers mirroring base images, `scp`/`.env` bootstrap on Alpine (`/dev/urandom`, no `openssl`), and the `docker compose pull && up -d` deploy flow.
+
+### Changed
+
+- **Migrations run at API startup** — `sprintly-api` (serve) now applies pending SQLx migrations before binding, controlled by `SPRINTLY_AUTO_MIGRATE` (default `true`); idempotent, so a redeploy or restart converges the schema with no separate step.
+- **Host-agnostic web image** — the WebSocket URL is resolved from the page origin at runtime (falling back to same-origin `/ws`) and `NEXT_PUBLIC_*` default to relative paths, so one CI-built web image works behind any host/scheme without a rebuild.
 
 ## [1.0.0] — 2026-06-14
 
