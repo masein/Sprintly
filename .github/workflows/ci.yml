@@ -161,14 +161,14 @@ jobs:
       - name: Web lib coverage (vitest → lcov)
         run: pnpm --filter @sprintly/web test:coverage
       - name: Upload backend coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: ./lcov-api.info
           flags: api
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
       - name: Upload web coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: ./apps/web/coverage/lcov.info
           flags: web
