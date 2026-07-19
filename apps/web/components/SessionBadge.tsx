@@ -94,3 +94,107 @@ export function SessionBadge() {
     </div>
   );
 }
+
+// Stacked, menu-friendly rendering of the same session actions — used in the
+// header's mobile dropdown, where there's no room for the inline SessionBadge
+// row (that starvation was the whole header-overflow bug).
+export function SessionMenuContents({ onNavigate }: { onNavigate?: () => void }) {
+  const router = useRouter();
+  const [user, setUser] = useState<Me | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    me()
+      .then((u) => {
+        if (alive) setUser(u);
+      })
+      .catch(() => {
+        if (alive) setUser(null);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="mono px-2 py-2 text-xs text-chrome-dim">
+        git fetch --rebase your-stuff…
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="mono flex flex-col gap-1 p-1 text-xs">
+        <Link
+          href="/login"
+          onClick={onNavigate}
+          className="rounded px-2 py-1.5 text-accent hover:bg-white/5"
+        >
+          sign in
+        </Link>
+        <Link
+          href="/register"
+          onClick={onNavigate}
+          className="rounded px-2 py-1.5 text-accent hover:bg-white/5"
+        >
+          register
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mono flex flex-col text-xs">
+      <div className="flex items-center gap-2 px-2 py-1.5">
+        <Avatar
+          size={20}
+          user={{
+            userId: user.id,
+            displayName: user.display_name,
+            handle: user.handle,
+            avatarUrl: user.avatar_url,
+            avatarStyle: user.avatar_style,
+            avatarSeed: user.avatar_seed,
+          }}
+        />
+        <span className="truncate text-chrome">@{user.handle}</span>
+        <span className="ml-auto shrink-0 rounded border border-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-chrome-dim">
+          {user.role}
+        </span>
+      </div>
+      <div className="my-1 border-t border-white/10" />
+      <Link
+        href="/me/day"
+        onClick={onNavigate}
+        className="rounded px-2 py-1.5 text-left hover:bg-white/5"
+      >
+        my day
+      </Link>
+      <Link
+        href="/settings"
+        onClick={onNavigate}
+        className="rounded px-2 py-1.5 text-left hover:bg-white/5"
+      >
+        settings
+      </Link>
+      <button
+        type="button"
+        onClick={async () => {
+          onNavigate?.();
+          await logout().catch(() => {});
+          router.refresh();
+          setUser(null);
+        }}
+        className="rounded px-2 py-1.5 text-left hover:bg-white/5"
+      >
+        logout
+      </button>
+    </div>
+  );
+}

@@ -56,7 +56,7 @@ export default function MyDayPage() {
         <h1 className="text-3xl font-semibold">Today.</h1>
       </header>
 
-      <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <section className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-4">
         <StatTile
           label="assigned to me"
           value={open}

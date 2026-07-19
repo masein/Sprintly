@@ -159,19 +159,19 @@ function Header({ task, canEdit }: { task: Task; canEdit: boolean }) {
           e.preventDefault();
           save.mutate();
         }}
-        className="flex items-center gap-2"
+        className="flex min-w-0 items-center gap-2"
       >
         <input
           autoFocus
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full rounded border border-white/10 bg-ink px-2 py-1 text-2xl font-semibold text-chrome focus:border-accent focus:outline-none"
+          className="min-w-0 flex-1 rounded border border-white/10 bg-ink px-2 py-1 text-2xl font-semibold text-chrome focus:border-accent focus:outline-none"
         />
-        <button type="submit" className="mono text-xs text-accent">save</button>
+        <button type="submit" className="mono shrink-0 text-xs text-accent">save</button>
         <button
           type="button"
           onClick={() => { setEditing(false); setTitle(task.title); }}
-          className="mono text-xs text-chrome-dim"
+          className="mono shrink-0 text-xs text-chrome-dim"
         >cancel</button>
       </form>
     );
