@@ -20,9 +20,18 @@
 # └──────────────────────────────────────────────────────────────────────────┘
 #
 # Routes (same as dev, same-origin so the web bundle needs no absolute host):
-#   /api/*   → api:8081   (REST)
-#   /ws      → api:8081   (WebSocket)
-#   /*       → web:3000   (Next.js)
+#   /api/*   → api:8081    (REST)
+#   /ws      → api:8081    (WebSocket)
+#   /s3/*    → minio:9000  (presigned attachment URLs; prefix stripped)
+#   /*       → web:3000    (Next.js)
+#
+# MinIO publishes no host port in prod (internal-only, per the "only the web
+# port is published" design) — /s3 is its sole path to a browser.
+# MINIO_PUBLIC_ENDPOINT must be set to this host + "/s3" so presigned URLs the
+# API signs land here. The prefix is stripped before proxying: MinIO's SigV4
+# check re-derives the canonical URI from the request path, and the API
+# signed it as "/<bucket>/<key>" (no /s3) — forwarding the prefix through
+# would break every signature.
 # ─────────────────────────────────────────────────────────────────────────────
 
 {
@@ -54,6 +63,12 @@
     # API.
     handle /api/* {
         reverse_proxy api:8081
+    }
+
+    # MinIO (presigned attachment URLs). Strip /s3 before proxying — see the
+    # SigV4 note above.
+    handle_path /s3/* {
+        reverse_proxy minio:9000
     }
 
     # Frontend (catch-all).
