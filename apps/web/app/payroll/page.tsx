@@ -65,8 +65,8 @@ export default function PayrollPage() {
   const data = q.data;
   return (
     <AppShell>
-      <header className="mb-6 flex items-end justify-between">
-        <div>
+      <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
           <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
             sprintly · payroll
           </div>
@@ -74,11 +74,11 @@ export default function PayrollPage() {
             {monthLabel(year, month)}
           </h1>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <button
             type="button"
             onClick={() => shift(-1)}
-            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             <ChevronLeft size={12} /> prev
           </button>
@@ -88,14 +88,14 @@ export default function PayrollPage() {
               setYear(now.getUTCFullYear());
               setMonth(now.getUTCMonth() + 1);
             }}
-            className="mono rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono shrink-0 whitespace-nowrap rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             this month
           </button>
           <button
             type="button"
             onClick={() => shift(1)}
-            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             next <ChevronRight size={12} />
           </button>
@@ -104,7 +104,7 @@ export default function PayrollPage() {
               href={csvUrl(year, month)}
               target="_blank"
               rel="noreferrer"
-              className="mono ml-2 inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+              className="mono ml-2 inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
             >
               <Download size={12} /> csv
             </a>

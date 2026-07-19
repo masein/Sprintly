@@ -172,16 +172,23 @@ export default function BacklogPage() {
                   </button>
                 )}
                 <span
-                  className={`mono rounded border px-1 py-0.5 text-[10px] uppercase ${PRIO[t.priority].cls}`}
+                  className={`mono shrink-0 whitespace-nowrap rounded border px-1 py-0.5 text-[10px] uppercase ${PRIO[t.priority].cls}`}
                 >
                   {PRIO[t.priority].label}
                 </span>
-                <Link href={`/tasks/${t.key}`} className="mono text-xs text-accent hover:underline">
+                <Link
+                  href={`/tasks/${t.key}`}
+                  className="mono shrink-0 whitespace-nowrap text-xs text-accent hover:underline"
+                >
                   {t.key}
                 </Link>
-                <span className="truncate text-sm text-chrome">{t.title}</span>
+                <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={t.title}>
+                  {t.title}
+                </span>
                 {t.assignee_id && (
-                  <span className="mono ml-auto text-[10px] text-chrome-dim">assigned</span>
+                  <span className="mono ml-auto shrink-0 whitespace-nowrap text-[10px] text-chrome-dim">
+                    assigned
+                  </span>
                 )}
               </li>
             );

@@ -52,8 +52,8 @@ export default function MetricsPage() {
   const m = q.data;
   return (
     <AppShell currentProjectKey={key}>
-      <header className="mb-6 flex items-end justify-between">
-        <div>
+      <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
           <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
             {key} · {tab === "flow" ? "flow metrics" : "time report"}
           </div>
@@ -61,7 +61,7 @@ export default function MetricsPage() {
             {tab === "flow" ? "How work flows." : "Where time went."}
           </h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Flow | Time tab switcher. */}
           <div className="flex items-center gap-1" role="tablist" aria-label="metrics view">
             {(["flow", "time"] as Tab[]).map((tb) => (
@@ -101,7 +101,7 @@ export default function MetricsPage() {
           )}
           <Link
             href={`/projects/${key}/dashboard`}
-            className="mono text-xs text-accent hover:underline"
+            className="mono shrink-0 whitespace-nowrap text-xs text-accent hover:underline"
           >
             dashboard →
           </Link>

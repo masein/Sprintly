@@ -10,9 +10,9 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { ChevronDown, FolderPlus, FolderKanban } from "lucide-react";
+import { ChevronDown, FolderPlus, FolderKanban, Menu, X } from "lucide-react";
 import { listProjects, type Project } from "@/lib/projects";
-import { SessionBadge } from "./SessionBadge";
+import { SessionBadge, SessionMenuContents } from "./SessionBadge";
 import { RunningTimerChip } from "./RunningTimerChip";
 import { CoffeeMeter } from "./CoffeeMeter";
 import { NotificationBell } from "./NotificationBell";
@@ -35,6 +35,24 @@ export function AppShell({
 }
 
 function TopBar({ currentProjectKey }: { currentProjectKey?: string }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close the mobile menu on outside click / Esc, same pattern as the switcher.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenuOpen(false);
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-session-menu]")) setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onClick);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onClick);
+    };
+  }, [menuOpen]);
+
   return (
     <header className="sticky top-0 z-20 border-b border-white/10 bg-ink/80 backdrop-blur">
       <div className="mx-auto flex h-12 max-w-7xl items-center gap-2 px-4 sm:gap-3 sm:px-6">
@@ -52,7 +70,32 @@ function TopBar({ currentProjectKey }: { currentProjectKey?: string }) {
           </span>
           <RunningTimerChip />
           <NotificationBell />
-          <SessionBadge />
+
+          {/* Desktop: session actions inline. Below lg they'd overflow the row
+              (that was the whole bug), so they collapse into a menu instead. */}
+          <span className="hidden lg:inline-flex">
+            <SessionBadge />
+          </span>
+
+          <div data-session-menu className="relative lg:hidden">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              className="flex h-7 w-7 items-center justify-center rounded border border-white/10 text-chrome-dim hover:border-white/20 hover:text-chrome"
+              aria-label={menuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={menuOpen}
+            >
+              {menuOpen ? <X size={14} /> : <Menu size={14} />}
+            </button>
+            {menuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-1 w-56 rounded border border-white/10 bg-ink-subtle p-1 shadow-xl"
+              >
+                <SessionMenuContents onNavigate={() => setMenuOpen(false)} />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>
@@ -91,28 +134,30 @@ function ProjectSwitcher({ currentProjectKey }: { currentProjectKey?: string }) 
   const current = projects?.find((p) => p.key === currentProjectKey);
 
   return (
-    <div data-project-switcher className="relative">
+    <div data-project-switcher className="relative min-w-0 shrink">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="mono flex items-center gap-2 rounded border border-white/10 bg-ink-subtle px-2.5 py-1 text-xs text-chrome hover:border-white/20"
+        className="mono flex min-w-0 max-w-[45vw] items-center gap-2 rounded border border-white/10 bg-ink-subtle px-2.5 py-1 text-xs text-chrome hover:border-white/20 sm:max-w-xs"
         aria-expanded={open}
       >
-        <FolderKanban size={14} />
+        <FolderKanban size={14} className="shrink-0" />
         {current ? (
           <>
             <span
-              className="inline-block h-2 w-2 rounded-full"
+              className="inline-block h-2 w-2 shrink-0 rounded-full"
               style={{ background: current.color }}
               aria-hidden
             />
-            <span>{current.key}</span>
-            <span className="text-chrome-dim">— {current.name}</span>
+            <span className="shrink-0 whitespace-nowrap">{current.key}</span>
+            <span className="min-w-0 truncate whitespace-nowrap text-chrome-dim">
+              — {current.name}
+            </span>
           </>
         ) : (
-          <span className="text-chrome-dim">project · select…</span>
+          <span className="whitespace-nowrap text-chrome-dim">project · select…</span>
         )}
-        <ChevronDown size={12} className="text-chrome-dim" />
+        <ChevronDown size={12} className="shrink-0 text-chrome-dim" />
       </button>
 
       {open && (

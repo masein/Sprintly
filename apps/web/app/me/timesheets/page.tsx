@@ -71,8 +71,8 @@ export default function TimesheetsPage() {
 
   return (
     <AppShell>
-      <header className="mb-6 flex items-end justify-between gap-3">
-        <div>
+      <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
           <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
             sprintly · timesheet
           </div>
@@ -85,25 +85,25 @@ export default function TimesheetsPage() {
             </div>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <button
             type="button"
             onClick={() => setPeriodStart(shiftMondayISO(periodStart, -1))}
-            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             <ChevronLeft size={12} /> prev
           </button>
           <button
             type="button"
             onClick={() => setPeriodStart(thisMondayISO())}
-            className="mono rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono shrink-0 whitespace-nowrap rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             this week
           </button>
           <button
             type="button"
             onClick={() => setPeriodStart(shiftMondayISO(periodStart, 1))}
-            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             next <ChevronRight size={12} />
           </button>
@@ -134,7 +134,7 @@ export default function TimesheetsPage() {
       {view && view.total_minutes > 0 && (
         <div className="space-y-6">
           {/* Totals card */}
-          <section className="grid grid-cols-2 gap-4 rounded-lg border border-white/10 bg-ink-subtle p-4 sm:grid-cols-4">
+          <section className="grid grid-cols-1 gap-4 rounded-lg border border-white/10 bg-ink-subtle p-4 sm:grid-cols-4">
             <Stat label="total" value={fmtMinutes(view.total_minutes)} />
             <Stat label="billable" value={fmtMinutes(view.billable_minutes)} />
             <Stat
@@ -149,7 +149,7 @@ export default function TimesheetsPage() {
             <h2 className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
               by day
             </h2>
-            <div className="grid grid-cols-7 gap-2">
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
               {view.days.map((d) => (
                 <div
                   key={d.date}
@@ -185,18 +185,18 @@ export default function TimesheetsPage() {
                 >
                   <Link
                     href={`/tasks/${t.task_key}`}
-                    className="mono text-xs text-accent hover:underline"
+                    className="mono shrink-0 whitespace-nowrap text-xs text-accent hover:underline"
                   >
                     {t.task_key}
                   </Link>
-                  <span className="flex-1 truncate text-sm text-chrome">
+                  <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={t.task_title}>
                     {t.task_title}
                   </span>
-                  <span className="mono text-xs text-chrome">
+                  <span className="mono shrink-0 whitespace-nowrap text-xs text-chrome">
                     {fmtMinutes(t.total_minutes)}
                   </span>
                   {t.billable_minutes < t.total_minutes && (
-                    <span className="mono text-[10px] text-chrome-dim">
+                    <span className="mono shrink-0 whitespace-nowrap text-[10px] text-chrome-dim">
                       {fmtMinutes(t.billable_minutes)} bill.
                     </span>
                   )}

@@ -96,175 +96,185 @@ export default function ProjectPage() {
 
   return (
     <AppShell currentProjectKey={projectKey}>
-      <header className="mb-6 flex flex-wrap items-center gap-2 sm:gap-3">
-        <div
-          className="flex h-12 w-12 items-center justify-center rounded-lg"
-          style={{ background: `${project.color}20`, color: project.color }}
-        >
-          <Icon size={24} />
-        </div>
-        <div className="flex-1">
-          <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-            {project.key} · {project.member_count}{" "}
-            {project.member_count === 1 ? "member" : "members"}
-            {project.your_role && (
-              <> · you are <span className="text-chrome">{project.your_role}</span></>
+      <header className="mb-6 space-y-3">
+        {/* Title row: gets the full width to itself so a long name/breadcrumb
+            never gets starved by the nav chips below (that starvation was the
+            whole bug — a shared flex-wrap row let a dozen buttons eat the
+            line before the title got a look at the remaining space). */}
+        <div className="flex items-start gap-3">
+          <div
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg"
+            style={{ background: `${project.color}20`, color: project.color }}
+          >
+            <Icon size={24} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
+              {project.key} · {project.member_count}{" "}
+              {project.member_count === 1 ? "member" : "members"}
+              {project.your_role && (
+                <> · you are <span className="text-chrome">{project.your_role}</span></>
+              )}
+            </div>
+            {editingName ? (
+              <InlineName
+                initial={project.name}
+                onSave={async (name) => {
+                  const updated = await editProject(project.key, { name });
+                  setProject(updated);
+                  setEditingName(false);
+                }}
+                onCancel={() => setEditingName(false)}
+              />
+            ) : (
+              <h1 className="flex min-w-0 items-center gap-2 text-3xl font-semibold">
+                <span>{project.name}</span>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingName(true)}
+                    className="shrink-0 text-chrome-dim hover:text-chrome"
+                    aria-label="Rename project"
+                  >
+                    <Pencil size={16} />
+                  </button>
+                )}
+                {project.archived_at && (
+                  <span className="mono ml-2 inline-flex shrink-0 items-center gap-1 rounded border border-white/10 px-2 py-0.5 text-xs uppercase text-chrome-dim">
+                    <Archive size={11} /> archived
+                  </span>
+                )}
+              </h1>
             )}
           </div>
-          {editingName ? (
-            <InlineName
-              initial={project.name}
-              onSave={async (name) => {
-                const updated = await editProject(project.key, { name });
-                setProject(updated);
-                setEditingName(false);
-              }}
-              onCancel={() => setEditingName(false)}
-            />
-          ) : (
-            <h1 className="flex items-center gap-2 text-3xl font-semibold">
-              {project.name}
-              {canManage && (
-                <button
-                  type="button"
-                  onClick={() => setEditingName(true)}
-                  className="text-chrome-dim hover:text-chrome"
-                  aria-label="Rename project"
-                >
-                  <Pencil size={16} />
-                </button>
-              )}
-              {project.archived_at && (
-                <span className="mono ml-2 inline-flex items-center gap-1 rounded border border-white/10 px-2 py-0.5 text-xs uppercase text-chrome-dim">
-                  <Archive size={11} /> archived
-                </span>
-              )}
-            </h1>
-          )}
         </div>
 
-        <Link
-          href={`/projects/${project.key}/dashboard`}
-          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
-        >
-          dashboard →
-        </Link>
-        <Link
-          href={`/projects/${project.key}/sprints`}
-          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
-        >
-          sprints →
-        </Link>
-        <Link
-          href={`/projects/${project.key}/timeline`}
-          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
-        >
-          timeline →
-        </Link>
-        <Link
-          href={`/projects/${project.key}/backlog`}
-          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
-        >
-          backlog →
-        </Link>
-        <Link
-          href={`/projects/${project.key}/vault`}
-          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
-        >
-          vault →
-        </Link>
-
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => setShowLabels(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+        {/* Nav + management chips: their own row, free to wrap onto as many
+            lines as they need without touching the title's width. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={`/projects/${project.key}/dashboard`}
+            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
-            <Tags size={14} /> labels
-          </button>
-        )}
-
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => setShowFields(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            dashboard →
+          </Link>
+          <Link
+            href={`/projects/${project.key}/sprints`}
+            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
-            <ListChecks size={14} /> fields
-          </button>
-        )}
-
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => setShowGit(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            sprints →
+          </Link>
+          <Link
+            href={`/projects/${project.key}/timeline`}
+            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
-            <GitBranch size={14} /> git
-          </button>
-        )}
-
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => setShowTemplates(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            timeline →
+          </Link>
+          <Link
+            href={`/projects/${project.key}/backlog`}
+            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
-            <FileStack size={14} /> templates
-          </button>
-        )}
-
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => setShowWebhooks(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            backlog →
+          </Link>
+          <Link
+            href={`/projects/${project.key}/vault`}
+            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
-            <Webhook size={14} /> webhooks
-          </button>
-        )}
+            vault →
+          </Link>
 
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => setShowImport(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
-          >
-            <ArrowDownUp size={14} /> import / export
-          </button>
-        )}
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setShowLabels(true)}
+              className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              <Tags size={14} /> labels
+            </button>
+          )}
 
-        {canManage && (
-          <button
-            type="button"
-            onClick={() => setShowPublic(true)}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
-          >
-            <Share2 size={14} /> public status
-          </button>
-        )}
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setShowFields(true)}
+              className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              <ListChecks size={14} /> fields
+            </button>
+          )}
 
-        {canManage && (
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                if (project.archived_at) await unarchiveProject(project.key);
-                else await archiveProject(project.key);
-                await reload();
-              } catch (e) {
-                setError((e as unknown as ApiError).message);
-              }
-            }}
-            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
-          >
-            {project.archived_at ? (
-              <><ArchiveRestore size={14} /> unarchive</>
-            ) : (
-              <><Archive size={14} /> archive</>
-            )}
-          </button>
-        )}
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setShowGit(true)}
+              className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              <GitBranch size={14} /> git
+            </button>
+          )}
+
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setShowTemplates(true)}
+              className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              <FileStack size={14} /> templates
+            </button>
+          )}
+
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setShowWebhooks(true)}
+              className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              <Webhook size={14} /> webhooks
+            </button>
+          )}
+
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setShowImport(true)}
+              className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              <ArrowDownUp size={14} /> import / export
+            </button>
+          )}
+
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setShowPublic(true)}
+              className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              <Share2 size={14} /> public status
+            </button>
+          )}
+
+          {canManage && (
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  if (project.archived_at) await unarchiveProject(project.key);
+                  else await archiveProject(project.key);
+                  await reload();
+                } catch (e) {
+                  setError((e as unknown as ApiError).message);
+                }
+              }}
+              className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              {project.archived_at ? (
+                <><ArchiveRestore size={14} /> unarchive</>
+              ) : (
+                <><Archive size={14} /> archive</>
+              )}
+            </button>
+          )}
+        </div>
       </header>
 
       {showLabels && (
@@ -337,7 +347,7 @@ function InlineName({
         if (name && name !== initial) await onSave(name);
         else onCancel();
       }}
-      className="flex items-center gap-2"
+      className="flex min-w-0 items-center gap-2"
     >
       <input
         autoFocus
@@ -349,10 +359,10 @@ function InlineName({
             onCancel();
           }
         }}
-        className="w-full rounded border border-white/10 bg-ink px-2 py-1 text-2xl font-semibold text-chrome focus:border-accent focus:outline-none"
+        className="min-w-0 flex-1 rounded border border-white/10 bg-ink px-2 py-1 text-2xl font-semibold text-chrome focus:border-accent focus:outline-none"
       />
-      <button type="submit" className="mono text-xs text-accent">save</button>
-      <button type="button" onClick={onCancel} className="mono text-xs text-chrome-dim">cancel</button>
+      <button type="submit" className="mono shrink-0 text-xs text-accent">save</button>
+      <button type="button" onClick={onCancel} className="mono shrink-0 text-xs text-chrome-dim">cancel</button>
     </form>
   );
 }

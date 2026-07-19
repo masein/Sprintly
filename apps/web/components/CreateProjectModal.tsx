@@ -115,7 +115,7 @@ export function CreateProjectModal({
     >
       <form
         onSubmit={submit}
-        className="w-full max-w-md space-y-5 rounded-lg border border-white/10 bg-ink-subtle p-6"
+        className="max-h-[90vh] w-full max-w-md space-y-5 overflow-y-auto rounded-lg border border-white/10 bg-ink-subtle p-6"
       >
         <div className="flex items-start justify-between">
           <div>

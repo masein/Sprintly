@@ -74,29 +74,29 @@ export default function ProjectDashboardPage() {
 
   return (
     <AppShell currentProjectKey={projectKey}>
-      <header className="mb-6 flex items-end justify-between">
-        <div>
+      <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
           <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
             sprintly · {projectKey} · dashboard
           </div>
           <h1 className="text-3xl font-semibold">At a glance.</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             href={`/projects/${projectKey}/metrics` as Route}
-            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             flow metrics →
           </Link>
           <Link
             href={`/projects/${projectKey}`}
-            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             ← board
           </Link>
           <Link
             href={`/projects/${projectKey}/sprints`}
-            className="mono inline-flex items-center gap-1 rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            className="mono inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-white/10 px-3 py-1.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
           >
             sprints →
           </Link>
@@ -104,7 +104,7 @@ export default function ProjectDashboardPage() {
       </header>
 
       {/* Stat tiles */}
-      <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <section className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-4">
         <StatTile
           label="open tasks"
           value={open}

@@ -213,17 +213,19 @@ function TaskList({
           key={t.key}
           className="flex items-center gap-3 rounded border border-white/10 bg-ink-subtle px-3 py-2"
         >
-          <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">
+          <span className="mono shrink-0 whitespace-nowrap text-[10px] uppercase tracking-widest text-chrome-dim">
             {t.status}
           </span>
           <Link
             href={`/tasks/${t.key}`}
-            className="mono text-xs text-accent hover:underline"
+            className="mono shrink-0 whitespace-nowrap text-xs text-accent hover:underline"
           >
             {t.key}
           </Link>
-          <span className="flex-1 truncate text-sm text-chrome">{t.title}</span>
-          <span className="mono text-xs text-chrome-dim">
+          <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={t.title}>
+            {t.title}
+          </span>
+          <span className="mono shrink-0 whitespace-nowrap text-xs text-chrome-dim">
             {t.story_points != null ? `${t.story_points} pts` : "—"}
           </span>
           {canManage && (
