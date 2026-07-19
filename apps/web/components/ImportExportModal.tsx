@@ -87,7 +87,7 @@ export function ImportExportModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-lg space-y-4 rounded-lg border border-white/10 bg-ink-subtle p-6">
+      <div className="max-h-[90vh] w-full max-w-lg space-y-4 overflow-y-auto rounded-lg border border-white/10 bg-ink-subtle p-6">
         <div className="flex items-start justify-between">
           <div>
             <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
