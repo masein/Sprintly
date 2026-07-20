@@ -133,7 +133,11 @@ export default function DocsPage() {
               that doesn&apos;t travel opens it). The{" "}
               <span className="mono">+ add card</span> box stays available in
               swimlane mode and drops the new card into the lane you add it from
-              (its assignee / label / priority). <kbd>Esc</kbd> dismisses any
+              (its assignee / label / priority). It also inherits the board&apos;s
+              scope — add a card while scoped to a sprint and it joins that
+              sprint, so it doesn&apos;t vanish from the view you&apos;re looking
+              at; under <span className="mono">all tasks</span> it stays a
+              sprint-less backlog card. <kbd>Esc</kbd> dismisses any
               inline editor — add-card, add-column, a column rename — the same as
               the <span className="mono">:q cancel</span> control. Change a
               card&apos;s <span className="mono">status</span> from the task
