@@ -57,6 +57,23 @@ async fn create_round_trips_filter_and_grouping(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn create_accepts_sprint_grouping(pool: PgPool) {
+    // A view grouped by sprint saves and round-trips — the CHECK constraint was
+    // widened to allow 'sprint' alongside the original groupings.
+    let owner = make_user(&pool).await;
+    let pid = make_project(&pool, owner).await;
+
+    let v = board_views::create(&pool, pid, owner, "By sprint", &json!([]), "sprint", false)
+        .await
+        .unwrap();
+    assert_eq!(v.group_by, "sprint");
+
+    let listed = board_views::list(&pool, pid, owner).await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].group_by, "sprint");
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn visibility_is_own_plus_shared(pool: PgPool) {
     let alice = make_user(&pool).await;
     let bob = make_user(&pool).await;

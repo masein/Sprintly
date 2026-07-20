@@ -44,7 +44,7 @@ import {
   type Column,
 } from "@/lib/projects";
 import { useCreateTask, useMoveTask, useTasks, type Task } from "@/lib/tasks";
-import { listSprints } from "@/lib/sprints";
+import { listSprints, type Sprint } from "@/lib/sprints";
 import { type BoardView, type GroupBy } from "@/lib/boardViews";
 import { TaskCard } from "./TaskCard";
 import { BoardFilters, toFilterDSL, type Chip } from "./BoardFilters";
@@ -68,8 +68,15 @@ const UNGROUPED = "\0"; // sorts last for the "unassigned"/"no label" lane
 
 /// Partition tasks into swimlanes for the chosen grouping. Only non-empty
 /// lanes render; the catch-all lane (unassigned / no label) sorts last.
-function computeLanes(tasks: Task[], groupBy: GroupBy, memberName: (id: string) => string): Lane[] {
+function computeLanes(
+  tasks: Task[],
+  groupBy: GroupBy,
+  memberName: (id: string) => string,
+  sprints: Sprint[],
+  activeSprintId: string | null,
+): Lane[] {
   if (groupBy === "none") return [{ key: "all", label: "", tasks }];
+  if (groupBy === "sprint") return computeSprintLanes(tasks, sprints, activeSprintId);
 
   const buckets = new Map<string, Task[]>();
   const push = (k: string, t: Task) => {
@@ -107,13 +114,58 @@ function computeLanes(tasks: Task[], groupBy: GroupBy, memberName: (id: string) 
     });
 }
 
+/// Sprint swimlanes: the active sprint on top (the point is to separate
+/// committed work from the rest), then any other sprints with cards in view
+/// (usually completed — a look-back), most recent start first, and the
+/// backlog / no-sprint lane last. Only non-empty lanes render.
+function computeSprintLanes(
+  tasks: Task[],
+  sprints: Sprint[],
+  activeSprintId: string | null,
+): Lane[] {
+  const byId = new Map(sprints.map((s) => [s.id, s]));
+  const buckets = new Map<string, Task[]>();
+  for (const t of tasks) {
+    const k = t.sprint_id ?? UNGROUPED;
+    const list = buckets.get(k);
+    if (list) list.push(t);
+    else buckets.set(k, [t]);
+  }
+
+  const lanes: Lane[] = [];
+
+  if (activeSprintId && buckets.has(activeSprintId)) {
+    const s = byId.get(activeSprintId);
+    lanes.push({
+      key: activeSprintId,
+      label: s ? `${s.name} · active` : "active sprint",
+      tasks: buckets.get(activeSprintId)!,
+    });
+    buckets.delete(activeSprintId);
+  }
+
+  [...buckets.keys()]
+    .filter((k) => k !== UNGROUPED)
+    .sort((a, b) => (byId.get(b)?.starts_at ?? "").localeCompare(byId.get(a)?.starts_at ?? ""))
+    .forEach((k) => {
+      const s = byId.get(k);
+      lanes.push({ key: k, label: s ? s.name : "unknown sprint", tasks: buckets.get(k)! });
+    });
+
+  const backlog = buckets.get(UNGROUPED);
+  if (backlog) lanes.push({ key: UNGROUPED, label: "backlog · no sprint", tasks: backlog });
+
+  return lanes;
+}
+
 /// What a card added into a given lane should inherit so it stays in that lane.
-/// The catch-all lane (unassigned / no label) adds nothing.
+/// The catch-all lane (unassigned / no label / backlog) adds nothing.
 function laneCardDefaults(groupBy: GroupBy, laneKey: string): CardDefaults {
   if (laneKey === UNGROUPED) return {};
   if (groupBy === "assignee") return { assignee_id: laneKey };
   if (groupBy === "priority") return { priority: laneKey as Task["priority"] };
   if (groupBy === "label") return { labels: [laneKey] };
+  if (groupBy === "sprint") return { sprint_id: laneKey };
   return {};
 }
 
@@ -198,10 +250,10 @@ export function Board({
   };
 
   const lanes = useMemo(
-    () => computeLanes(tasks, groupBy, memberName),
+    () => computeLanes(tasks, groupBy, memberName, sprints, activeSprint?.id ?? null),
     // memberName closes over membersQ.data; depend on it explicitly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tasks, groupBy, membersQ.data],
+    [tasks, groupBy, membersQ.data, sprints, activeSprint?.id],
   );
 
   function applyView(v: BoardView) {
@@ -271,7 +323,14 @@ export function Board({
                 canMoveCards={canManage}
                 manageColumns={false}
                 canAddCards={canManage}
-                cardDefaults={{ ...laneCardDefaults(groupBy, lane.key), sprint_id: scopedSprintId }}
+                cardDefaults={
+                  // The lane's own defaults (incl. its sprint when grouped by
+                  // sprint); the board scope's sprint overrides only when the
+                  // scope actually pins one, else the lane's sprint stands.
+                  scopedSprintId
+                    ? { ...laneCardDefaults(groupBy, lane.key), sprint_id: scopedSprintId }
+                    : laneCardDefaults(groupBy, lane.key)
+                }
                 move={move}
                 onBoardChange={onBoardChange}
                 onError={setError}

@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::{AppError, AppResult};
 
-pub const GROUP_BYS: [&str; 4] = ["none", "assignee", "label", "priority"];
+pub const GROUP_BYS: [&str; 5] = ["none", "assignee", "label", "priority", "sprint"];
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct BoardView {

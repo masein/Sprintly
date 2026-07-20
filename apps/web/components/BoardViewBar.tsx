@@ -18,7 +18,7 @@ import type { Sprint } from "@/lib/sprints";
 import type { Chip } from "./BoardFilters";
 import type { ApiError } from "@/lib/api";
 
-const GROUP_BYS: GroupBy[] = ["none", "assignee", "label", "priority"];
+const GROUP_BYS: GroupBy[] = ["none", "assignee", "label", "priority", "sprint"];
 
 export function BoardViewBar({
   projectKey,
