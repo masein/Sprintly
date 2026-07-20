@@ -123,8 +123,8 @@ export default function DocsPage() {
               for the whole project (sprint cards plus the backlog), or pick a
               specific sprint to look back. With no sprint running the control
               reads <span className="mono">all tasks (no active sprint)</span>.
-              Column counts follow the scope, and your choice is remembered per
-              project.
+              Column counts follow the scope. Switching scope is a session-only
+              move — reopen the board and a running sprint takes the focus again.
             </p>
             <p>
               Click anywhere on a card to open it — the small{" "}
