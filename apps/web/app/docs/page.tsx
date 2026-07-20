@@ -69,8 +69,10 @@ export default function DocsPage() {
               background worker drops a fresh task each interval (it catches up
               without spamming if it falls behind). The{" "}
               <span className="mono">backlog</span> (everything with no sprint)
-              has multi-select: tick a few, then assign, drop into a sprint, or
-              delete them in one action.
+              has an inline <span className="mono">+ add a task</span> for filing
+              a sprint-less task straight into the pile, plus multi-select: tick
+              a few, then assign, drop into a sprint, or delete them in one
+              action.
             </p>
           </Section>
 

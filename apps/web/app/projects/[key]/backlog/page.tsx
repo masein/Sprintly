@@ -4,14 +4,15 @@
 // (assign, move to a sprint, delete). The board is for flow; this is for
 // triaging the pile.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { CheckSquare, Square, Trash2, UserPlus, UserMinus } from "lucide-react";
+import { CheckSquare, Plus, Square, Trash2, UserPlus, UserMinus } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { getProject } from "@/lib/projects";
 import { listSprints } from "@/lib/sprints";
+import { createTask } from "@/lib/tasks";
 import { me } from "@/lib/auth-bundle";
 import { bulkTasks, listBacklog, type BacklogItem, type BulkOp } from "@/lib/templates";
 import type { ApiError } from "@/lib/api";
@@ -69,6 +70,10 @@ export default function BacklogPage() {
   }
 
   const canManage = projectQ.data?.your_role === "lead";
+  // Task creation is open to leads and contributors (watchers/viewers can't) —
+  // mirrors the API's create-task gate.
+  const canCreate =
+    projectQ.data?.your_role === "lead" || projectQ.data?.your_role === "contributor";
   const items = backlogQ.data ?? [];
   const sprints = (sprintsQ.data ?? []).filter((s) => s.state !== "completed");
 
@@ -149,6 +154,12 @@ export default function BacklogPage() {
       )}
 
       <div className="rounded-lg border border-white/10 bg-ink-subtle">
+        {canCreate && (
+          <BacklogQuickAdd
+            projectKey={key}
+            onCreated={() => qc.invalidateQueries({ queryKey: ["backlog", key] })}
+          />
+        )}
         {canManage && items.length > 0 && (
           <button
             type="button"
@@ -202,5 +213,110 @@ export default function BacklogPage() {
         </ul>
       </div>
     </AppShell>
+  );
+}
+
+// Inline quick-add for the backlog. Mirrors the board's "+ add card": a title
+// input where Enter files a sprint-less task in the default board's first
+// column, Esc collapses. Stays open + refocuses after each add for rapid
+// entry. Empty submit gets an inline nudge (QA F5), never a silent no-op.
+function BacklogQuickAdd({
+  projectKey,
+  onCreated,
+}: {
+  projectKey: string;
+  onCreated: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [titleError, setTitleError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const create = useMutation({
+    // No column_id / sprint_id: the API slots it into the default board's first
+    // column with no sprint, which is exactly a backlog task.
+    mutationFn: (t: string) => createTask(projectKey, { title: t }),
+    onSuccess: () => {
+      onCreated();
+      setTitle("");
+      setError(null);
+      inputRef.current?.focus();
+    },
+    onError: (e) => setError((e as unknown as ApiError).message ?? "couldn't file it"),
+  });
+
+  function close() {
+    setOpen(false);
+    setTitle("");
+    setTitleError(null);
+    setError(null);
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        data-backlog-quick-add
+        onClick={() => setOpen(true)}
+        className="mono flex w-full items-center gap-1 border-b border-white/10 px-3 py-2 text-left text-xs text-chrome-dim hover:text-chrome"
+      >
+        <Plus size={12} /> add a task
+      </button>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!title.trim()) {
+          setTitleError("Needs a title.");
+          return;
+        }
+        create.mutate(title.trim());
+      }}
+      className="space-y-1 border-b border-white/10 p-2"
+    >
+      <input
+        ref={inputRef}
+        autoFocus
+        value={title}
+        onChange={(e) => {
+          setTitle(e.target.value);
+          if (titleError) setTitleError(null);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            close();
+          }
+        }}
+        placeholder="task title"
+        aria-label="new task title"
+        aria-invalid={!!titleError}
+        className={`block w-full rounded border bg-ink px-2 py-1 text-sm text-chrome focus:outline-none placeholder:text-chrome-dim/50 placeholder:italic ${
+          titleError ? "border-red-500/60 focus:border-red-500" : "border-white/10 focus:border-accent"
+        }`}
+      />
+      {titleError && <div className="mono text-[11px] text-red-300">{titleError}</div>}
+      {error && <div className="mono text-[11px] text-red-300">{error}</div>}
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          onClick={close}
+          className="mono text-[10px] text-chrome-dim hover:text-chrome"
+        >
+          :q cancel
+        </button>
+        <button
+          type="submit"
+          disabled={create.isPending}
+          className="mono rounded bg-accent px-2 py-1 text-[10px] text-accent-fg disabled:opacity-50"
+        >
+          {create.isPending ? "…" : "add"}
+        </button>
+      </div>
+    </form>
   );
 }
