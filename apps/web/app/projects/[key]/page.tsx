@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { Archive, ArchiveRestore, ArrowDownUp, FileStack, GitBranch, ListChecks, Pencil, Share2, Tags, Webhook } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDownUp, FileStack, GitBranch, ListChecks, Pencil, Share2, Tags, Users, Webhook } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Board } from "@/components/Board";
 import { FieldsManager } from "@/components/FieldsManager";
 import { GitIntegrationsManager } from "@/components/GitIntegrationsManager";
 import { ImportExportModal } from "@/components/ImportExportModal";
 import { LabelsManager } from "@/components/LabelsManager";
+import { MembersManager } from "@/components/MembersManager";
 import { PublicStatusModal } from "@/components/PublicStatusModal";
 import { TemplatesManager } from "@/components/TemplatesManager";
 import { WebhooksManager } from "@/components/WebhooksManager";
@@ -41,6 +42,7 @@ export default function ProjectPage() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showPublic, setShowPublic] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
 
   async function reload() {
     try {
@@ -183,6 +185,16 @@ export default function ProjectPage() {
             vault →
           </Link>
 
+          {/* Everyone can see who's on the project; only leads can mutate
+              (enforced inside the manager + by the API). */}
+          <button
+            type="button"
+            onClick={() => setShowMembers(true)}
+            className="mono flex items-center gap-2 rounded border border-white/10 px-3 py-2.5 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+          >
+            <Users size={14} /> members
+          </button>
+
           {canManage && (
             <button
               type="button"
@@ -307,6 +319,14 @@ export default function ProjectPage() {
 
       {showPublic && (
         <PublicStatusModal projectKey={project.key} onClose={() => setShowPublic(false)} />
+      )}
+
+      {showMembers && (
+        <MembersManager
+          projectKey={project.key}
+          canManage={canManage}
+          onClose={() => setShowMembers(false)}
+        />
       )}
 
       {defaultBoard ? (
