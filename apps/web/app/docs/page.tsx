@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, ListTree, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, Smile, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, ListTree, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, Smile, TerminalSquare, Users, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -69,8 +69,10 @@ export default function DocsPage() {
               background worker drops a fresh task each interval (it catches up
               without spamming if it falls behind). The{" "}
               <span className="mono">backlog</span> (everything with no sprint)
-              has multi-select: tick a few, then assign, drop into a sprint, or
-              delete them in one action.
+              has an inline <span className="mono">+ add a task</span> for filing
+              a sprint-less task straight into the pile, plus multi-select: tick
+              a few, then assign, drop into a sprint, or delete them in one
+              action.
             </p>
           </Section>
 
@@ -174,6 +176,21 @@ export default function DocsPage() {
               picker hands the task to any project member — or{" "}
               <span className="mono">unassigned</span>. Assigning notifies the new
               owner and shows their avatar on the card.
+            </p>
+          </Section>
+
+          <Section icon={Users} title="Members & roles">
+            <p>
+              The <span className="mono">members</span> button on the project
+              page shows who&apos;s on it — avatar, handle, and role. A{" "}
+              <span className="mono">lead</span> can add an existing user (find
+              them by handle or email as you type), change anyone&apos;s role
+              between <span className="mono">lead</span>,{" "}
+              <span className="mono">contributor</span>, and{" "}
+              <span className="mono">watcher</span>, and remove someone (they
+              can be added back — nothing is destroyed). Everyone else sees the
+              same list, read-only. You can&apos;t remove the last lead — the
+              server says no, and the panel shows you why.
             </p>
           </Section>
 
