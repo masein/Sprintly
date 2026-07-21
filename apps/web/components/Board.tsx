@@ -54,7 +54,14 @@ type Lane = { key: string; label: string; tasks: Task[] };
 
 // Fields a new card inherits from the lane it's added into (QA F13), so a card
 // quick-added in the "@bob" / "p1" / "backend" lane actually lands in that lane.
-type CardDefaults = { assignee_id?: string; priority?: Task["priority"]; labels?: string[] };
+// `sprint_id` comes from the board's scope (not a lane) so a card added while
+// scoped to a sprint joins that sprint and stays visible in the filtered view.
+type CardDefaults = {
+  assignee_id?: string;
+  priority?: Task["priority"];
+  labels?: string[];
+  sprint_id?: string;
+};
 
 const PRIORITY_ORDER = ["p0", "p1", "p2", "p3"];
 const UNGROUPED = "\0"; // sorts last for the "unassigned"/"no label" lane
@@ -156,6 +163,17 @@ export function Board({
     setScope(next);
   }
 
+  // The concrete sprint a new card should join so it doesn't vanish from the
+  // current filtered view: the active sprint's id when scoped to "active", the
+  // pinned sprint's id when a specific sprint is selected, or undefined for
+  // "all tasks" (a sprint-less backlog card, today's behavior).
+  const scopedSprintId =
+    scope === null || scope === "all"
+      ? undefined
+      : scope === "active"
+        ? (activeSprint?.id ?? undefined)
+        : scope;
+
   const filter = chips.length > 0 ? toFilterDSL(chips) : undefined;
   // Don't fetch until the scope is resolved — avoids a flash of the wrong scope.
   const { data: tasks = [] } = useTasks(
@@ -225,6 +243,7 @@ export function Board({
           canMoveCards={canManage}
           manageColumns={canManage}
           canAddCards={canManage}
+          cardDefaults={{ sprint_id: scopedSprintId }}
           move={move}
           onBoardChange={onBoardChange}
           onError={setError}
@@ -252,7 +271,7 @@ export function Board({
                 canMoveCards={canManage}
                 manageColumns={false}
                 canAddCards={canManage}
-                cardDefaults={laneCardDefaults(groupBy, lane.key)}
+                cardDefaults={{ ...laneCardDefaults(groupBy, lane.key), sprint_id: scopedSprintId }}
                 move={move}
                 onBoardChange={onBoardChange}
                 onError={setError}
