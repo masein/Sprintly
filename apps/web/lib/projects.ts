@@ -98,6 +98,12 @@ export const removeMember = (key: string, userId: string) =>
     { method: "DELETE" },
   );
 
+export const changeMemberRole = (key: string, userId: string, role: Member["role"]) =>
+  api<void>(
+    `/projects/${encodeURIComponent(key)}/members/${encodeURIComponent(userId)}`,
+    { method: "PATCH", body: { role } },
+  );
+
 // ── boards / columns ────────────────────────────────────────────────────────
 
 export const listBoards = (key: string) =>

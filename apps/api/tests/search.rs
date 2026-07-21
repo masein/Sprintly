@@ -175,6 +175,37 @@ async fn search_ranks_tsvector_then_trigram(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn user_search_matches_email_prefix(pool: PgPool) {
+    // The members typeahead lets you find someone by an email prefix. Mirror
+    // the /search user WHERE clause and assert an email prefix matches (the
+    // email itself is never selected/returned — only the id here).
+    let uid = make_user(&pool).await;
+    let email: String = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(uid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let prefix = &email[..email.len().min(5)];
+
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"
+        SELECT id
+        FROM   users
+        WHERE  deleted_at IS NULL
+          AND  (handle ILIKE $1 || '%' OR email ILIKE $1 || '%' OR display_name % $1)
+        "#,
+    )
+    .bind(prefix)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(
+        ids.contains(&uid),
+        "email prefix {prefix:?} should find the user"
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn subtasks_returns_only_children(pool: PgPool) {
     let owner = make_user(&pool).await;
     let (pid, parent_id, _) = make_project_with_task(&pool, "SUB", owner, "parent").await;

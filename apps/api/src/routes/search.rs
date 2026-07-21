@@ -175,8 +175,11 @@ async fn search(
                display_name AS "display_name!: String"
         FROM   users
         WHERE  deleted_at IS NULL
-          AND  (handle ILIKE $1 || '%' OR display_name % $1)
-        ORDER BY (handle ILIKE $1 || '%') DESC, similarity(display_name, $1) DESC
+          -- Also match an email prefix so you can find someone by their email
+          -- (e.g. adding a project member) — the address itself is never
+          -- returned, only handle + display_name.
+          AND  (handle ILIKE $1 || '%' OR email ILIKE $1 || '%' OR display_name % $1)
+        ORDER BY (handle ILIKE $1 || '%' OR email ILIKE $1 || '%') DESC, similarity(display_name, $1) DESC
         LIMIT  $2
         "#,
         raw,
