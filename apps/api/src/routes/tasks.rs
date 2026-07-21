@@ -65,6 +65,9 @@ pub struct TaskDto {
     /// The parent task's key (e.g. `QAV-1`), for the subtask breadcrumb/link.
     pub parent_key: Option<String>,
     pub epic_id: Option<Uuid>,
+    /// The sprint this task is assigned to, if any (null = backlog). Lets the
+    /// board group cards into sprint swimlanes without a second round-trip.
+    pub sprint_id: Option<Uuid>,
     pub estimate_minutes: Option<i32>,
     pub story_points: Option<i32>,
     pub due_date: Option<NaiveDate>,
@@ -430,6 +433,7 @@ async fn list_tasks(
                t.reporter_id,
                t.parent_task_id,
                t.epic_id,
+               t.sprint_id,
                t.estimate_minutes,
                t.story_points,
                t.due_date,
@@ -486,6 +490,7 @@ async fn list_tasks(
             // The board never lists subtasks, so there's no parent to surface.
             parent_key: None,
             epic_id: r.epic_id,
+            sprint_id: r.sprint_id,
             estimate_minutes: r.estimate_minutes,
             story_points: r.story_points,
             due_date: r.due_date,
@@ -851,6 +856,7 @@ async fn fetch_task(db: &PgPool, task_key: &str, project_id: Uuid) -> AppResult<
                t.parent_task_id,
                parent.key        AS "parent_key?: String",
                t.epic_id,
+               t.sprint_id,
                t.estimate_minutes,
                t.story_points,
                t.due_date,
@@ -886,6 +892,7 @@ async fn fetch_task(db: &PgPool, task_key: &str, project_id: Uuid) -> AppResult<
         parent_task_id: r.parent_task_id,
         parent_key: r.parent_key,
         epic_id: r.epic_id,
+        sprint_id: r.sprint_id,
         estimate_minutes: r.estimate_minutes,
         story_points: r.story_points,
         due_date: r.due_date,

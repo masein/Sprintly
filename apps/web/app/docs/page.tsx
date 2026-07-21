@@ -107,15 +107,21 @@ export default function DocsPage() {
             <p>
               Filter the board with chips, then group it into swimlanes by{" "}
               <span className="mono">assignee</span>,{" "}
-              <span className="mono">label</span>, or{" "}
-              <span className="mono">priority</span> from the{" "}
-              <span className="mono">swimlanes</span> control. Save a filter +
-              grouping as a named <span className="mono">view</span> to reopen
-              later; tick <span className="mono">shared</span> and the rest of
-              the project can pick it too (yours to edit, theirs to use). In a
-              grouped view cards still drag between columns within their lane —
-              changing lane means changing the card&apos;s assignee, label, or
-              priority on the card itself.
+              <span className="mono">label</span>,{" "}
+              <span className="mono">priority</span>, or{" "}
+              <span className="mono">sprint</span> from the{" "}
+              <span className="mono">swimlanes</span> control. Grouping by{" "}
+              <span className="mono">sprint</span> under{" "}
+              <span className="mono">all tasks</span> puts the active sprint in
+              the top lane, any other sprints with cards below it, and the
+              backlog / no-sprint pile last — so you can tell committed work
+              apart from everything else at a glance. Save a filter + grouping
+              as a named <span className="mono">view</span> to reopen later; tick{" "}
+              <span className="mono">shared</span> and the rest of the project
+              can pick it too (yours to edit, theirs to use). In a grouped view
+              cards still drag between columns within their lane — changing lane
+              means changing the card&apos;s assignee, label, priority, or
+              sprint on the card itself.
             </p>
             <p>
               The <span className="mono">scope</span> control sets which sprint
