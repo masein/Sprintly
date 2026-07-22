@@ -37,6 +37,11 @@ jobs:
           docker compose -f infra/compose/docker-compose.yml logs --tail=80
           exit 1
 
+      # Idempotent: guarantees the demo admin (demo@sprintly.local) exists so
+      # admin-surface specs have a deterministic admin to sign in as.
+      - name: Seed the demo admin
+        run: docker compose -f infra/compose/docker-compose.yml --env-file .env exec -T api /usr/local/bin/sprintly-seed
+
       - uses: pnpm/action-setup@v6
         with: { version: 9.12.0 }
       - uses: actions/setup-node@v7

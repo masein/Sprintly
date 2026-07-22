@@ -38,6 +38,44 @@ export const resetUserPassword = (id: string) =>
     { method: "POST" },
   );
 
+export const setUserEmail = (id: string, email: string) =>
+  api<void>(`/admin/users/${id}/email`, { method: "POST", body: { email } });
+
+// ── invites ─────────────────────────────────────────────────────────────────
+
+export type InviteRow = {
+  id: string;
+  email_hint: string | null;
+  suggested_role: "admin" | "member" | "viewer";
+  invited_by: string | null;
+  created_at: string;
+  expires_at: string;
+  consumed_at: string | null;
+  consumed_by: string | null;
+};
+
+export type CreatedInvite = {
+  id: string;
+  /** Plaintext token — surfaced once, never returned again. */
+  token: string;
+  url: string;
+  email_hint: string | null;
+  suggested_role: string;
+  expires_at: string;
+};
+
+export const listInvites = () =>
+  api<{ items: InviteRow[] }>("/admin/invites").then((r) => r.items);
+
+export const createInvite = (body: {
+  email_hint?: string;
+  suggested_role?: InviteRow["suggested_role"];
+  ttl_hours?: number;
+}) => api<CreatedInvite>("/admin/invites", { method: "POST", body });
+
+export const revokeInvite = (id: string) =>
+  api<void>(`/admin/invites/${id}/revoke`, { method: "POST" });
+
 export type AdminAuditRow = {
   id: string;
   actor_handle: string | null;
