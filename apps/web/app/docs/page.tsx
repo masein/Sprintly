@@ -388,6 +388,26 @@ export default function DocsPage() {
             </p>
           </Section>
 
+          <Section icon={Users} title="Admin: users & invites">
+            <p>
+              <span className="mono">/admin</span> (admins only). The{" "}
+              <span className="mono">users</span> tab is the account desk:
+              search anyone, flip their global role (
+              <span className="mono">admin / member / viewer</span>), edit
+              their <span className="mono">email</span> inline (the pencil next
+              to it — duplicates are refused, and they log in with the new
+              address immediately), suspend/reactivate, or mint a single-use{" "}
+              <span className="mono">password reset</span> link to hand them.
+              The <span className="mono">invites</span> tab mints one-shot
+              signup links with a role attached — an{" "}
+              <span className="mono">admin</span> invite makes an admin, so
+              mind who you hand it to. Give it an email and Sprintly also
+              sends it (when SMTP is configured). The link is shown once;
+              lose it, revoke it, mint another. Every action here lands in the
+              audit log.
+            </p>
+          </Section>
+
           <Section icon={LogIn} title="Single sign-on (OIDC)">
             <p>
               Point Sprintly at your identity provider — Authentik, Keycloak,
