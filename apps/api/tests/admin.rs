@@ -39,6 +39,41 @@ async fn make_user(pool: &PgPool, role: &str) -> Uuid {
     id
 }
 
+/// Admin email change: users.email is citext with a unique index, so setting
+/// one user's email to a case-variant of another's must surface as a unique
+/// violation (the endpoint maps this to 409), while a fresh address applies.
+#[sqlx::test(migrations = "./migrations")]
+async fn user_email_change_conflicts_on_citext_duplicate(pool: PgPool) {
+    let a = make_user(&pool, "member").await;
+    let b = make_user(&pool, "member").await;
+
+    let b_email: String = sqlx::query_scalar("SELECT email::text FROM users WHERE id = $1")
+        .bind(b)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // Case-variant of an existing email → unique violation (citext).
+    let dup = sqlx::query("UPDATE users SET email = $2 WHERE id = $1 AND deleted_at IS NULL")
+        .bind(a)
+        .bind(b_email.to_uppercase())
+        .execute(&pool)
+        .await;
+    match dup {
+        Err(sqlx::Error::Database(e)) => assert!(e.is_unique_violation()),
+        other => panic!("expected unique violation, got {other:?}"),
+    }
+
+    // A fresh address applies cleanly.
+    let done = sqlx::query("UPDATE users SET email = $2 WHERE id = $1 AND deleted_at IS NULL")
+        .bind(a)
+        .bind(format!("fresh-{}@x.test", a.simple()))
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(done.rows_affected(), 1);
+}
+
 /// F15: retention selects the right rows over real data and pruning removes
 /// them. (MinIO object deletion is exercised in the running stack, not here.)
 #[sqlx::test(migrations = "./migrations")]
