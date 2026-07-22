@@ -10,6 +10,7 @@ import {
   AlertTriangle, Calendar, Clock, Flame, History, ListChecks, TrendingUp,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import { StatTile } from "@/components/StatTile";
 import { VelocityChart } from "@/components/VelocityChart";
 import { BurndownChart } from "@/components/BurndownChart";
@@ -59,6 +60,12 @@ export default function ProjectDashboardPage() {
         </AppShell>
       );
     }
+    // Anything else (500, network) — say so instead of spinning forever.
+    return (
+      <AppShell currentProjectKey={projectKey}>
+        <LoadError what="The dashboard" message={e.message} onRetry={() => q.refetch()} />
+      </AppShell>
+    );
   }
 
   const d = q.data;

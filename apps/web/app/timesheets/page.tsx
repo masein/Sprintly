@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { Check, Download } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import {
   approveTimesheet,
   csvExportUrl,
@@ -47,6 +48,11 @@ export default function ApprovalsPage() {
         </AppShell>
       );
     }
+    return (
+      <AppShell>
+        <LoadError what="The approvals queue" message={e.message} onRetry={() => q.refetch()} />
+      </AppShell>
+    );
   }
 
   const items = q.data ?? [];

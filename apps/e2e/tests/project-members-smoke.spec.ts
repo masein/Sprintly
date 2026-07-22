@@ -74,7 +74,7 @@ test.describe("project members UI", () => {
       // Type part of B's EMAIL (not handle) — exercises email search.
       await dialog.getByLabel("find a user to add").fill(`invitee${suffix}`);
       await dialog.getByRole("button", { name: new RegExp(`@${bHandle}`) }).click();
-      await expect(dialog.getByText(`@${bHandle}`)).toBeVisible();
+      await expect(dialog.getByText(`@${bHandle}`, { exact: true })).toBeVisible();
     });
 
     await test.step("lead changes B's role to watcher", async () => {
@@ -87,11 +87,11 @@ test.describe("project members UI", () => {
       const dialog = page.getByRole("dialog");
       page.once("dialog", (d) => d.accept());
       await dialog.getByRole("button", { name: `remove @${bHandle}` }).click();
-      await expect(dialog.getByText(`@${bHandle}`)).toHaveCount(0);
+      await expect(dialog.getByText(`@${bHandle}`, { exact: true })).toHaveCount(0);
       // Re-add by handle this time.
       await dialog.getByLabel("find a user to add").fill(bHandle);
       await dialog.getByRole("button", { name: new RegExp(`@${bHandle}`) }).click();
-      await expect(dialog.getByText(`@${bHandle}`)).toBeVisible();
+      await expect(dialog.getByText(`@${bHandle}`, { exact: true })).toBeVisible();
     });
 
     await test.step("B logs in and sees the members list read-only", async () => {
@@ -100,8 +100,9 @@ test.describe("project members UI", () => {
       await page.goto(`/projects/${key}`);
       await page.getByRole("button", { name: /^members$/i }).click();
       const dialog = page.getByRole("dialog");
-      await expect(dialog.getByText(`@${bHandle}`)).toBeVisible();
-      await expect(dialog.getByText(`@${aHandle}`)).toBeVisible();
+      // B's own row reads "@handle · you", so anchor instead of exact-match.
+      await expect(dialog.getByText(new RegExp(`^@${bHandle}`))).toBeVisible();
+      await expect(dialog.getByText(`@${aHandle}`, { exact: true })).toBeVisible();
       // Read-only: no add box, no role dropdowns, no remove buttons.
       await expect(dialog.getByLabel("find a user to add")).toHaveCount(0);
       await expect(dialog.getByLabel(`role for @${bHandle}`)).toHaveCount(0);
