@@ -420,7 +420,12 @@ function BoardSurface({
 
     const overId = String(over.id);
     const overTask = tasks.find((t) => t.id === overId);
-    const bodyColumnId = overId.endsWith(":body") ? overId.slice(0, -":body".length) : null;
+    // Column-body drop zones are `${columnId}:body` on the plain board and
+    // `${columnId}:body:${laneKey}` inside a swimlane (ids must be unique
+    // across lanes). Match both — matching only the bare suffix silently ate
+    // every column-body drop in grouped views, so cards could only move
+    // between columns by landing exactly on another card.
+    const bodyColumnId = overId.includes(":body") ? (overId.split(":body")[0] ?? null) : null;
     const overColumn = bodyColumnId ? board.columns.find((c) => c.id === bodyColumnId) : null;
 
     let payload: Parameters<typeof move.mutate>[0] | null = null;

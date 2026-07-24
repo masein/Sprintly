@@ -9,6 +9,7 @@ import {
   AlertCircle, Eye, ListChecks, Timer,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import { StatTile } from "@/components/StatTile";
 import { getMyDashboard } from "@/lib/dashboards";
 import { fmtMinutes } from "@/lib/timetracking";
@@ -35,6 +36,11 @@ export default function MyDayPage() {
       router.push("/login");
       return null;
     }
+    return (
+      <AppShell>
+        <LoadError what="Your day" message={e.message} onRetry={() => q.refetch()} />
+      </AppShell>
+    );
   }
   const d = q.data;
   if (!d) {

@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import { ThroughputChart } from "@/components/ThroughputChart";
 import { TimeReportPanel } from "@/components/TimeReportPanel";
 import { fmtHours, getMetrics } from "@/lib/metrics";
@@ -112,6 +113,15 @@ export default function MetricsPage() {
 
       {tab === "flow" && q.isLoading && (
         <div className="mono text-sm text-chrome-dim">compiling vibes…</div>
+      )}
+
+      {/* 401/403 return above; anything else shows here so the time tab stays usable. */}
+      {tab === "flow" && q.error && !q.isLoading && (
+        <LoadError
+          what="Flow metrics"
+          message={(q.error as unknown as ApiError).message}
+          onRetry={() => q.refetch()}
+        />
       )}
 
       {tab === "flow" && m && (

@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { Trophy } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import { Sprint } from "@/components/Sprint";
 import {
   listCatalog,
@@ -26,6 +27,18 @@ export default function AchievementsPage() {
       router.push("/login");
       return null;
     }
+    return (
+      <AppShell>
+        <LoadError
+          what="The trophy shelf"
+          message={e.message}
+          onRetry={() => {
+            void catalog.refetch();
+            void mine.refetch();
+          }}
+        />
+      </AppShell>
+    );
   }
 
   const earnedByCode = new Map<string, AwardedRow>();

@@ -151,6 +151,41 @@ pub struct ListTasksQuery {
 
 // ─── handlers ───────────────────────────────────────────────────────────────
 
+/// Resolve `handles` and send each a "mention" notification pointing at the
+/// task. Best-effort like the comment fan-out; `notify()` skips the actor.
+async fn fan_out_mentions(
+    state: &AppState,
+    actor: Uuid,
+    task_id: Uuid,
+    task_key: &str,
+    text: &str,
+    handles: &[String],
+) {
+    use crate::domain::notifications as notif;
+    if handles.is_empty() {
+        return;
+    }
+    let mentioned = notif::resolve_handles(&state.db, handles)
+        .await
+        .unwrap_or_default();
+    let link = format!("/tasks/{task_key}");
+    let snippet: String = text.chars().take(140).collect();
+    for uid in mentioned {
+        let _ = notif::notify(
+            &state.db,
+            &state.redis,
+            uid,
+            actor,
+            "mention",
+            &format!("You were mentioned on {task_key}"),
+            Some(&snippet),
+            Some(&link),
+            Some(task_id),
+        )
+        .await;
+    }
+}
+
 async fn create_task(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -361,6 +396,12 @@ async fn create_task(
         .await;
     }
 
+    // Mention fan-out for a description written at creation time.
+    if let Some(desc) = req.description.as_deref() {
+        let handles = crate::domain::notifications::parse_mentions(desc);
+        fan_out_mentions(&state, user.id, task_id, &task_key, desc, &handles).await;
+    }
+
     // Outbound webhooks (best-effort).
     let _ = crate::domain::webhooks::dispatch(
         &state.db,
@@ -551,9 +592,11 @@ async fn edit_task(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    // Current assignee, so we only notify on an actual re-assignment.
-    let old_assignee: Option<Uuid> =
-        sqlx::query_scalar(r#"SELECT assignee_id FROM tasks WHERE id = $1"#)
+    // Current assignee (so we only notify on an actual re-assignment) and
+    // current description (so a description edit only pings NEWLY mentioned
+    // handles, not everyone already in the text).
+    let (old_assignee, old_description): (Option<Uuid>, String) =
+        sqlx::query_as(r#"SELECT assignee_id, description FROM tasks WHERE id = $1"#)
             .bind(task_id)
             .fetch_one(&state.db)
             .await?;
@@ -633,6 +676,13 @@ async fn edit_task(
             )
             .await;
         }
+    }
+
+    // Mention fan-out on description edits: only handles NEW to the text get
+    // pinged — re-saving an unchanged description notifies no one.
+    if let Some(new_desc) = req.description.as_deref() {
+        let added = crate::domain::notifications::new_mentions(&old_description, new_desc);
+        fan_out_mentions(&state, user.id, task_id, &task_key, new_desc, &added).await;
     }
 
     // Outbound webhooks (best-effort).

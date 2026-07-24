@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { Check, Download, FileText, Receipt, Send, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import { fmtMoneyCents } from "@/lib/timetracking";
 import {
   createClient,
@@ -98,6 +99,24 @@ export default function BillingPage() {
         <div className="mono rounded border border-white/10 bg-ink-subtle p-6 text-sm text-chrome-dim">
           Billing is admin-only. Ask an admin for access.
         </div>
+      </AppShell>
+    );
+  }
+
+  // Any other fetch failure (500, network) — say so instead of rendering an
+  // empty billing page that looks like there are no clients.
+  const loadFailure = !unauthed && !forbidden ? (clientsQ.error ?? invoicesQ.error) : null;
+  if (loadFailure) {
+    return (
+      <AppShell>
+        <LoadError
+          what="Billing"
+          message={(loadFailure as ApiError).message}
+          onRetry={() => {
+            void clientsQ.refetch();
+            void invoicesQ.refetch();
+          }}
+        />
       </AppShell>
     );
   }

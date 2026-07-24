@@ -11,6 +11,7 @@ import {
   ThumbsUp, Trash2, ArrowRight, Lock, Sparkles, X,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import { Markdown } from "@/components/Markdown";
 import {
   closeRetro,
@@ -75,6 +76,11 @@ export default function RetroPage() {
         </AppShell>
       );
     }
+    return (
+      <AppShell>
+        <LoadError what="The retro" message={e.message} onRetry={() => retroQ.refetch()} />
+      </AppShell>
+    );
   }
 
   if (!retroQ.data || !sprintQ.data) {
