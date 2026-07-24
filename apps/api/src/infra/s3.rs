@@ -124,11 +124,18 @@ impl<'a> Presigner<'a> {
 }
 
 fn host_from(endpoint: &str) -> String {
-    // Strip scheme.
-    endpoint
+    // Strip scheme AND any path suffix: the public endpoint may sit behind a
+    // path-based reverse proxy (e.g. http://host:8083/s3 → Caddy → minio),
+    // but the Host header the browser sends — and MinIO verifies the SigV4
+    // signature against — is just host:port. Signing "host:port/s3" made
+    // every presigned URL 403 (SignatureDoesNotMatch) on such deployments.
+    let stripped = endpoint
         .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .trim_end_matches('/')
+        .trim_start_matches("http://");
+    stripped
+        .split('/')
+        .next()
+        .unwrap_or(stripped)
         .to_string()
 }
 
@@ -211,6 +218,31 @@ mod tests {
         assert!(url.contains("X-Amz-Algorithm=AWS4-HMAC-SHA256"));
         assert!(url.contains("X-Amz-Expires=600"));
         assert!(url.contains("X-Amz-Signature="));
+    }
+
+    #[test]
+    fn host_from_strips_scheme_and_path() {
+        // A path-based public endpoint (reverse proxy in front of MinIO) must
+        // sign only host:port — the Host header MinIO actually verifies.
+        assert_eq!(host_from("http://212.33.206.34:8083/s3"), "212.33.206.34:8083");
+        assert_eq!(host_from("https://sprintly.example/s3/"), "sprintly.example");
+        assert_eq!(host_from("http://localhost:9000"), "localhost:9000");
+        assert_eq!(host_from("http://localhost:9000/"), "localhost:9000");
+    }
+
+    #[test]
+    fn path_based_endpoint_signs_bare_host_but_keeps_path_in_url() {
+        let mut c = cfg();
+        c.public_endpoint = "http://localhost:8080/s3".into();
+        let p = Presigner::new(&c);
+        let url = p.put("tasks/abc/foo.png", "image/png", 600);
+        // The browser-facing URL keeps the proxy path…
+        assert!(url.starts_with("http://localhost:8080/s3/sprintly/tasks/abc/foo.png?"));
+        // …and the signature must differ from one signed for a host WITH the
+        // path glued on (the old bug): recompute with the buggy host and make
+        // sure we didn't produce that.
+        let sig = url.split("X-Amz-Signature=").nth(1).unwrap();
+        assert_eq!(sig.len(), 64, "hex sha256 signature expected");
     }
 
     #[test]
