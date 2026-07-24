@@ -449,3 +449,111 @@ async fn invalid_input_is_rejected_over_http(pool: PgPool) {
     .await;
     assert!(status.is_client_error(), "expected 4xx, got {status}");
 }
+
+/// An explicitly-presented invite must win over open signup: the invitee gets
+/// the invite's role and the token is consumed. No token + open signup still
+/// lands as member. (Regression: the open-signup branch used to short-circuit
+/// and silently ignore the invite entirely.)
+#[sqlx::test(migrations = "./migrations")]
+async fn invite_role_wins_over_open_signup(pool: PgPool) {
+    let app = app(pool.clone());
+
+    // First user is admin by the first-boot rule.
+    let (admin_token, _) = register(&app, "founder").await;
+
+    // Admin mints an admin invite.
+    let (status, invite) = send(
+        &app,
+        "POST",
+        "/api/v1/admin/invites",
+        Some(&admin_token),
+        Some(json!({ "suggested_role": "admin" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "mint failed: {invite:?}");
+    let token_plain = invite["token"].as_str().unwrap().to_string();
+    let invite_id = invite["id"].as_str().unwrap().to_string();
+
+    // Open signup is ON in the test config — the invite must still apply.
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/api/v1/auth/register",
+        None,
+        Some(json!({
+            "email": "invited@sprintly.test",
+            "handle": "invited",
+            "display_name": "Invited Admin",
+            "password": "correct-horse-battery-staple",
+            "invite_token": token_plain,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "invited register failed: {body:?}");
+    assert_eq!(
+        body["user"]["role"], "admin",
+        "invite role must apply: {body:?}"
+    );
+
+    // The token is single-use: consumed_at is stamped.
+    let consumed: bool =
+        sqlx::query_scalar("SELECT consumed_at IS NOT NULL FROM invite_tokens WHERE id = $1::uuid")
+            .bind(&invite_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(consumed, "invite must be marked consumed");
+
+    // No token + open signup → plain member, as before.
+    let (_, walkin) = register(&app, "walkin").await;
+    assert_eq!(walkin["role"], "member");
+}
+
+/// Admin email change over HTTP: applies, rejects duplicates with 409, and
+/// requires admin.
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_can_change_a_user_email(pool: PgPool) {
+    let app = app(pool.clone());
+    let (admin_token, _) = register(&app, "boss").await; // first user → admin
+    let (member_token, member) = register(&app, "worker").await;
+    let member_id = member["id"].as_str().unwrap().to_string();
+
+    // Happy path.
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/users/{member_id}/email"),
+        Some(&admin_token),
+        Some(json!({ "email": "worker-new@sprintly.test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let stored: String = sqlx::query_scalar("SELECT email::text FROM users WHERE id = $1::uuid")
+        .bind(&member_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, "worker-new@sprintly.test");
+
+    // Duplicate (case-variant of the admin's email) → 409.
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/users/{member_id}/email"),
+        Some(&admin_token),
+        Some(json!({ "email": "BOSS@sprintly.test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "expected 409: {body:?}");
+
+    // Non-admin is refused.
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/users/{member_id}/email"),
+        Some(&member_token),
+        Some(json!({ "email": "sneaky@sprintly.test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

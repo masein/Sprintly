@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { Check, ChevronLeft, ChevronRight, Download, FileText, RotateCcw } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import {
   csvUrl,
   markPaid,
@@ -54,6 +55,11 @@ export default function PayrollPage() {
         </AppShell>
       );
     }
+    return (
+      <AppShell>
+        <LoadError what="Payroll" message={e.message} onRetry={() => q.refetch()} />
+      </AppShell>
+    );
   }
 
   function shift(delta: number) {

@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Bug, Sparkles, Wrench, Beaker, Flame } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import { myTasks, type MyTask } from "@/lib/search";
 import type { ApiError } from "@/lib/api";
 
@@ -51,6 +52,11 @@ export default function MyTasksPage() {
       router.push("/login");
       return null;
     }
+    return (
+      <AppShell>
+        <LoadError what="Your queue" message={e.message} onRetry={() => q.refetch()} />
+      </AppShell>
+    );
   }
 
   const grouped = new Map<MyTask["status"], MyTask[]>(
