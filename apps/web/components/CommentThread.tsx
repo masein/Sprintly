@@ -18,10 +18,17 @@ import {
 import { me, type Me } from "@/lib/auth-bundle";
 import { Markdown } from "./Markdown";
 import { Avatar } from "./Avatar";
+import { MentionTextarea } from "./MentionTextarea";
 
 const QUICK_EMOJI = ["👍", "🎉", "🚀", "❤️", "👀", "🙌"];
 
-export function CommentThread({ taskKey }: { taskKey: string }) {
+export function CommentThread({
+  taskKey,
+  projectKey,
+}: {
+  taskKey: string;
+  projectKey: string;
+}) {
   const qc = useQueryClient();
   const comments = useQuery({
     queryKey: ["comments", taskKey],
@@ -60,7 +67,8 @@ export function CommentThread({ taskKey }: { taskKey: string }) {
         onSubmit={async (body) => {
           await create.mutateAsync({ body });
         }}
-        placeholder="leave a comment — markdown supported"
+        placeholder="leave a comment — markdown supported, @handle to mention"
+        projectKey={projectKey}
       />
 
       <div className="space-y-4">
@@ -74,6 +82,7 @@ export function CommentThread({ taskKey }: { taskKey: string }) {
             key={c.id}
             comment={c}
             taskKey={taskKey}
+            projectKey={projectKey}
             replies={repliesByParent.get(c.id) ?? []}
             currentUser={currentUser.data}
           />
@@ -86,11 +95,13 @@ export function CommentThread({ taskKey }: { taskKey: string }) {
 function CommentItem({
   comment,
   taskKey,
+  projectKey,
   replies,
   currentUser,
 }: {
   comment: Comment;
   taskKey: string;
+  projectKey: string;
   replies: Comment[];
   currentUser: Me | undefined;
 }) {
@@ -177,6 +188,7 @@ function CommentItem({
       {editing ? (
         <EditCommentForm
           initial={comment.body}
+          projectKey={projectKey}
           onCancel={() => setEditing(false)}
           onSave={async (next) => {
             await edit.mutateAsync(next);
@@ -213,6 +225,7 @@ function CommentItem({
               key={r.id}
               comment={r}
               taskKey={taskKey}
+              projectKey={projectKey}
               replies={[]}
               currentUser={currentUser}
             />
@@ -227,6 +240,7 @@ function CommentItem({
               await reply.mutateAsync(body);
             }}
             placeholder="reply…"
+            projectKey={projectKey}
             onCancel={() => setReplying(false)}
           />
         </div>
@@ -238,10 +252,12 @@ function CommentItem({
 function NewCommentForm({
   onSubmit,
   placeholder,
+  projectKey,
   onCancel,
 }: {
   onSubmit: (body: string) => Promise<void>;
   placeholder: string;
+  projectKey: string;
   onCancel?: () => void;
 }) {
   const [body, setBody] = useState("");
@@ -261,16 +277,17 @@ function NewCommentForm({
       }}
       className="space-y-2"
     >
-      <textarea
+      <MentionTextarea
         value={body}
-        onChange={(e) => setBody(e.target.value)}
+        onChange={setBody}
+        projectKey={projectKey}
         placeholder={placeholder}
         rows={3}
         className="block w-full rounded border border-white/10 bg-ink px-3 py-2 text-sm text-chrome focus:border-accent focus:outline-none"
       />
       <div className="flex items-center justify-between">
         <span className="mono text-[10px] text-chrome-dim">
-          markdown · `code`, **bold**, etc.
+          markdown · `code`, **bold** · @handle mentions
         </span>
         <div className="flex items-center gap-2">
           {onCancel && (
@@ -297,10 +314,12 @@ function NewCommentForm({
 
 function EditCommentForm({
   initial,
+  projectKey,
   onSave,
   onCancel,
 }: {
   initial: string;
+  projectKey: string;
   onSave: (body: string) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -313,9 +332,10 @@ function EditCommentForm({
       }}
       className="space-y-2"
     >
-      <textarea
+      <MentionTextarea
         value={body}
-        onChange={(e) => setBody(e.target.value)}
+        onChange={setBody}
+        projectKey={projectKey}
         rows={4}
         className="block w-full rounded border border-white/10 bg-ink px-3 py-2 text-sm text-chrome focus:border-accent focus:outline-none"
       />

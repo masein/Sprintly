@@ -12,6 +12,7 @@ import { Pencil, X, Check, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Markdown } from "@/components/Markdown";
 import { CommentThread } from "@/components/CommentThread";
+import { MentionTextarea } from "@/components/MentionTextarea";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { Attachments } from "@/components/Attachments";
 import { Watchers } from "@/components/Watchers";
@@ -115,7 +116,7 @@ export default function TaskPage() {
         <div className="min-w-0 space-y-8">
           <Header task={task} canEdit={canManage} />
           <Description task={task} canEdit={canManage} />
-          <CommentThread taskKey={task.key} />
+          <CommentThread taskKey={task.key} projectKey={task.project_key} />
           <ActivityFeed taskKey={task.key} />
         </div>
         <aside className="space-y-6">
@@ -212,13 +213,14 @@ function Description({ task, canEdit }: { task: Task; canEdit: boolean }) {
   if (editing) {
     return (
       <section className="space-y-2">
-        <textarea
+        <MentionTextarea
           autoFocus
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={setBody}
+          projectKey={task.project_key}
           rows={8}
           className="block w-full rounded border border-white/10 bg-ink-subtle px-3 py-2 text-sm text-chrome focus:border-accent focus:outline-none"
-          placeholder="markdown — backticks for `code`, **bold**, * lists, etc."
+          placeholder="markdown — backticks for `code`, **bold**, @handle to mention, etc."
         />
         <div className="flex items-center justify-end gap-2">
           <button
