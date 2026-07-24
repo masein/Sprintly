@@ -23,6 +23,7 @@ import { TaskTimer } from "@/components/TaskTimer";
 import { Avatar } from "@/components/Avatar";
 import { deleteTask, editTask, getTask, moveTask, type Task } from "@/lib/tasks";
 import { assignTaskEpic, listEpics } from "@/lib/roadmap";
+import { assignTaskToSprint, listSprints, unassignTaskFromSprint } from "@/lib/sprints";
 import { me } from "@/lib/auth-bundle";
 import { getProject, listBoards, listMembers } from "@/lib/projects";
 import { labelColorMap, listProjectLabels } from "@/lib/labels";
@@ -310,6 +311,7 @@ function Sidebar({ task, canEdit }: { task: Task; canEdit: boolean }) {
         onChange={(v) => patch.mutate({ type: v as Task["type"] })}
       />
       <AssigneeField task={task} canEdit={canEdit} />
+      <SprintField task={task} canEdit={canEdit} />
       <EpicField task={task} canEdit={canEdit} />
       {task.due_date && <Field label="due" value={task.due_date} />}
       {task.estimate_minutes != null && (
@@ -511,6 +513,68 @@ function LabelsField({ task, canEdit }: { task: Task; canEdit: boolean }) {
           <span className="mono text-[10px] text-chrome-dim">none</span>
         )}
       </div>
+    </div>
+  );
+}
+
+// Which sprint the task lives in — or the backlog. This is the discoverable
+// way OUT of a sprint (the sprint page's remove icon being the only other
+// one). Uses the sprint assign/unassign endpoints; assigning to a different
+// sprint replaces the current one server-side.
+function SprintField({ task, canEdit }: { task: Task; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const sprintsQ = useQuery({
+    queryKey: ["sprints", task.project_key],
+    queryFn: () => listSprints(task.project_key),
+    retry: false,
+  });
+  const change = useMutation({
+    mutationFn: async (next: string) => {
+      if (next === "") {
+        // "backlog" — drop out of the current sprint (no-op if none).
+        if (task.sprint_id) await unassignTaskFromSprint(task.sprint_id, task.key);
+        return;
+      }
+      await assignTaskToSprint(next, task.key);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task", task.key] });
+      qc.invalidateQueries({ queryKey: ["tasks", task.project_id] });
+      qc.invalidateQueries({ queryKey: ["sprints", task.project_key] });
+    },
+  });
+
+  const sprints = sprintsQ.data ?? [];
+  const current = sprints.find((s) => s.id === task.sprint_id);
+  // Assignable targets: planned + active. The current sprint stays listed even
+  // if completed, so the select always shows the truth.
+  const options = sprints.filter(
+    (s) => s.state !== "completed" || s.id === task.sprint_id,
+  );
+
+  if (!canEdit) {
+    return current ? <Field label="sprint" value={current.name} /> : null;
+  }
+  if (sprints.length === 0) return null; // no sprints yet — nothing to pick
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">sprint</span>
+      <select
+        value={task.sprint_id ?? ""}
+        onChange={(e) => change.mutate(e.target.value)}
+        aria-label="sprint"
+        disabled={change.isPending}
+        className="mono max-w-[60%] truncate rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome disabled:opacity-50"
+      >
+        <option value="">backlog · none</option>
+        {options.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+            {s.state === "active" ? " · active" : s.state === "completed" ? " · completed" : ""}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

@@ -151,7 +151,10 @@ export default function DocsPage() {
               card&apos;s <span className="mono">status</span> from the task
               detail&apos;s <span className="mono">details</span> panel: the
               dropdown lists the board&apos;s real columns, so moving status there
-              moves the card on the board too.
+              moves the card on the board too. The same panel has a{" "}
+              <span className="mono">sprint</span> select — pick{" "}
+              <span className="mono">backlog · none</span> to pull a task out of
+              its sprint, or drop it straight into another one.
             </p>
           </Section>
 
