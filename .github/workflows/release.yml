@@ -45,7 +45,7 @@ jobs:
     env:
       REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'docker.netixsystem.com' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Compute short SHA
         run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
