@@ -43,6 +43,15 @@
         reverse_proxy api:8081
     }
 
+    # MinIO (presigned attachment URLs), same as prod: the prefix is stripped
+    # before proxying so the forwarded path matches what the API's SigV4
+    # signer used (/<bucket>/<key>, no /s3). Dev routing through this keeps
+    # dev/CI on the exact prod topology — a host+path signing bug shipped
+    # precisely because they diverged.
+    handle_path /s3/* {
+        reverse_proxy minio:9000
+    }
+
     # Frontend (catch-all).
     handle {
         reverse_proxy web:3000

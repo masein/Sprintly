@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, ListTree, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, Smile, TerminalSquare, Users, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { ArrowDownUp, AtSign, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, ListTree, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, Smile, TerminalSquare, Users, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -151,7 +151,10 @@ export default function DocsPage() {
               card&apos;s <span className="mono">status</span> from the task
               detail&apos;s <span className="mono">details</span> panel: the
               dropdown lists the board&apos;s real columns, so moving status there
-              moves the card on the board too.
+              moves the card on the board too. The same panel has a{" "}
+              <span className="mono">sprint</span> select — pick{" "}
+              <span className="mono">backlog · none</span> to pull a task out of
+              its sprint, or drop it straight into another one.
             </p>
           </Section>
 
@@ -197,6 +200,21 @@ export default function DocsPage() {
               can be added back — nothing is destroyed). Everyone else sees the
               same list, read-only. You can&apos;t remove the last lead — the
               server says no, and the panel shows you why.
+            </p>
+          </Section>
+
+          <Section icon={AtSign} title="Mentions">
+            <p>
+              Type <span className="mono">@</span> in a comment or a task
+              description and Sprintly suggests the project&apos;s members as
+              you type — pick with <span className="mono">↑ ↓ Enter</span> or a
+              click. Mentioned people get an in-app notification (and see the
+              bell light up live); mentions render highlighted in the text.
+              Editing a description only pings handles that are{" "}
+              <em>new</em> to it — re-saving doesn&apos;t re-ping anyone, and
+              you never get notified about your own mentions of yourself.
+              An <span className="mono">@</span> inside an email address or a
+              code span stays plain text.
             </p>
           </Section>
 

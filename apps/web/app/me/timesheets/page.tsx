@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import {
   csvExportUrl,
   fmtMinutes,
@@ -112,6 +113,15 @@ export default function TimesheetsPage() {
 
       {q.isLoading && (
         <div className="mono text-sm text-chrome-dim">compiling vibes…</div>
+      )}
+
+      {/* Keep the week nav usable — the error may be specific to this period. */}
+      {q.error && !q.isLoading && (
+        <LoadError
+          what="This week's timesheet"
+          message={(q.error as unknown as ApiError).message}
+          onRetry={() => q.refetch()}
+        />
       )}
 
       {view && view.total_minutes === 0 && (

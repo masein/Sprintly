@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { Flag, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import { getProject } from "@/lib/projects";
 import {
   createEpic,
@@ -62,6 +63,12 @@ export default function TimelinePage() {
         </AppShell>
       );
     }
+    // Not a permissions story — an empty timeline would be a lie here.
+    return (
+      <AppShell currentProjectKey={key}>
+        <LoadError what="The timeline" message={e.message} onRetry={() => epicsQ.refetch()} />
+      </AppShell>
+    );
   }
 
   const canManage = projectQ.data?.your_role === "lead";

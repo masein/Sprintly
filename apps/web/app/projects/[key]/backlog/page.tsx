@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { CheckSquare, Plus, Square, Trash2, UserPlus, UserMinus } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import { getProject } from "@/lib/projects";
 import { listSprints } from "@/lib/sprints";
 import { createTask } from "@/lib/tasks";
@@ -67,6 +68,12 @@ export default function BacklogPage() {
         </AppShell>
       );
     }
+    // Without this, a failed fetch fell through to "Backlog zero" — a lie.
+    return (
+      <AppShell currentProjectKey={key}>
+        <LoadError what="The backlog" message={e.message} onRetry={() => backlogQ.refetch()} />
+      </AppShell>
+    );
   }
 
   const canManage = projectQ.data?.your_role === "lead";
