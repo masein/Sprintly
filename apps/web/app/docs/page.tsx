@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { ArrowDownUp, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, ListTree, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, Smile, TerminalSquare, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { ArrowDownUp, AtSign, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, ListTree, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, Smile, TerminalSquare, Users, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -69,8 +69,10 @@ export default function DocsPage() {
               background worker drops a fresh task each interval (it catches up
               without spamming if it falls behind). The{" "}
               <span className="mono">backlog</span> (everything with no sprint)
-              has multi-select: tick a few, then assign, drop into a sprint, or
-              delete them in one action.
+              has an inline <span className="mono">+ add a task</span> for filing
+              a sprint-less task straight into the pile, plus multi-select: tick
+              a few, then assign, drop into a sprint, or delete them in one
+              action.
             </p>
           </Section>
 
@@ -105,15 +107,21 @@ export default function DocsPage() {
             <p>
               Filter the board with chips, then group it into swimlanes by{" "}
               <span className="mono">assignee</span>,{" "}
-              <span className="mono">label</span>, or{" "}
-              <span className="mono">priority</span> from the{" "}
-              <span className="mono">swimlanes</span> control. Save a filter +
-              grouping as a named <span className="mono">view</span> to reopen
-              later; tick <span className="mono">shared</span> and the rest of
-              the project can pick it too (yours to edit, theirs to use). In a
-              grouped view cards still drag between columns within their lane —
-              changing lane means changing the card&apos;s assignee, label, or
-              priority on the card itself.
+              <span className="mono">label</span>,{" "}
+              <span className="mono">priority</span>, or{" "}
+              <span className="mono">sprint</span> from the{" "}
+              <span className="mono">swimlanes</span> control. Grouping by{" "}
+              <span className="mono">sprint</span> under{" "}
+              <span className="mono">all tasks</span> puts the active sprint in
+              the top lane, any other sprints with cards below it, and the
+              backlog / no-sprint pile last — so you can tell committed work
+              apart from everything else at a glance. Save a filter + grouping
+              as a named <span className="mono">view</span> to reopen later; tick{" "}
+              <span className="mono">shared</span> and the rest of the project
+              can pick it too (yours to edit, theirs to use). In a grouped view
+              cards still drag between columns within their lane — changing lane
+              means changing the card&apos;s assignee, label, priority, or
+              sprint on the card itself.
             </p>
             <p>
               The <span className="mono">scope</span> control sets which sprint
@@ -123,8 +131,8 @@ export default function DocsPage() {
               for the whole project (sprint cards plus the backlog), or pick a
               specific sprint to look back. With no sprint running the control
               reads <span className="mono">all tasks (no active sprint)</span>.
-              Column counts follow the scope, and your choice is remembered per
-              project.
+              Column counts follow the scope. Switching scope is a session-only
+              move — reopen the board and a running sprint takes the focus again.
             </p>
             <p>
               Click anywhere on a card to open it — the small{" "}
@@ -133,13 +141,20 @@ export default function DocsPage() {
               that doesn&apos;t travel opens it). The{" "}
               <span className="mono">+ add card</span> box stays available in
               swimlane mode and drops the new card into the lane you add it from
-              (its assignee / label / priority). <kbd>Esc</kbd> dismisses any
+              (its assignee / label / priority). It also inherits the board&apos;s
+              scope — add a card while scoped to a sprint and it joins that
+              sprint, so it doesn&apos;t vanish from the view you&apos;re looking
+              at; under <span className="mono">all tasks</span> it stays a
+              sprint-less backlog card. <kbd>Esc</kbd> dismisses any
               inline editor — add-card, add-column, a column rename — the same as
               the <span className="mono">:q cancel</span> control. Change a
               card&apos;s <span className="mono">status</span> from the task
               detail&apos;s <span className="mono">details</span> panel: the
               dropdown lists the board&apos;s real columns, so moving status there
-              moves the card on the board too.
+              moves the card on the board too. The same panel has a{" "}
+              <span className="mono">sprint</span> select — pick{" "}
+              <span className="mono">backlog · none</span> to pull a task out of
+              its sprint, or drop it straight into another one.
             </p>
           </Section>
 
@@ -170,6 +185,36 @@ export default function DocsPage() {
               picker hands the task to any project member — or{" "}
               <span className="mono">unassigned</span>. Assigning notifies the new
               owner and shows their avatar on the card.
+            </p>
+          </Section>
+
+          <Section icon={Users} title="Members & roles">
+            <p>
+              The <span className="mono">members</span> button on the project
+              page shows who&apos;s on it — avatar, handle, and role. A{" "}
+              <span className="mono">lead</span> can add an existing user (find
+              them by handle or email as you type), change anyone&apos;s role
+              between <span className="mono">lead</span>,{" "}
+              <span className="mono">contributor</span>, and{" "}
+              <span className="mono">watcher</span>, and remove someone (they
+              can be added back — nothing is destroyed). Everyone else sees the
+              same list, read-only. You can&apos;t remove the last lead — the
+              server says no, and the panel shows you why.
+            </p>
+          </Section>
+
+          <Section icon={AtSign} title="Mentions">
+            <p>
+              Type <span className="mono">@</span> in a comment or a task
+              description and Sprintly suggests the project&apos;s members as
+              you type — pick with <span className="mono">↑ ↓ Enter</span> or a
+              click. Mentioned people get an in-app notification (and see the
+              bell light up live); mentions render highlighted in the text.
+              Editing a description only pings handles that are{" "}
+              <em>new</em> to it — re-saving doesn&apos;t re-ping anyone, and
+              you never get notified about your own mentions of yourself.
+              An <span className="mono">@</span> inside an email address or a
+              code span stays plain text.
             </p>
           </Section>
 
@@ -358,6 +403,26 @@ export default function DocsPage() {
               formatted message posted to their webhook URL. Pick which board
               events fire it, hit <span className="mono">send test</span>, and
               every attempt — code, retry, error — shows in the deliveries list.
+            </p>
+          </Section>
+
+          <Section icon={Users} title="Admin: users & invites">
+            <p>
+              <span className="mono">/admin</span> (admins only). The{" "}
+              <span className="mono">users</span> tab is the account desk:
+              search anyone, flip their global role (
+              <span className="mono">admin / member / viewer</span>), edit
+              their <span className="mono">email</span> inline (the pencil next
+              to it — duplicates are refused, and they log in with the new
+              address immediately), suspend/reactivate, or mint a single-use{" "}
+              <span className="mono">password reset</span> link to hand them.
+              The <span className="mono">invites</span> tab mints one-shot
+              signup links with a role attached — an{" "}
+              <span className="mono">admin</span> invite makes an admin, so
+              mind who you hand it to. Give it an email and Sprintly also
+              sends it (when SMTP is configured). The link is shown once;
+              lose it, revoke it, mint another. Every action here lands in the
+              audit log.
             </p>
           </Section>
 

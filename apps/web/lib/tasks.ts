@@ -21,6 +21,7 @@ export type Task = {
   parent_task_id: string | null;
   parent_key: string | null;
   epic_id: string | null;
+  sprint_id: string | null;
   estimate_minutes: number | null;
   story_points: number | null;
   due_date: string | null;

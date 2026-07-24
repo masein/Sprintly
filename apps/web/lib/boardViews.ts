@@ -5,7 +5,7 @@
 import { api } from "./api";
 import type { Chip } from "@/components/BoardFilters";
 
-export type GroupBy = "none" | "assignee" | "label" | "priority";
+export type GroupBy = "none" | "assignee" | "label" | "priority" | "sprint";
 
 export type BoardView = {
   id: string;

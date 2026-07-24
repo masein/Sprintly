@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import { Plus, X, Vault as VaultIcon } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { LoadError } from "@/components/LoadError";
 import { VaultItemRow } from "@/components/VaultItemRow";
 import {
   createVaultItem,
@@ -59,6 +60,11 @@ export default function VaultPage() {
       router.push("/login");
       return null;
     }
+    return (
+      <AppShell currentProjectKey={projectKey}>
+        <LoadError what="The vault" message={e.message} onRetry={() => itemsQ.refetch()} />
+      </AppShell>
+    );
   }
 
   const grouped = (itemsQ.data ?? []).reduce<Record<string, typeof itemsQ.data>>(

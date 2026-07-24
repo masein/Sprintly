@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 use uuid::Uuid;
+use validator::Validate;
 
 use crate::{
     domain::permissions::Role as GlobalRole,
@@ -46,6 +47,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/users/:id/suspend", post(suspend))
         .route("/admin/users/:id/reactivate", post(reactivate))
         .route("/admin/users/:id/role", post(set_role))
+        .route("/admin/users/:id/email", post(set_email))
         .route("/admin/users/:id/reset-password", post(reset_password))
         .route("/admin/audit", get(list_audit))
         .route("/admin/health", get(health))
@@ -75,6 +77,12 @@ pub struct ListUsersQuery {
 #[derive(Debug, Deserialize)]
 pub struct SetRoleReq {
     pub role: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct SetEmailReq {
+    #[validate(email)]
+    pub email: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -273,6 +281,51 @@ async fn set_role(
         "user.role",
         Some(id),
         &serde_json::json!({ "new_role": req.role }),
+        &headers,
+        ConnectInfo(addr),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Change a user's login email. Admin-only, audit-logged. The column is
+/// citext with a unique index, so case-variants collide — surfaced as a
+/// friendly conflict rather than a 500.
+async fn set_email(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<SetEmailReq>,
+) -> AppResult<impl IntoResponse> {
+    require_admin(&user)?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
+    let email = req.email.trim().to_string();
+
+    let mut tx = state.db.begin().await?;
+    let updated =
+        sqlx::query(r#"UPDATE users SET email = $2 WHERE id = $1 AND deleted_at IS NULL"#)
+            .bind(id)
+            .bind(&email)
+            .execute(&mut *tx)
+            .await;
+    match updated {
+        Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
+            return Err(AppError::Conflict("that email is already taken".into()));
+        }
+        Err(e) => return Err(e.into()),
+        Ok(res) if res.rows_affected() == 0 => return Err(AppError::NotFound),
+        Ok(_) => {}
+    }
+    write_admin_audit(
+        &mut tx,
+        user.id,
+        "user.email",
+        Some(id),
+        &serde_json::json!({ "new_email": email }),
         &headers,
         ConnectInfo(addr),
     )

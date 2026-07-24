@@ -7,26 +7,32 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Activity, AlertTriangle, Check, Cog, Database, Download, RotateCcw,
-  Server, Shield, Users, Webhook,
+  Activity, AlertTriangle, Ban, Check, Cog, Copy, Database, Download, Mail,
+  Pencil, RotateCcw, Server, Shield, Users, Webhook,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { StatTile } from "@/components/StatTile";
 import {
+  createInvite,
   getHealth,
   listAdminAudit,
   listAdminUsers,
   listBackups,
+  listInvites,
   reactivateUser,
   resetUserPassword,
+  revokeInvite,
+  setUserEmail,
   setUserRole,
   startBackup,
   suspendUser,
   type AdminUserRow,
+  type CreatedInvite,
+  type InviteRow,
 } from "@/lib/admin";
 import type { ApiError } from "@/lib/api";
 
-type Tab = "users" | "audit" | "health" | "backups" | "webhooks";
+type Tab = "users" | "invites" | "audit" | "health" | "backups" | "webhooks";
 
 export default function AdminPage() {
   const router = useRouter();
@@ -46,6 +52,7 @@ export default function AdminPage() {
 
       <nav className="mb-6 flex gap-1 border-b border-white/10">
         <TabButton current={tab} self="users"    onClick={() => setTab("users")}    icon={Users}>users</TabButton>
+        <TabButton current={tab} self="invites"  onClick={() => setTab("invites")}  icon={Mail}>invites</TabButton>
         <TabButton current={tab} self="audit"    onClick={() => setTab("audit")}    icon={Shield}>audit</TabButton>
         <TabButton current={tab} self="health"   onClick={() => setTab("health")}   icon={Activity}>health</TabButton>
         <TabButton current={tab} self="backups"  onClick={() => setTab("backups")}  icon={Database}>backups</TabButton>
@@ -53,6 +60,7 @@ export default function AdminPage() {
       </nav>
 
       {tab === "users" && <UsersTab onAuthExpired={() => router.push("/login")} />}
+      {tab === "invites" && <InvitesTab />}
       {tab === "audit" && <AuditTab />}
       {tab === "health" && <HealthTab />}
       {tab === "backups" && <BackupsTab />}
@@ -164,9 +172,7 @@ function UsersTab({ onAuthExpired }: { onAuthExpired: () => void }) {
           >
             <div className="min-w-0 flex-1">
               <div className="mono text-sm text-chrome">@{u.handle}</div>
-              <div className="mono text-[11px] text-chrome-dim">
-                {u.email} · {u.display_name}
-              </div>
+              <EmailCell user={u} />
             </div>
             <span
               className={`mono rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
@@ -221,6 +227,270 @@ function UsersTab({ onAuthExpired }: { onAuthExpired: () => void }) {
             </button>
           </li>
         ))}
+      </ul>
+    </div>
+  );
+}
+
+// One user row's email: read-only with a pencil, or an inline edit. Enter
+// saves, Esc cancels; a duplicate email comes back as the server's conflict
+// message, not a silent shrug.
+function EmailCell({ user }: { user: AdminUserRow }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [email, setEmail] = useState(user.email);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: () => setUserEmail(user.id, email.trim()),
+    onSuccess: () => {
+      setEditing(false);
+      setError(null);
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+    onError: (e) => setError((e as unknown as ApiError).message ?? "couldn't change it"),
+  });
+
+  if (!editing) {
+    return (
+      <div className="mono flex min-w-0 items-center gap-1 text-[11px] text-chrome-dim">
+        <span className="truncate">{user.email}</span>
+        <button
+          type="button"
+          onClick={() => {
+            setEmail(user.email);
+            setEditing(true);
+          }}
+          aria-label={`edit email for @${user.handle}`}
+          className="shrink-0 text-chrome-dim hover:text-chrome"
+        >
+          <Pencil size={10} />
+        </button>
+        <span className="truncate">· {user.display_name}</span>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (email.trim()) save.mutate();
+      }}
+      className="flex flex-wrap items-center gap-1"
+    >
+      <input
+        autoFocus
+        type="email"
+        value={email}
+        onChange={(e) => {
+          setEmail(e.target.value);
+          if (error) setError(null);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            setEditing(false);
+            setError(null);
+          }
+        }}
+        aria-label={`new email for @${user.handle}`}
+        className="mono w-56 rounded border border-white/10 bg-ink px-1.5 py-0.5 text-[11px] text-chrome focus:border-accent focus:outline-none"
+      />
+      <button type="submit" disabled={save.isPending} className="mono text-[10px] text-accent">
+        save
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setEditing(false);
+          setError(null);
+        }}
+        className="mono text-[10px] text-chrome-dim"
+      >
+        cancel
+      </button>
+      {error && <span className="mono text-[10px] text-red-300">{error}</span>}
+    </form>
+  );
+}
+
+// ─── Invites ────────────────────────────────────────────────────────────────
+
+function inviteState(r: InviteRow): "outstanding" | "used" | "expired" {
+  if (r.consumed_at) return "used";
+  return new Date(r.expires_at) <= new Date() ? "expired" : "outstanding";
+}
+
+function InvitesTab() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["admin-invites"], queryFn: listInvites, retry: false });
+
+  const [emailHint, setEmailHint] = useState("");
+  const [role, setRole] = useState<InviteRow["suggested_role"]>("member");
+  const [minted, setMinted] = useState<CreatedInvite | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const mint = useMutation({
+    mutationFn: () =>
+      createInvite({ email_hint: emailHint.trim() || undefined, suggested_role: role }),
+    onSuccess: (inv) => {
+      setMinted(inv);
+      setCopied(false);
+      setEmailHint("");
+      setError(null);
+      qc.invalidateQueries({ queryKey: ["admin-invites"] });
+    },
+    onError: (e) => setError((e as unknown as ApiError).message ?? "couldn't mint it"),
+  });
+  const revoke = useMutation({
+    mutationFn: (id: string) => revokeInvite(id),
+    onSuccess: () => {
+      setError(null);
+      qc.invalidateQueries({ queryKey: ["admin-invites"] });
+    },
+    onError: (e) => setError((e as unknown as ApiError).message ?? "couldn't revoke it"),
+  });
+
+  if (q.error && (q.error as unknown as ApiError).status === 403) {
+    return (
+      <div className="mono rounded border border-white/10 bg-ink-subtle p-6 text-sm text-chrome-dim">
+        Admin-only. Ask another admin to flip your role.
+      </div>
+    );
+  }
+
+  const rows = q.data ?? [];
+
+  return (
+    <div className="space-y-4">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          mint.mutate();
+        }}
+        className="space-y-2 rounded-lg border border-white/10 bg-ink-subtle p-4"
+      >
+        <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
+          mint an invite link
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="email"
+            value={emailHint}
+            onChange={(e) => setEmailHint(e.target.value)}
+            placeholder="email (optional — also sends it, if SMTP is up)"
+            aria-label="invitee email"
+            className="mono w-80 rounded border border-white/10 bg-ink px-2 py-1 text-xs text-chrome focus:border-accent focus:outline-none placeholder:text-chrome-dim/50 placeholder:italic"
+          />
+          <label className="mono flex items-center gap-1 text-[11px] text-chrome-dim">
+            as
+            <select
+              aria-label="invited role"
+              value={role}
+              onChange={(e) => setRole(e.target.value as InviteRow["suggested_role"])}
+              className="rounded border border-white/10 bg-ink px-1.5 py-0.5 text-[11px] text-chrome"
+            >
+              <option value="member">member</option>
+              <option value="admin">admin</option>
+              <option value="viewer">viewer</option>
+            </select>
+          </label>
+          <button
+            type="submit"
+            disabled={mint.isPending}
+            className="mono rounded bg-accent px-3 py-1 text-xs text-accent-fg disabled:opacity-50"
+          >
+            {mint.isPending ? "minting…" : "mint invite link"}
+          </button>
+        </div>
+        <p className="mono text-[11px] text-chrome-dim">
+          One link, one signup, expires in a week. An admin invite makes an
+          admin — mind who you hand it to.
+        </p>
+      </form>
+
+      {minted && (
+        <div className="space-y-1 rounded border border-accent/30 bg-accent/5 p-3">
+          <div className="mono text-[11px] uppercase tracking-widest text-chrome-dim">
+            invite link · shown once
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <code data-testid="invite-url" className="mono min-w-0 flex-1 break-all rounded bg-ink px-2 py-1 text-xs text-chrome">
+              {minted.url}
+            </code>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(minted.url).then(
+                  () => setCopied(true),
+                  () => setCopied(false),
+                );
+              }}
+              className="mono inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              <Copy size={11} /> {copied ? "copied" : "copy"}
+            </button>
+          </div>
+          <p className="mono text-[11px] text-chrome-dim">
+            {minted.suggested_role} · expires {minted.expires_at.slice(0, 10)} —
+            lose it and it&apos;s gone; revoke and re-mint.
+          </p>
+        </div>
+      )}
+
+      {error && (
+        <div role="alert" className="mono rounded border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-[11px] text-red-200">
+          {error}
+        </div>
+      )}
+
+      <ul className="space-y-1">
+        {rows.map((r) => {
+          const st = inviteState(r);
+          return (
+            <li
+              key={r.id}
+              className="flex flex-wrap items-center gap-3 rounded border border-white/10 bg-ink-subtle px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="mono truncate text-xs text-chrome">
+                  {r.email_hint ?? "anyone with the link"}
+                </div>
+                <div className="mono text-[11px] text-chrome-dim">
+                  as {r.suggested_role} · minted {r.created_at.slice(0, 10)} ·{" "}
+                  {st === "outstanding" ? `expires ${r.expires_at.slice(0, 10)}` : st}
+                </div>
+              </div>
+              <span
+                className={`mono rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
+                  st === "used"
+                    ? "border-emerald-500/30 text-emerald-300"
+                    : st === "expired"
+                      ? "border-white/10 text-chrome-dim"
+                      : "border-accent/40 text-accent"
+                }`}
+              >
+                {st}
+              </span>
+              {st === "outstanding" && (
+                <button
+                  type="button"
+                  onClick={() => revoke.mutate(r.id)}
+                  className="mono inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] text-chrome-dim hover:border-red-500/40 hover:text-red-300"
+                >
+                  <Ban size={10} /> revoke
+                </button>
+              )}
+            </li>
+          );
+        })}
+        {rows.length === 0 && q.isSuccess && (
+          <li className="mono rounded border border-dashed border-white/10 p-6 text-center text-xs text-chrome-dim">
+            No invites minted yet. The register page also works, if signup is open.
+          </li>
+        )}
       </ul>
     </div>
   );

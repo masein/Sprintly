@@ -4,7 +4,7 @@
 // have a real component library set up in M2. Voice per docs/PERSONALITY.md:
 // monospace labels, no exclamation marks, error messages are honest.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   login,
@@ -33,6 +33,14 @@ export function AuthForm({ mode }: { mode: Mode }) {
   // Set when a provisioned account must set a new password before getting in.
   const [resetChallenge, setResetChallenge] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState("");
+
+  // Minted invite links land here as /register?invite=<token> — prefill the
+  // field so the invitee doesn't have to fish the token out of the URL.
+  useEffect(() => {
+    if (mode !== "register" || typeof window === "undefined") return;
+    const t = new URLSearchParams(window.location.search).get("invite");
+    if (t) setInvite(t);
+  }, [mode]);
 
   function done() {
     router.push("/");

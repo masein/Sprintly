@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, CheckCircle2, Plus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { BurndownChart } from "@/components/BurndownChart";
+import { LoadError } from "@/components/LoadError";
 import { Markdown } from "@/components/Markdown";
 import {
   assignTaskToSprint,
@@ -71,6 +72,11 @@ export default function SprintDetailPage() {
       router.push("/login");
       return null;
     }
+    return (
+      <AppShell>
+        <LoadError what="This sprint" message={e.message} onRetry={() => sprintQ.refetch()} />
+      </AppShell>
+    );
   }
 
   const sprint = sprintQ.data;

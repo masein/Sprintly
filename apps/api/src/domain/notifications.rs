@@ -46,6 +46,17 @@ pub fn parse_mentions(body: &str) -> Vec<String> {
     out
 }
 
+/// Mentions present in `new` but not in `old` — the set to notify when a
+/// text is edited, so re-saving a description doesn't re-ping everyone
+/// already mentioned in it.
+pub fn new_mentions(old: &str, new: &str) -> Vec<String> {
+    let before = parse_mentions(old);
+    parse_mentions(new)
+        .into_iter()
+        .filter(|h| !before.contains(h))
+        .collect()
+}
+
 /// Resolve mention handles (lowercased) to active users' ids.
 pub async fn resolve_handles(db: &PgPool, handles: &[String]) -> AppResult<Vec<Uuid>> {
     if handles.is_empty() {
@@ -140,5 +151,28 @@ mod tests {
     #[test]
     fn stops_at_punctuation() {
         assert_eq!(parse_mentions("ping @dave, thanks!"), vec!["dave"]);
+    }
+
+    #[test]
+    fn new_mentions_only_reports_added_handles() {
+        assert_eq!(
+            new_mentions("cc @alice", "cc @alice — also @bob_2 please"),
+            vec!["bob_2"]
+        );
+    }
+
+    #[test]
+    fn new_mentions_ignores_case_and_removals() {
+        // @Alice was already there (case-insensitively); dropping @carol
+        // notifies no one.
+        assert_eq!(
+            new_mentions("@Alice and @carol", "@alice only"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn new_mentions_from_empty_is_all_of_them() {
+        assert_eq!(new_mentions("", "@alice @bob_2"), vec!["alice", "bob_2"]);
     }
 }

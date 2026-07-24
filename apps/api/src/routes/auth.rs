@@ -126,16 +126,23 @@ async fn register(
         .fetch_one(&state.db)
         .await?;
 
+    let presented_token = req
+        .invite_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty());
     let (assigned_role, consumed_invite_id): (String, Option<Uuid>) = if user_count == 0 {
         ("admin".into(), None)
+    } else if let Some(token) = presented_token {
+        // An explicit invite wins even when open signup is on: it carries the
+        // role an admin chose, and a single-use token someone pasted must be
+        // consumed (or rejected if stale) — never silently ignored.
+        let (role, invite_id) = consume_invite(&state.db, token).await?;
+        (role, Some(invite_id))
     } else if state.cfg.open_signup {
         ("member".into(), None)
     } else {
-        let Some(token) = req.invite_token.as_deref() else {
-            return Err(AppError::Forbidden);
-        };
-        let (role, invite_id) = consume_invite(&state.db, token).await?;
-        (role, Some(invite_id))
+        return Err(AppError::Forbidden);
     };
 
     // Hash password.
