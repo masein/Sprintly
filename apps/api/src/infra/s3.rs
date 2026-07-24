@@ -69,8 +69,9 @@ impl<'a> Presigner<'a> {
         // Canonical URI: /<bucket>/<key> with the key uri-encoded (preserving slashes).
         let canonical_uri = format!("/{}/{}", self.cfg.bucket, encode_uri_path(key));
 
-        // Host = whatever the user's browser will hit, no scheme/port stripping —
-        // SigV4 includes the port in the host header iff non-default.
+        // Host = what the browser's Host header will carry: host:port only —
+        // scheme and any proxy path stripped (see host_from). SigV4 includes
+        // the port in the host header iff non-default.
         let host = host_from(self.public_endpoint);
 
         // Build query params, ALPHABETICALLY by key. AWS requires sorted order.
@@ -132,11 +133,7 @@ fn host_from(endpoint: &str) -> String {
     let stripped = endpoint
         .trim_start_matches("https://")
         .trim_start_matches("http://");
-    stripped
-        .split('/')
-        .next()
-        .unwrap_or(stripped)
-        .to_string()
+    stripped.split('/').next().unwrap_or(stripped).to_string()
 }
 
 fn sha256_hex(b: &[u8]) -> String {
@@ -224,8 +221,14 @@ mod tests {
     fn host_from_strips_scheme_and_path() {
         // A path-based public endpoint (reverse proxy in front of MinIO) must
         // sign only host:port — the Host header MinIO actually verifies.
-        assert_eq!(host_from("http://212.33.206.34:8083/s3"), "212.33.206.34:8083");
-        assert_eq!(host_from("https://sprintly.example/s3/"), "sprintly.example");
+        assert_eq!(
+            host_from("http://212.33.206.34:8083/s3"),
+            "212.33.206.34:8083"
+        );
+        assert_eq!(
+            host_from("https://sprintly.example/s3/"),
+            "sprintly.example"
+        );
         assert_eq!(host_from("http://localhost:9000"), "localhost:9000");
         assert_eq!(host_from("http://localhost:9000/"), "localhost:9000");
     }
