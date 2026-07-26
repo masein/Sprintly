@@ -362,6 +362,14 @@ export default function DocsPage() {
               floats). PDF + CSV exports.
             </p>
             <p>
+              The <span className="mono">clockwork</span> panel on My Day and
+              the <span className="mono">top contributors</span> panel on a
+              project&apos;s dashboard both step through past weeks with{" "}
+              <span className="mono">‹ ›</span> — history isn&apos;t locked to
+              the current week. On the dashboard, non-leads see their own logs
+              only.
+            </p>
+            <p>
               The <span className="mono">Time</span> tab on a project&apos;s{" "}
               <span className="mono">metrics</span> page reports logged time over
               an arbitrary date range <em>and/or</em> a sprint — presets for last
