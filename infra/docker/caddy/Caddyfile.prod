@@ -52,13 +52,16 @@
         # HSTS would wrongly pin clients to HTTPS on this host.
     }
 
-    # WebSocket upgrade.
-    @ws {
-        path /ws /ws/*
-        header Connection *Upgrade*
-        header Upgrade websocket
+    # WebSocket upgrade. Must live inside a handle block: Caddy runs `handle`
+    # directives before bare `reverse_proxy` ones, so the catch-all handle
+    # below was swallowing /ws (→ web:3000 → 404) and a top-level
+    # `reverse_proxy @ws` never saw the request. No header matcher — /ws
+    # serves nothing but the socket, and the api answers non-upgrade GETs
+    # with a plain 4xx anyway.
+    @ws path /ws /ws/*
+    handle @ws {
+        reverse_proxy api:8081
     }
-    reverse_proxy @ws api:8081
 
     # API.
     handle /api/* {

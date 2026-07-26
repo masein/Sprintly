@@ -65,6 +65,12 @@ pub fn router(state: AppState) -> Router {
         .nest("/api/v1", v1)
         // Bare /healthz too, for orchestrators that prefer root probes.
         .merge(probes)
+        // The realtime socket lives at bare /ws — that's what the reverse
+        // proxy (dev + prod Caddyfiles) and the web client both dial. It was
+        // only reachable at /api/v1/ws before, so behind the proxy every
+        // upgrade 404'd and realtime silently never worked; the /api/v1/ws
+        // alias stays for anything that found the old path.
+        .merge(routes::ws::router())
         .layer(axum_mw::from_fn(own_mw::csrf::csrf_guard))
         .with_state(state)
         .layer(
