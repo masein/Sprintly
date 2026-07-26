@@ -85,7 +85,8 @@ export default function DocsPage() {
               <span className="mono">milestones</span> as dated markers. Assign a
               task to an epic from the task&apos;s sidebar. Dragging a bar to
               reschedule is a v2 idea; for now, edit an epic&apos;s dates in its
-              row and the bar moves.
+              row and the bar moves — and click its colour swatch to repaint
+              it whenever, not just at creation.
             </p>
           </Section>
 

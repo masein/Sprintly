@@ -337,14 +337,45 @@ function EpicRow({
   onChange: () => void;
   onDelete: () => void;
 }) {
+  const [picking, setPicking] = useState(false);
   const save = useMutation({
     mutationFn: (body: Partial<Epic>) => updateEpic(epic.id, body),
     onSuccess: onChange,
   });
   const pct = epic.task_count > 0 ? Math.round((epic.done_count / epic.task_count) * 100) : 0;
   return (
-    <li className="flex items-center gap-2 rounded border border-white/10 px-2 py-1.5">
-      <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: epic.color }} aria-hidden />
+    <li className="flex flex-wrap items-center gap-2 rounded border border-white/10 px-2 py-1.5">
+      {canManage ? (
+        <button
+          type="button"
+          aria-label={`${epic.name} color`}
+          title="change color"
+          onClick={() => setPicking((v) => !v)}
+          className="h-3 w-3 shrink-0 rounded-sm ring-offset-1 transition hover:ring-1 hover:ring-white/40"
+          style={{ background: epic.color }}
+        />
+      ) : (
+        <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: epic.color }} aria-hidden />
+      )}
+      {picking && (
+        <span className="flex items-center gap-1" role="group" aria-label={`${epic.name} color options`}>
+          {SWATCHES.map((s) => (
+            <button
+              type="button"
+              key={s}
+              aria-label={`recolor ${s}`}
+              onClick={() => {
+                setPicking(false);
+                if (s !== epic.color) save.mutate({ color: s });
+              }}
+              className={`h-3.5 w-3.5 rounded-sm transition hover:scale-110 ${
+                s === epic.color ? "ring-1 ring-white/70" : ""
+              }`}
+              style={{ background: s }}
+            />
+          ))}
+        </span>
+      )}
       <span className="mono truncate text-xs text-chrome">{epic.name}</span>
       <span className="mono text-[10px] text-chrome-dim">
         {epic.done_count}/{epic.task_count}
