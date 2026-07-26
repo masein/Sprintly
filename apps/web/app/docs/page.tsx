@@ -101,6 +101,13 @@ export default function DocsPage() {
               by key/title in search and shows up in your task list — it just
               stops masquerading as independent top-level work.
             </p>
+            <p>
+              Time rolls up: a parent&apos;s{" "}
+              <span className="mono">tracked</span> line in the timer panel is
+              its own logs <em>plus</em> its direct subtasks&apos; (
+              <span className="mono">tracked 3h · 1h in subtasks</span>) — so
+              the parent tells the whole story without opening each child.
+            </p>
           </Section>
 
           <Section icon={Rows3} title="Board views & swimlanes">
@@ -368,6 +375,14 @@ export default function DocsPage() {
               approved week locks logs in its range. Monthly payroll
               aggregates billable minutes × your hourly rate (cents math, no
               floats). PDF + CSV exports.
+            </p>
+            <p>
+              The <span className="mono">clockwork</span> panel on My Day and
+              the <span className="mono">top contributors</span> panel on a
+              project&apos;s dashboard both step through past weeks with{" "}
+              <span className="mono">‹ ›</span> — history isn&apos;t locked to
+              the current week. On the dashboard, non-leads see their own logs
+              only.
             </p>
             <p>
               The <span className="mono">Time</span> tab on a project&apos;s{" "}

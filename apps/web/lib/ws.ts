@@ -112,6 +112,13 @@ function routeToQueryCache(e: ServerEvent, qc: QueryClient) {
     case "task_deleted":
       qc.invalidateQueries({ queryKey: ["tasks", e.data.project_id] });
       qc.invalidateQueries({ queryKey: ["task", e.data.key] });
+      // Overview surfaces fold task state into aggregates — refresh the ones
+      // that are actually mounted (invalidate no-ops for inactive keys).
+      // "My day" was the reported offender: it sat stale until a manual
+      // reload because nothing ever told it the world had changed.
+      qc.invalidateQueries({ queryKey: ["my-dashboard"] });
+      qc.invalidateQueries({ queryKey: ["project-dashboard"] });
+      qc.invalidateQueries({ queryKey: ["my-tasks"] });
       break;
     case "comment_created":
       qc.invalidateQueries({ queryKey: ["task", e.data.task_id] });
@@ -119,6 +126,7 @@ function routeToQueryCache(e: ServerEvent, qc: QueryClient) {
       break;
     case "notification_created":
       qc.invalidateQueries({ queryKey: ["notifications"] });
+      qc.invalidateQueries({ queryKey: ["my-dashboard"] });
       break;
     default:
       break;

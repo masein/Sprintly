@@ -96,6 +96,9 @@ export type RetroNote = {
   body: string;
   anonymous: boolean;
   author_handle: string | null;
+  /** Hidden (null) when anonymous — used to spot the viewer's own notes. */
+  author_id: string | null;
+  edited: boolean;
   vote_count: number;
   you_voted: boolean;
   promoted_task_key: string | null;

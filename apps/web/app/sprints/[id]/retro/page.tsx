@@ -8,7 +8,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ThumbsUp, Trash2, ArrowRight, Lock, Sparkles, X,
+  ThumbsUp, Trash2, ArrowRight, Lock, Pencil, Sparkles,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { LoadError } from "@/components/LoadError";
@@ -17,6 +17,7 @@ import {
   closeRetro,
   createNote,
   deleteNote,
+  editNote,
   editSprint,
   getRetro,
   getSprint,
@@ -314,21 +315,19 @@ function Column({
       </header>
 
       <ul className="space-y-2">
-        {notes.map((n) => (
-          <NoteCard
-            key={n.id}
-            note={n}
-            sprintId={sprintId}
-            canEdit={
-              isAdmin ||
-              (!n.anonymous && n.author_handle != null && currentUserId != null
-                ? false // we don't have user_id of author on the DTO; rely on author_handle for display
-                : false)
-            }
-            canDelete={isAdmin === true}
-            allowPromote={kind === "action_item" && !readonly}
-          />
-        ))}
+        {notes.map((n) => {
+          const mine = !n.anonymous && n.author_id != null && n.author_id === currentUserId;
+          return (
+            <NoteCard
+              key={n.id}
+              note={n}
+              sprintId={sprintId}
+              canEdit={!readonly && (isAdmin === true || mine)}
+              canDelete={!readonly && (isAdmin === true || mine)}
+              allowPromote={kind === "action_item" && !readonly}
+            />
+          );
+        })}
       </ul>
 
       {!readonly && (
@@ -372,16 +371,19 @@ function Column({
 function NoteCard({
   note,
   sprintId,
+  canEdit,
   canDelete,
   allowPromote,
 }: {
   note: RetroNote;
   sprintId: string;
-  canEdit?: boolean;
+  canEdit: boolean;
   canDelete: boolean;
   allowPromote: boolean;
 }) {
   const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(note.body);
   const toggleVote = useMutation({
     mutationFn: () =>
       note.you_voted ? unvoteOnNote(note.id) : voteOnNote(note.id),
@@ -396,13 +398,60 @@ function NoteCard({
     mutationFn: () => deleteNote(note.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["retro", sprintId] }),
   });
+  const save = useMutation({
+    mutationFn: () => editNote(note.id, draft),
+    onSuccess: () => {
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: ["retro", sprintId] });
+    },
+    onError: (e) => alert((e as unknown as ApiError).message),
+  });
 
   return (
     <li className="rounded border border-white/10 bg-ink p-2 text-sm">
-      <div className="whitespace-pre-wrap text-chrome">{note.body}</div>
+      {editing ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (draft.trim()) save.mutate();
+          }}
+          className="space-y-1"
+        >
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={2}
+            aria-label="edit note"
+            className="block w-full rounded border border-white/10 bg-ink-subtle px-2 py-1 text-xs text-chrome focus:border-accent focus:outline-none"
+          />
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setDraft(note.body);
+              }}
+              className="mono text-[10px] text-chrome-dim hover:text-chrome"
+            >
+              cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!draft.trim() || save.isPending}
+              className="mono rounded bg-accent px-2 py-0.5 text-[10px] text-accent-fg disabled:opacity-50"
+            >
+              save
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="whitespace-pre-wrap text-chrome">{note.body}</div>
+      )}
       <div className="mt-1.5 flex items-center gap-2 text-[10px]">
         <span className="mono text-chrome-dim">
           {note.anonymous ? "anonymous" : note.author_handle ? `@${note.author_handle}` : "—"}
+          {note.edited ? " · edited" : ""}
         </span>
         <button
           type="button"
@@ -434,15 +483,32 @@ function NoteCard({
             </button>
           )
         )}
-        {canDelete && (
-          <button
-            type="button"
-            onClick={() => del.mutate()}
-            className="ml-auto text-chrome-dim hover:text-red-300"
-            aria-label="Delete note"
-          >
-            <Trash2 size={10} />
-          </button>
+        {(canEdit || canDelete) && (
+          <span className="ml-auto flex items-center gap-1.5">
+            {canEdit && !editing && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft(note.body);
+                  setEditing(true);
+                }}
+                className="text-chrome-dim hover:text-chrome"
+                aria-label="Edit note"
+              >
+                <Pencil size={10} />
+              </button>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                onClick={() => del.mutate()}
+                className="text-chrome-dim hover:text-red-300"
+                aria-label="Delete note"
+              >
+                <Trash2 size={10} />
+              </button>
+            )}
+          </span>
         )}
       </div>
     </li>
