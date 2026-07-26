@@ -37,6 +37,15 @@ export const listTaskLogs = (taskKey: string) =>
   api<{ items: TimeLog[] }>(`/tasks/${encodeURIComponent(taskKey)}/time-logs`)
     .then((r) => r.items);
 
+export type TaskTimeSummary = {
+  own_minutes: number;
+  subtask_minutes: number;
+  total_minutes: number;
+};
+
+export const taskTimeSummary = (taskKey: string) =>
+  api<TaskTimeSummary>(`/tasks/${encodeURIComponent(taskKey)}/time-summary`);
+
 export const editLog = (
   id: string,
   body: { note?: string; billable?: boolean; duration_minutes?: number },

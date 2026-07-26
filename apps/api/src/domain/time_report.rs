@@ -279,6 +279,41 @@ pub fn aggregate(rows: &[FetchedLog]) -> TimeReportData {
     }
 }
 
+/// A task's tracked time, with direct subtask logs rolled up into the total.
+/// One level deep on purpose — that's as deep as the subtasks panel creates,
+/// and it keeps the sum cheap and predictable.
+#[derive(Debug, Serialize)]
+pub struct TaskTimeSummary {
+    pub own_minutes: i64,
+    pub subtask_minutes: i64,
+    pub total_minutes: i64,
+}
+
+pub async fn task_time_summary(pool: &PgPool, task_id: Uuid) -> AppResult<TaskTimeSummary> {
+    let row = sqlx::query!(
+        r#"
+        SELECT COALESCE(SUM(tl.duration_minutes) FILTER (WHERE tl.task_id = $1), 0)::bigint
+                   AS "own_minutes!: i64",
+               COALESCE(SUM(tl.duration_minutes) FILTER (WHERE tl.task_id <> $1), 0)::bigint
+                   AS "subtask_minutes!: i64"
+        FROM   time_logs tl
+        JOIN   tasks t ON t.id = tl.task_id
+        WHERE  (t.id = $1 OR t.parent_task_id = $1)
+          AND  t.deleted_at IS NULL
+          AND  tl.deleted_at IS NULL
+          AND  tl.ended_at IS NOT NULL
+        "#,
+        task_id
+    )
+    .fetch_one(pool)
+    .await?;
+    Ok(TaskTimeSummary {
+        own_minutes: row.own_minutes,
+        subtask_minutes: row.subtask_minutes,
+        total_minutes: row.own_minutes + row.subtask_minutes,
+    })
+}
+
 /// CSV export: one row per log (chronological), then a TOTAL line. The rows sum
 /// to the same `total_minutes` the JSON report reports.
 pub fn to_csv(logs: &[FetchedLog], total_minutes: i64) -> String {
