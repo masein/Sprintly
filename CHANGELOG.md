@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Retro notes are editable** — your own (non-anonymous) notes get a pencil while the retro is open: edit in place, with an `· edited` marker once changed (admins can edit any note, including anonymous ones). The edit endpoint existed but no UI called it, and it skipped the checks its siblings had — it now requires project access and an open retro (a closed retro's summary already snapshotted the notes, so late edits would make the record lie). Authors can also delete their own notes from the UI now, not just admins — a permission the API always granted.
 - **Parent tasks count their subtasks' time** — the timer panel on a task now shows a `tracked` total that includes time logged on its direct subtasks (`tracked 3h · 1h in subtasks`), via a new `GET /tasks/:key/time-summary` endpoint. Before, subtask time was invisible from the parent — the total tracked time of a broken-down task was scattered across its children.
 - **Historical time logs on My Day and the dashboard** — both surfaces were stuck on the current week. My Day gains a `clockwork` panel (week total, per-day bars, top tasks) and the project dashboard's `top contributors` panel gains the same `‹ ›` week navigation — step back through any past week, with a one-click `this week` reset. Powered by the existing per-week timesheet and range time-report endpoints; on the dashboard, non-leads see their own logs only (the server's existing scope rule, now labelled honestly).
 

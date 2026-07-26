@@ -69,6 +69,11 @@ pub struct NoteDto {
     pub anonymous: bool,
     /// Hidden when anonymous.
     pub author_handle: Option<String>,
+    /// Hidden when anonymous — the client uses it to show edit/delete on the
+    /// viewer's own notes (the server still checks on every write).
+    pub author_id: Option<Uuid>,
+    /// True once the body has been edited (derived from the touch trigger).
+    pub edited: bool,
     pub vote_count: i64,
     pub you_voted: bool,
     pub promoted_task_key: Option<String>,
@@ -120,8 +125,10 @@ async fn get_retro(
                n.column_kind     AS "column_kind!: String",
                n.body            AS "body!: String",
                n.anonymous       AS "anonymous!: bool",
+               n.author_id,
                u.handle          AS "author_handle?: String",
                n.created_at      AS "created_at!: DateTime<Utc>",
+               (n.updated_at > n.created_at) AS "edited!: bool",
                n.promoted_task_id,
                (SELECT key FROM tasks t WHERE t.id = n.promoted_task_id)
                                  AS "promoted_task_key?: String",
@@ -153,6 +160,8 @@ async fn get_retro(
             body: r.body,
             anonymous: anon,
             author_handle: if anon { None } else { r.author_handle },
+            author_id: if anon { None } else { r.author_id },
+            edited: r.edited,
             vote_count: r.vote_count,
             you_voted: r.you_voted,
             promoted_task_key: r.promoted_task_key,
@@ -231,13 +240,31 @@ async fn edit_note(
     req.validate()
         .map_err(|e| AppError::Validation(e.to_string()))?;
     let row = sqlx::query!(
-        r#"SELECT author_id, anonymous AS "anonymous!: bool"
-           FROM retro_notes WHERE id = $1 AND deleted_at IS NULL"#,
+        r#"
+        SELECT n.author_id,
+               n.anonymous AS "anonymous!: bool",
+               r.state     AS "retro_state!: String",
+               s.project_id AS "project_id!: Uuid"
+        FROM   retro_notes n
+        JOIN   sprint_retros r ON r.id = n.retro_id
+        JOIN   sprints s       ON s.id = r.sprint_id
+        WHERE  n.id = $1 AND n.deleted_at IS NULL
+        "#,
         id
     )
     .fetch_optional(&state.db)
     .await?
     .ok_or(AppError::NotFound)?;
+    // Same gate as writing a note in the first place: project access, and the
+    // retro still open — a closed retro's summary already snapshotted the
+    // notes, so editing after the fact would make the record lie.
+    let ctx = project_ctx::load_by_id(&state.db, row.project_id, user.id).await?;
+    if !can(&user.as_actor(), Action::ViewBoard, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+    if row.retro_state != "open" {
+        return Err(AppError::Conflict("retro is closed".into()));
+    }
     // Anonymous notes have no owner; only admins can edit them.
     let is_admin = user.role == GlobalRole::Admin;
     let is_author = !row.anonymous && row.author_id == Some(user.id);

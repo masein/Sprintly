@@ -557,3 +557,177 @@ async fn admin_can_change_a_user_email(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+// ─── Retro note editing (QA-4) ───────────────────────────────────────────────
+
+/// Drive a project to an open retro; returns (sprint_id, retro_id).
+async fn open_retro(app: &Router, token: &str, key: &str) -> (String, String) {
+    make_project(app, token, key).await;
+    let (status, sprint) = send(
+        app,
+        "POST",
+        &format!("/api/v1/projects/{key}/sprints"),
+        Some(token),
+        Some(json!({
+            "name": "Retro Sprint",
+            "starts_at": "2026-06-19T00:00:00Z",
+            "ends_at": "2026-07-03T00:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{sprint:?}");
+    let sprint_id = sprint["id"].as_str().unwrap().to_string();
+    for step in ["start", "complete"] {
+        let (status, body) = send(
+            app,
+            "POST",
+            &format!("/api/v1/sprints/{sprint_id}/{step}"),
+            Some(token),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{step}: {body:?}");
+    }
+    let (status, retro) = send(
+        app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint_id}/retro"),
+        Some(token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{retro:?}");
+    assert_eq!(retro["state"], "open");
+    let retro_id = retro["id"].as_str().unwrap().to_string();
+    (sprint_id, retro_id)
+}
+
+async fn fetch_first_note(app: &Router, token: &str, sprint_id: &str) -> Value {
+    let (status, retro) = send(
+        app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint_id}/retro"),
+        Some(token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    retro["notes"]["went_well"][0].clone()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn retro_note_editing_rules_over_http(pool: PgPool) {
+    let app = app(pool);
+    let (lead_token, lead) = register(&app, "retrolead").await;
+    let (sprint_id, retro_id) = open_retro(&app, &lead_token, "RNE").await;
+
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/retros/{retro_id}/notes"),
+        Some(&lead_token),
+        Some(json!({ "column_kind": "went_well", "body": "first draft" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // The DTO exposes author_id on a non-anonymous note, and no edit flag yet.
+    let note = fetch_first_note(&app, &lead_token, &sprint_id).await;
+    let note_id = note["id"].as_str().unwrap().to_string();
+    assert_eq!(note["author_id"], lead["id"]);
+    assert_eq!(note["edited"], false);
+
+    // The author edits their note.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/retro-notes/{note_id}"),
+        Some(&lead_token),
+        Some(json!({ "body": "second thoughts" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // A non-member can't touch it — membership is checked before ownership.
+    let (stranger_token, _) = register(&app, "retrostranger").await;
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/retro-notes/{note_id}"),
+        Some(&stranger_token),
+        Some(json!({ "body": "vandalism" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // The edit landed and is flagged as edited.
+    let note = fetch_first_note(&app, &lead_token, &sprint_id).await;
+    assert_eq!(note["body"], "second thoughts");
+    assert_eq!(note["edited"], true);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn retro_note_editing_locks_with_the_retro(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "retrocloser").await;
+    let (sprint_id, retro_id) = open_retro(&app, &token, "RNC").await;
+
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/retros/{retro_id}/notes"),
+        Some(&token),
+        Some(json!({ "column_kind": "went_well", "body": "for the record" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let note = fetch_first_note(&app, &token, &sprint_id).await;
+    let note_id = note["id"].as_str().unwrap().to_string();
+
+    // Anonymous notes expose no author_id even to their author.
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/retros/{retro_id}/notes"),
+        Some(&token),
+        Some(json!({ "column_kind": "went_well", "body": "whistleblowing", "anonymous": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (_, retro) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint_id}/retro"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let anon = retro["notes"]["went_well"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["anonymous"] == true)
+        .unwrap()
+        .clone();
+    assert_eq!(anon["author_id"], Value::Null);
+
+    // Close the retro → edits are refused, the summary already snapshotted.
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/retros/{retro_id}/close"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/retro-notes/{note_id}"),
+        Some(&token),
+        Some(json!({ "body": "revisionism" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT n.author_id,\n               n.anonymous AS \"anonymous!: bool\",\n               r.state     AS \"retro_state!: String\",\n               s.project_id AS \"project_id!: Uuid\"\n        FROM   retro_notes n\n        JOIN   sprint_retros r ON r.id = n.retro_id\n        JOIN   sprints s       ON s.id = r.sprint_id\n        WHERE  n.id = $1 AND n.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "author_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "anonymous!: bool",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "retro_state!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "project_id!: Uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "227097a69ed00d1b7cfa8849f93d8c3956aa989ddbac98e460c0d6749cc4175c"
+}
