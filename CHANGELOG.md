@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The backlog lives on the sprint page — drag across** — the sprint page gains a `backlog` panel next to the task list: drag a backlog row (by its grip) onto the task list to commit it to the sprint, drag a sprint row onto the panel to send it back. The per-row buttons (`+ add tasks`, the remove icon, the task detail's sprint select) all remain — drag is a shortcut, not the only door. Panel and grips disappear once the sprint completes.
 - **Epics can change color after creation** — the color swatch on an epic's row (timeline page) is now a picker for leads: click it, choose a new swatch, and the bar follows. The API accepted `color` on epic updates all along; the UI just never offered it — color was a creation-time-only choice.
 - **`← board` on the sprint page** — the sprint detail now links straight back to the project board, the same affordance the backlog page has. Before, getting from a sprint to its board took a detour through the sprints list or the project switcher.
 - **The retro summary is editable after closing** — closing a retro generates deterministic markdown from the notes; it's a starting point, not the final word. Leads (and admins) get an `edit` button on the summary right on the retro page — rework it until it reads like a human wrote it (`PATCH /sprints/:id` now accepts `summary_md`, only once the sprint is completed; meta edits on completed sprints stay refused).
