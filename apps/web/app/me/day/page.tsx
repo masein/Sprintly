@@ -27,7 +27,11 @@ export default function MyDayPage() {
   const q = useQuery({
     queryKey: ["my-dashboard"],
     queryFn: () => getMyDashboard(),
+    // Live-ish by three routes: WS invalidation (see lib/ws.ts) for changes
+    // made elsewhere, a focus refetch for coming back to the tab (the global
+    // default turns this off), and the interval as the fallback.
     refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
   });
 
   if (q.error) {
