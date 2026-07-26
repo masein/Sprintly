@@ -24,6 +24,7 @@ import {
   type Board as BoardModel,
   type Project,
 } from "@/lib/projects";
+import { me } from "@/lib/auth-bundle";
 import type { ApiError } from "@/lib/api";
 
 export default function ProjectPage() {
@@ -43,6 +44,15 @@ export default function ProjectPage() {
   const [showImport, setShowImport] = useState(false);
   const [showPublic, setShowPublic] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
+  // Global admins can manage any project's members (the API always allowed
+  // it — the UI used to show them the read-only view).
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    void me()
+      .then((u) => setIsAdmin(u.role === "admin"))
+      .catch(() => {});
+  }, []);
 
   async function reload() {
     try {
@@ -324,7 +334,7 @@ export default function ProjectPage() {
       {showMembers && (
         <MembersManager
           projectKey={project.key}
-          canManage={canManage}
+          canManage={canManage || isAdmin}
           onClose={() => setShowMembers(false)}
         />
       )}
