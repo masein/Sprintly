@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Parent tasks count their subtasks' time** — the timer panel on a task now shows a `tracked` total that includes time logged on its direct subtasks (`tracked 3h · 1h in subtasks`), via a new `GET /tasks/:key/time-summary` endpoint. Before, subtask time was invisible from the parent — the total tracked time of a broken-down task was scattered across its children.
 - **Historical time logs on My Day and the dashboard** — both surfaces were stuck on the current week. My Day gains a `clockwork` panel (week total, per-day bars, top tasks) and the project dashboard's `top contributors` panel gains the same `‹ ›` week navigation — step back through any past week, with a one-click `this week` reset. Powered by the existing per-week timesheet and range time-report endpoints; on the dashboard, non-leads see their own logs only (the server's existing scope rule, now labelled honestly).
 
 - **@mentions you can actually type** — the notification plumbing for mentions existed since M12, but nothing helped you write one and nothing showed one. Now: comment boxes and the task description editor autocomplete `@` against the project's members (↑/↓/Enter or click to pick); rendered markdown highlights `@handle` (code spans, links, and emails stay plain); and mentioning someone in a task description finally notifies them — on create, and on edit only the handles *newly added* to the text, so re-saving a description never re-pings the people already in it.
