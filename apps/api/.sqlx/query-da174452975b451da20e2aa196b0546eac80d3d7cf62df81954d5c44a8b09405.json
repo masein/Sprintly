@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COALESCE(SUM(tl.duration_minutes) FILTER (WHERE tl.task_id = $1), 0)::bigint\n                   AS \"own_minutes!: i64\",\n               COALESCE(SUM(tl.duration_minutes) FILTER (WHERE tl.task_id <> $1), 0)::bigint\n                   AS \"subtask_minutes!: i64\"\n        FROM   time_logs tl\n        JOIN   tasks t ON t.id = tl.task_id\n        WHERE  (t.id = $1 OR t.parent_task_id = $1)\n          AND  t.deleted_at IS NULL\n          AND  tl.deleted_at IS NULL\n          AND  tl.ended_at IS NOT NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "own_minutes!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "subtask_minutes!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "da174452975b451da20e2aa196b0546eac80d3d7cf62df81954d5c44a8b09405"
+}

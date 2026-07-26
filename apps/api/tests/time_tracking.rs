@@ -233,3 +233,127 @@ async fn timesheet_unique_per_user_per_week(pool: PgPool) {
         "duplicate (user_id, period_start) must collide"
     );
 }
+
+// ─── Subtask time rollup ─────────────────────────────────────────────────────
+
+async fn make_subtask(pool: &PgPool, parent: Uuid) -> Uuid {
+    let row = sqlx::query!(
+        r#"SELECT project_id AS "project_id!: Uuid",
+                  board_id   AS "board_id!: Uuid",
+                  column_id  AS "column_id!: Uuid"
+           FROM tasks WHERE id = $1"#,
+        parent
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let mut tx = pool.begin().await.unwrap();
+    let (key, _) = task_domain::next_key(&mut tx, row.project_id)
+        .await
+        .unwrap();
+    let tid = Uuid::now_v7();
+    sqlx::query(
+        r#"INSERT INTO tasks (id, project_id, board_id, column_id, key, title,
+                              order_in_column, parent_task_id)
+           VALUES ($1, $2, $3, $4, $5, 'sub', 1024.0, $6)"#,
+    )
+    .bind(tid)
+    .bind(row.project_id)
+    .bind(row.board_id)
+    .bind(row.column_id)
+    .bind(&key)
+    .bind(parent)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    tid
+}
+
+async fn closed_log(pool: &PgPool, task: Uuid, user: Uuid, minutes: i64) -> Uuid {
+    let started = Utc::now() - Duration::minutes(minutes + 60);
+    let ended = started + Duration::minutes(minutes);
+    let id = Uuid::now_v7();
+    sqlx::query(
+        r#"INSERT INTO time_logs (id, task_id, user_id, started_at, ended_at)
+           VALUES ($1, $2, $3, $4, $5)"#,
+    )
+    .bind(id)
+    .bind(task)
+    .bind(user)
+    .bind(started)
+    .bind(ended)
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn task_time_summary_rolls_up_direct_subtasks(pool: PgPool) {
+    use sprintly_api::domain::time_report;
+
+    let u = make_user(&pool, None).await;
+    let parent = make_task(&pool, u).await;
+    let sub = make_subtask(&pool, parent).await;
+
+    closed_log(&pool, parent, u, 60).await;
+    closed_log(&pool, sub, u, 30).await;
+    closed_log(&pool, sub, u, 15).await;
+
+    let s = time_report::task_time_summary(&pool, parent).await.unwrap();
+    assert_eq!(s.own_minutes, 60);
+    assert_eq!(s.subtask_minutes, 45);
+    assert_eq!(s.total_minutes, 105);
+
+    // The subtask's own summary is just its own logs — rollup is downward only.
+    let s = time_report::task_time_summary(&pool, sub).await.unwrap();
+    assert_eq!(s.own_minutes, 45);
+    assert_eq!(s.subtask_minutes, 0);
+    assert_eq!(s.total_minutes, 45);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn task_time_summary_skips_running_deleted_and_soft_deleted(pool: PgPool) {
+    use sprintly_api::domain::time_report;
+
+    let u = make_user(&pool, None).await;
+    let parent = make_task(&pool, u).await;
+    let sub = make_subtask(&pool, parent).await;
+
+    closed_log(&pool, parent, u, 60).await;
+
+    // Running log (no ended_at) — not counted.
+    sqlx::query(
+        r#"INSERT INTO time_logs (id, task_id, user_id, started_at)
+           VALUES ($1, $2, $3, $4)"#,
+    )
+    .bind(Uuid::now_v7())
+    .bind(parent)
+    .bind(u)
+    .bind(Utc::now())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Soft-deleted subtask log — not counted.
+    let doomed = closed_log(&pool, sub, u, 30).await;
+    sqlx::query(r#"UPDATE time_logs SET deleted_at = now() WHERE id = $1"#)
+        .bind(doomed)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Log on a soft-deleted subtask — not counted either.
+    closed_log(&pool, sub, u, 30).await;
+    sqlx::query(r#"UPDATE tasks SET deleted_at = now() WHERE id = $1"#)
+        .bind(sub)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let s = time_report::task_time_summary(&pool, parent).await.unwrap();
+    assert_eq!(s.own_minutes, 60);
+    assert_eq!(s.subtask_minutes, 0);
+    assert_eq!(s.total_minutes, 60);
+}

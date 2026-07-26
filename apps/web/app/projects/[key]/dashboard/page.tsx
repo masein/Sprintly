@@ -2,6 +2,7 @@
 
 // /projects/[key]/dashboard — single-pane overview for a project.
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Route } from "next";
 import { useParams, useRouter } from "next/navigation";
@@ -15,9 +16,11 @@ import { StatTile } from "@/components/StatTile";
 import { VelocityChart } from "@/components/VelocityChart";
 import { BurndownChart } from "@/components/BurndownChart";
 import { BurnWidget } from "@/components/BurnWidget";
+import { WeekNav, sundayOfISO, thisMondayISO } from "@/components/WeekNav";
 import { getProjectDashboard } from "@/lib/dashboards";
 import { getBurndown } from "@/lib/sprints";
 import { getProject } from "@/lib/projects";
+import { getTimeReport } from "@/lib/timeReport";
 import { fmtMinutes } from "@/lib/timetracking";
 import type { ApiError } from "@/lib/api";
 
@@ -244,25 +247,7 @@ export default function ProjectDashboardPage() {
             </ul>
           </section>
 
-          <section>
-            <h2 className="mono mb-2 flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
-              <Clock size={11} /> top contributors this week
-            </h2>
-            <ul className="space-y-1">
-              {d.top_contributors.length === 0 && (
-                <li className="mono text-[11px] text-chrome-dim">no time logged</li>
-              )}
-              {d.top_contributors.map((c) => (
-                <li
-                  key={c.user_id}
-                  className="mono flex items-center gap-2 text-xs"
-                >
-                  <span className="text-chrome">@{c.handle}</span>
-                  <span className="ml-auto text-chrome-dim">{fmtMinutes(c.minutes)}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+          <ContributorsPanel projectKey={projectKey} />
 
           <section>
             <h2 className="mono mb-2 flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
@@ -278,6 +263,64 @@ export default function ProjectDashboardPage() {
         </aside>
       </div>
     </AppShell>
+  );
+}
+
+// ─── Contributors, any week ─────────────────────────────────────────────────
+// The dashboard aggregate only knows the current week, so history rides on
+// the range-aware time report instead. Non-leads get the server's self-only
+// scope — their own logs, honestly labelled.
+
+function ContributorsPanel({ projectKey }: { projectKey: string }) {
+  const [periodStart, setPeriodStart] = useState(() => thisMondayISO());
+  const q = useQuery({
+    queryKey: ["time-report", projectKey, periodStart],
+    queryFn: () =>
+      getTimeReport(projectKey, {
+        from: periodStart,
+        to: sundayOfISO(periodStart),
+      }),
+    enabled: !!projectKey,
+  });
+  const report = q.data;
+
+  return (
+    <section aria-label="top contributors">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="mono flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
+          <Clock size={11} /> top contributors
+        </h2>
+        <WeekNav periodStart={periodStart} onChange={setPeriodStart} />
+      </div>
+      {q.error ? (
+        <div className="mono rounded border border-red-500/30 bg-red-500/10 p-3 text-[11px] text-red-200">
+          {(q.error as unknown as ApiError).message}
+        </div>
+      ) : !report ? (
+        <div className="mono text-[11px] text-chrome-dim">crunching the week…</div>
+      ) : (
+        <>
+          <ul className="space-y-1">
+            {report.by_user.length === 0 && (
+              <li className="mono text-[11px] text-chrome-dim">no time logged</li>
+            )}
+            {report.by_user.slice(0, 5).map((c) => (
+              <li key={c.user_id} className="mono flex items-center gap-2 text-xs">
+                <span className="text-chrome">@{c.handle}</span>
+                <span className="ml-auto text-chrome-dim">
+                  {fmtMinutes(c.total_minutes)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {report.scope === "self" && (
+            <div className="mono mt-1 text-[10px] text-chrome-dim">
+              your logs only — leads see the whole team
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
