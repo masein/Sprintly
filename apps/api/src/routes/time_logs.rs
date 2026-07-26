@@ -27,7 +27,7 @@ use validator::Validate;
 use crate::{
     domain::{
         permissions::{can, Action, Role as GlobalRole},
-        projects as project_ctx, tasks as task_domain, timesheets as ts,
+        projects as project_ctx, tasks as task_domain, time_report, timesheets as ts,
     },
     infra::AppState,
     middleware::CurrentUser,
@@ -43,6 +43,7 @@ pub fn router() -> Router<AppState> {
             "/tasks/:task_key/time-logs",
             post(create_manual).get(list_for_task),
         )
+        .route("/tasks/:task_key/time-summary", get(time_summary))
         .route(
             "/time-logs/:id",
             axum::routing::patch(edit_log).delete(delete_log),
@@ -322,6 +323,33 @@ async fn list_for_task(
         })
         .collect();
     Ok(Json(serde_json::json!({ "items": items })))
+}
+
+/// Tracked-time rollup for a task: its own closed logs plus its direct
+/// subtasks' — the panel number that answers "how much did this really take"
+/// without hunting through the subtasks one by one.
+async fn time_summary(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(task_key): Path<String>,
+) -> AppResult<impl IntoResponse> {
+    let task = sqlx::query!(
+        r#"
+        SELECT id         AS "id!: Uuid",
+               project_id AS "project_id!: Uuid"
+        FROM   tasks WHERE key = $1 AND deleted_at IS NULL
+        "#,
+        task_key
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    let ctx = project_ctx::load_by_id(&state.db, task.project_id, user.id).await?;
+    if !can(&user.as_actor(), Action::ViewBoard, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+    let summary = time_report::task_time_summary(&state.db, task.id).await?;
+    Ok(Json(summary))
 }
 
 async fn edit_log(
