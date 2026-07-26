@@ -2,17 +2,19 @@
 
 // /me/day — "My day". Personal one-page overview.
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  AlertCircle, Eye, ListChecks, Timer,
+  AlertCircle, Clock, Eye, ListChecks, Timer,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { LoadError } from "@/components/LoadError";
 import { StatTile } from "@/components/StatTile";
+import { WeekNav, thisMondayISO } from "@/components/WeekNav";
 import { getMyDashboard } from "@/lib/dashboards";
-import { fmtMinutes } from "@/lib/timetracking";
+import { fmtMinutes, specificTimesheet } from "@/lib/timetracking";
 import type { ApiError } from "@/lib/api";
 
 const PRIORITY_COLOR: Record<string, string> = {
@@ -157,6 +159,8 @@ export default function MyDayPage() {
         </div>
 
         <aside className="space-y-6">
+          <ClockworkPanel />
+
           <section>
             <h2 className="mono mb-2 flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
               <Timer size={11} /> running timer
@@ -215,6 +219,84 @@ export default function MyDayPage() {
         </aside>
       </div>
     </AppShell>
+  );
+}
+
+// ─── Clockwork: my week, any week ───────────────────────────────────────────
+// Week-navigable time logs, backed by the per-week timesheet endpoint — the
+// answer to "My day only shows the current week". Step back as far as the
+// logs go; the timesheets page has the full ledger.
+
+function ClockworkPanel() {
+  const [periodStart, setPeriodStart] = useState(() => thisMondayISO());
+  const q = useQuery({
+    queryKey: ["timesheet", periodStart],
+    queryFn: () => specificTimesheet(periodStart),
+  });
+  const sheet = q.data;
+  const maxDay = Math.max(1, ...(sheet?.days.map((d) => d.total_minutes) ?? []));
+
+  return (
+    <section aria-label="clockwork">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="mono flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
+          <Clock size={11} /> clockwork
+        </h2>
+        <WeekNav periodStart={periodStart} onChange={setPeriodStart} />
+      </div>
+
+      {q.error ? (
+        <div className="mono rounded border border-red-500/30 bg-red-500/10 p-3 text-[11px] text-red-200">
+          {(q.error as unknown as ApiError).message}
+        </div>
+      ) : !sheet ? (
+        <div className="mono rounded border border-dashed border-white/10 p-3 text-center text-[11px] text-chrome-dim">
+          crunching the week…
+        </div>
+      ) : (
+        <div className="rounded-lg border border-white/10 bg-ink-subtle p-3">
+          <div className="mono mb-2 flex items-baseline justify-between text-xs">
+            <span className="text-chrome-dim">logged</span>
+            <span className="text-chrome">{fmtMinutes(sheet.total_minutes)}</span>
+          </div>
+          <div className="mb-3 flex items-end gap-1" aria-hidden>
+            {sheet.days.map((day) => (
+              <div key={day.date} className="flex-1">
+                <div
+                  className="rounded-sm bg-accent/60"
+                  style={{ height: `${4 + (day.total_minutes / maxDay) * 28}px` }}
+                  title={`${day.date} · ${fmtMinutes(day.total_minutes)}`}
+                />
+              </div>
+            ))}
+          </div>
+          <ul className="space-y-1">
+            {sheet.by_task.length === 0 && (
+              <li className="mono text-[11px] text-chrome-dim">
+                nothing logged this week
+              </li>
+            )}
+            {sheet.by_task.slice(0, 6).map((t) => (
+              <li key={t.task_key} className="mono flex items-center gap-2 text-xs">
+                <Link href={`/tasks/${t.task_key}`} className="text-accent hover:underline">
+                  {t.task_key}
+                </Link>
+                <span className="truncate text-chrome-dim">{t.task_title}</span>
+                <span className="ml-auto shrink-0 text-chrome">
+                  {fmtMinutes(t.total_minutes)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <Link
+            href="/me/timesheets"
+            className="mono mt-2 inline-block text-[11px] text-accent hover:underline"
+          >
+            → full timesheet
+          </Link>
+        </div>
+      )}
+    </section>
   );
 }
 
