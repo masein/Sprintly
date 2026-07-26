@@ -13,6 +13,18 @@ export const listSubtasks = (taskKey: string) =>
   api<{ items: Subtask[] }>(`/tasks/${encodeURIComponent(taskKey)}/subtasks`)
     .then((r) => r.items);
 
+/**
+ * Convert / promote / reparent: a task key makes this task a subtask of it,
+ * null promotes it back to a top-level task. One level deep; the server
+ * refuses nesting, cross-project parents, and demoting a task that has
+ * subtasks of its own.
+ */
+export const setTaskParent = (taskKey: string, parentKey: string | null) =>
+  api<void>(`/tasks/${encodeURIComponent(taskKey)}/parent`, {
+    method: "PUT",
+    body: { parent_key: parentKey },
+  });
+
 export type LinkKind = "blocks" | "relates_to" | "duplicates" | "parent_of";
 
 export type Link = {

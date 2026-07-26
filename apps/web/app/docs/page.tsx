@@ -101,6 +101,16 @@ export default function DocsPage() {
               by key/title in search and shows up in your task list — it just
               stops masquerading as independent top-level work.
             </p>
+            <p>
+              Hierarchy isn&apos;t a life sentence: the{" "}
+              <span className="mono">parent</span> row in a task&apos;s details
+              converts either way — <span className="mono">make subtask
+              of…</span> tucks a task under a parent (and drops it from its
+              sprint, since it rolls up now), <span className="mono">↑
+              promote</span> makes a subtask top-level again, and{" "}
+              <span className="mono">move…</span> shifts it under a different
+              parent. One level deep, same project — the server holds the line.
+            </p>
           </Section>
 
           <Section icon={Rows3} title="Board views & swimlanes">

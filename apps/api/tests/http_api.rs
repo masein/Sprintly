@@ -557,3 +557,191 @@ async fn admin_can_change_a_user_email(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+// ─── Task ↔ subtask conversion (QA-9) ────────────────────────────────────────
+
+async fn make_task_http(app: &Router, token: &str, project: &str, title: &str) -> String {
+    let (status, task) = send(
+        app,
+        "POST",
+        &format!("/api/v1/projects/{project}/tasks"),
+        Some(token),
+        Some(json!({ "title": title })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task:?}");
+    task["key"].as_str().unwrap().to_string()
+}
+
+async fn set_parent(app: &Router, token: &str, key: &str, parent: Option<&str>) -> StatusCode {
+    let (status, body) = send(
+        app,
+        "PUT",
+        &format!("/api/v1/tasks/{key}/parent"),
+        Some(token),
+        Some(json!({ "parent_key": parent })),
+    )
+    .await;
+    assert!(
+        !status.is_server_error(),
+        "set_parent({key}, {parent:?}) → {status}: {body:?}"
+    );
+    status
+}
+
+async fn board_keys(app: &Router, token: &str, project: &str) -> Vec<String> {
+    let (status, list) = send(
+        app,
+        "GET",
+        &format!("/api/v1/projects/{project}/tasks"),
+        Some(token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["key"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn task_subtask_conversion_over_http(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "converter").await;
+    make_project(&app, &token, "CVT").await;
+    let a = make_task_http(&app, &token, "CVT", "parent to be").await;
+    let b = make_task_http(&app, &token, "CVT", "future subtask").await;
+    let c = make_task_http(&app, &token, "CVT", "second parent").await;
+
+    // Demote B under A → B leaves the board list.
+    assert_eq!(
+        set_parent(&app, &token, &b, Some(&a)).await,
+        StatusCode::NO_CONTENT
+    );
+    let keys = board_keys(&app, &token, "CVT").await;
+    assert!(keys.contains(&a) && keys.contains(&c) && !keys.contains(&b));
+    let (_, task_b) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{b}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(task_b["parent_key"], a.as_str());
+
+    // Guards: no nesting under a subtask; no demoting a task with children;
+    // no being your own parent.
+    assert_eq!(
+        set_parent(&app, &token, &c, Some(&b)).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        set_parent(&app, &token, &a, Some(&c)).await,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        set_parent(&app, &token, &c, Some(&c)).await,
+        StatusCode::BAD_REQUEST
+    );
+
+    // Reparent B from A to C.
+    assert_eq!(
+        set_parent(&app, &token, &b, Some(&c)).await,
+        StatusCode::NO_CONTENT
+    );
+    let (_, task_b) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{b}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(task_b["parent_key"], c.as_str());
+
+    // Cross-project parents are refused.
+    make_project(&app, &token, "CVX").await;
+    let x = make_task_http(&app, &token, "CVX", "elsewhere").await;
+    assert_eq!(
+        set_parent(&app, &token, &b, Some(&x)).await,
+        StatusCode::BAD_REQUEST
+    );
+
+    // Promote B → back on the board.
+    assert_eq!(
+        set_parent(&app, &token, &b, None).await,
+        StatusCode::NO_CONTENT
+    );
+    let keys = board_keys(&app, &token, "CVT").await;
+    assert!(keys.contains(&b));
+    let (_, task_b) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{b}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(task_b["parent_key"], Value::Null);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn demoting_a_sprint_task_clears_its_sprint(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "demoter").await;
+    make_project(&app, &token, "DMS").await;
+    let a = make_task_http(&app, &token, "DMS", "the parent").await;
+    let b = make_task_http(&app, &token, "DMS", "committed then demoted").await;
+
+    let (status, sprint) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/DMS/sprints",
+        Some(&token),
+        Some(json!({
+            "name": "Sprint 1",
+            "starts_at": "2026-06-19T00:00:00Z",
+            "ends_at": "2026-07-03T00:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{sprint:?}");
+    let sprint_id = sprint["id"].as_str().unwrap();
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sprint_id}/tasks/{b}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Demote → sprint membership drops so the sprint doesn't count it twice.
+    assert_eq!(
+        set_parent(&app, &token, &b, Some(&a)).await,
+        StatusCode::NO_CONTENT
+    );
+    let (_, task_b) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{b}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(task_b["sprint_id"], Value::Null);
+    let (_, list) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint_id}/tasks"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 0);
+}

@@ -57,6 +57,7 @@ pub fn router() -> Router<AppState> {
             get(list_links).post(add_link).delete(remove_link),
         )
         .route("/tasks/:task_key/subtasks", get(list_subtasks))
+        .route("/tasks/:task_key/parent", axum::routing::put(set_parent))
         .route(
             "/tasks/:task_key/attachments",
             post(create_attachment).get(list_attachments),
@@ -809,6 +810,113 @@ async fn list_subtasks(
         })
         .collect();
     Ok(Json(serde_json::json!({ "items": items })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetParentReq {
+    /// A task key to become a subtask of, or null to promote to top-level.
+    pub parent_key: Option<String>,
+}
+
+/// Convert a task into a subtask, promote a subtask back to a task, or move a
+/// subtask to a different parent — one endpoint, `parent_key` decides.
+///
+/// The hierarchy stays one level deep on purpose (that's all the panel and
+/// the rollups understand), so: the parent can't itself be a subtask, and a
+/// task with subtasks of its own can't be demoted. Becoming a subtask also
+/// drops the task from its sprint — subtasks roll up under their parent
+/// everywhere else, so leaving a stale sprint membership behind would count
+/// it twice.
+async fn set_parent(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(task_key): Path<String>,
+    Json(req): Json<SetParentReq>,
+) -> AppResult<impl IntoResponse> {
+    let task = resolve_task(&state.db, &task_key).await?;
+    let ctx = project_ctx::load_by_id(&state.db, task.project_id, user.id).await?;
+    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+
+    match req.parent_key.as_deref() {
+        None => {
+            // Promote to a top-level task. Its column/board were never
+            // cleared, so it simply reappears where it last lived.
+            sqlx::query("UPDATE tasks SET parent_task_id = NULL WHERE id = $1")
+                .bind(task.id)
+                .execute(&state.db)
+                .await?;
+        }
+        Some(parent_key) => {
+            let parent = sqlx::query!(
+                r#"
+                SELECT id             AS "id!: Uuid",
+                       project_id     AS "project_id!: Uuid",
+                       parent_task_id
+                FROM   tasks WHERE key = $1 AND deleted_at IS NULL
+                "#,
+                parent_key
+            )
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+            if parent.id == task.id {
+                return Err(AppError::BadRequest(
+                    "a task can't be its own parent".into(),
+                ));
+            }
+            if parent.project_id != task.project_id {
+                return Err(AppError::BadRequest(
+                    "parent must be in the same project".into(),
+                ));
+            }
+            if parent.parent_task_id.is_some() {
+                return Err(AppError::BadRequest(
+                    "that parent is itself a subtask — subtasks go one level deep".into(),
+                ));
+            }
+            let children: i64 = sqlx::query_scalar(
+                r#"SELECT COUNT(*) FROM tasks
+                   WHERE parent_task_id = $1 AND deleted_at IS NULL"#,
+            )
+            .bind(task.id)
+            .fetch_one(&state.db)
+            .await?;
+            if children > 0 {
+                return Err(AppError::Conflict(
+                    "this task has subtasks of its own — promote or move them first".into(),
+                ));
+            }
+            sqlx::query("UPDATE tasks SET parent_task_id = $2, sprint_id = NULL WHERE id = $1")
+                .bind(task.id)
+                .bind(parent.id)
+                .execute(&state.db)
+                .await?;
+        }
+    }
+
+    let mut tx = state.db.begin().await?;
+    crate::domain::tasks::log_activity(
+        &mut tx,
+        task.id,
+        Some(user.id),
+        "reparented",
+        &serde_json::json!({ "parent_key": req.parent_key }),
+    )
+    .await?;
+    tx.commit().await?;
+
+    crate::infra::events::publish(
+        &state.redis,
+        &Event::TaskUpdated {
+            project_id: task.project_id,
+            task_id: task.id,
+            key: task_key.clone(),
+        },
+    )
+    .await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ─── handlers: attachments ──────────────────────────────────────────────────
