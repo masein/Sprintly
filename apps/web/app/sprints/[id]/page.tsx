@@ -7,7 +7,17 @@ import { useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Play, CheckCircle2, Plus, Trash2, X } from "lucide-react";
+import {
+  DndContext,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
+import { Play, CheckCircle2, GripVertical, Plus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { BurndownChart } from "@/components/BurndownChart";
 import { LoadError } from "@/components/LoadError";
@@ -22,6 +32,7 @@ import {
   unassignTaskFromSprint,
   type SprintTask,
 } from "@/lib/sprints";
+import { listBacklog } from "@/lib/templates";
 import { search } from "@/lib/search";
 import { createTask } from "@/lib/tasks";
 import { pluralize } from "@/lib/format";
@@ -48,6 +59,41 @@ export default function SprintDetailPage() {
     queryFn: () => getBurndown(id),
     enabled: !!id,
   });
+  const projectKey = sprintQ.data?.project_key;
+  const sprintOpen = sprintQ.data != null && sprintQ.data.state !== "completed";
+  const backlogQ = useQuery({
+    queryKey: ["backlog", projectKey],
+    queryFn: () => listBacklog(projectKey!),
+    enabled: !!projectKey && sprintOpen,
+  });
+
+  const invalidateLists = () => {
+    qc.invalidateQueries({ queryKey: ["sprint-tasks", id] });
+    qc.invalidateQueries({ queryKey: ["sprint", id] });
+    qc.invalidateQueries({ queryKey: ["sprint-burndown", id] });
+    qc.invalidateQueries({ queryKey: ["backlog", projectKey] });
+  };
+  const pullIn = useMutation({
+    mutationFn: (taskKey: string) => assignTaskToSprint(id, taskKey),
+    onSuccess: invalidateLists,
+    onError: (e) => alert((e as unknown as ApiError).message),
+  });
+  const pushOut = useMutation({
+    mutationFn: (taskKey: string) => unassignTaskFromSprint(id, taskKey),
+    onSuccess: invalidateLists,
+    onError: (e) => alert((e as unknown as ApiError).message),
+  });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+  const onDragEnd = (ev: DragEndEvent) => {
+    const overId = ev.over ? String(ev.over.id) : null;
+    const [src, taskKey] = String(ev.active.id).split(":");
+    if (!taskKey || !overId) return;
+    if (src === "backlog" && overId === "sprint-drop") pullIn.mutate(taskKey);
+    if (src === "sprint" && overId === "backlog-drop") pushOut.mutate(taskKey);
+  };
 
   const start = useMutation({
     mutationFn: () => startSprint(id),
@@ -157,33 +203,200 @@ export default function SprintDetailPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
-        <section>
-          <h2 className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
-            tasks ({tasksQ.data?.length ?? 0})
-          </h2>
-          <TaskList tasks={tasksQ.data ?? []} sprintId={id} canManage={sprint.state !== "completed"} />
-          {sprint.state !== "completed" && (
-            <AddTaskRow sprintId={id} projectKey={sprint.project_key} onAdded={() => {
-              qc.invalidateQueries({ queryKey: ["sprint-tasks", id] });
-              qc.invalidateQueries({ queryKey: ["sprint", id] });
-              qc.invalidateQueries({ queryKey: ["sprint-burndown", id] });
-            }} />
-          )}
-        </section>
-        <aside>
-          {burnQ.data && <BurndownChart points={burnQ.data.items} />}
-          {sprint.summary_md && (
-            <section className="mt-4 rounded-lg border border-white/10 bg-ink-subtle p-4">
-              <div className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
-                retro summary
-              </div>
-              <Markdown>{sprint.summary_md}</Markdown>
-            </section>
-          )}
-        </aside>
-      </div>
+      <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+          <SprintDropZone active={sprintOpen}>
+            <h2 className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
+              tasks ({tasksQ.data?.length ?? 0})
+            </h2>
+            <TaskList
+              tasks={tasksQ.data ?? []}
+              sprintId={id}
+              canManage={sprint.state !== "completed"}
+              draggable={sprintOpen}
+            />
+            {sprint.state !== "completed" && (
+              <AddTaskRow sprintId={id} projectKey={sprint.project_key} onAdded={invalidateLists} />
+            )}
+          </SprintDropZone>
+          <aside>
+            {sprintOpen && (
+              <BacklogPanel items={backlogQ.data ?? []} loading={backlogQ.isLoading} />
+            )}
+            {burnQ.data && <BurndownChart points={burnQ.data.items} />}
+            {sprint.summary_md && (
+              <section className="mt-4 rounded-lg border border-white/10 bg-ink-subtle p-4">
+                <div className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
+                  retro summary
+                </div>
+                <Markdown>{sprint.summary_md}</Markdown>
+              </section>
+            )}
+          </aside>
+        </div>
+      </DndContext>
     </AppShell>
+  );
+}
+
+// ─── Sprint ↔ backlog drag (QA: "show the backlog in the sprint view") ──────
+// Two drop zones, one DndContext: drag a backlog row onto the task list to
+// commit it, drag a sprint row onto the backlog panel to send it back. The
+// per-row buttons stay — drag is a shortcut, not the only door.
+
+function SprintDropZone({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: "sprint-drop", disabled: !active });
+  return (
+    <section
+      ref={setNodeRef}
+      className={`rounded-lg transition ${
+        isOver ? "bg-accent/5 ring-1 ring-accent/40" : ""
+      }`}
+      data-testid="sprint-drop"
+    >
+      {children}
+    </section>
+  );
+}
+
+function DragHandle({
+  attributes,
+  listeners,
+}: {
+  attributes: React.HTMLAttributes<HTMLButtonElement>;
+  listeners: Record<string, unknown> | undefined;
+}) {
+  return (
+    <button
+      type="button"
+      {...attributes}
+      {...(listeners as React.DOMAttributes<HTMLButtonElement>)}
+      className="cursor-grab touch-none text-chrome-dim hover:text-chrome active:cursor-grabbing"
+      aria-label="drag to move"
+    >
+      <GripVertical size={12} />
+    </button>
+  );
+}
+
+function BacklogPanel({ items, loading }: { items: { key: string; title: string }[]; loading: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({ id: "backlog-drop" });
+  return (
+    <section
+      ref={setNodeRef}
+      data-testid="backlog-drop"
+      className={`mb-4 rounded-lg border border-white/10 bg-ink-subtle p-3 transition ${
+        isOver ? "bg-accent/5 ring-1 ring-accent/40" : ""
+      }`}
+    >
+      <h2 className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
+        backlog ({items.length}) · drag across
+      </h2>
+      <ul className="max-h-72 space-y-1 overflow-y-auto">
+        {loading && (
+          <li className="mono text-[11px] text-chrome-dim">digging the pile…</li>
+        )}
+        {!loading && items.length === 0 && (
+          <li className="mono rounded border border-dashed border-white/10 p-3 text-center text-[11px] text-chrome-dim">
+            backlog zero — nothing to pull
+          </li>
+        )}
+        {items.map((t) => (
+          <BacklogRow key={t.key} taskKey={t.key} title={t.title} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function BacklogRow({ taskKey, title }: { taskKey: string; title: string }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `backlog:${taskKey}`,
+  });
+  return (
+    <li
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Translate.toString(transform),
+        opacity: isDragging ? 0.6 : undefined,
+        zIndex: isDragging ? 30 : undefined,
+        position: isDragging ? "relative" : undefined,
+      }}
+      className="flex items-center gap-2 rounded border border-white/10 bg-ink px-2 py-1.5"
+    >
+      <DragHandle attributes={attributes} listeners={listeners} />
+      <Link
+        href={`/tasks/${taskKey}`}
+        className="mono shrink-0 text-xs text-accent hover:underline"
+      >
+        {taskKey}
+      </Link>
+      <span className="min-w-0 flex-1 truncate text-xs text-chrome" title={title}>
+        {title}
+      </span>
+    </li>
+  );
+}
+
+function SprintTaskRow({
+  task,
+  draggable,
+  canManage,
+  onUnassign,
+}: {
+  task: SprintTask;
+  draggable: boolean;
+  canManage: boolean;
+  onUnassign: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `sprint:${task.key}`,
+    disabled: !draggable,
+  });
+  return (
+    <li
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Translate.toString(transform),
+        opacity: isDragging ? 0.6 : undefined,
+        zIndex: isDragging ? 30 : undefined,
+        position: isDragging ? "relative" : undefined,
+      }}
+      className="flex items-center gap-3 rounded border border-white/10 bg-ink-subtle px-3 py-2"
+    >
+      {draggable && <DragHandle attributes={attributes} listeners={listeners} />}
+      <span className="mono shrink-0 whitespace-nowrap text-[10px] uppercase tracking-widest text-chrome-dim">
+        {task.status}
+      </span>
+      <Link
+        href={`/tasks/${task.key}`}
+        className="mono shrink-0 whitespace-nowrap text-xs text-accent hover:underline"
+      >
+        {task.key}
+      </Link>
+      <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={task.title}>
+        {task.title}
+      </span>
+      <span className="mono shrink-0 whitespace-nowrap text-xs text-chrome-dim">
+        {task.story_points != null ? `${task.story_points} pts` : "—"}
+      </span>
+      {canManage && (
+        <button
+          type="button"
+          onClick={onUnassign}
+          className="text-chrome-dim hover:text-red-300"
+          aria-label="Remove from sprint"
+        >
+          <Trash2 size={12} />
+        </button>
+      )}
+    </li>
   );
 }
 
@@ -191,10 +404,12 @@ function TaskList({
   tasks,
   sprintId,
   canManage,
+  draggable,
 }: {
   tasks: SprintTask[];
   sprintId: string;
   canManage: boolean;
+  draggable: boolean;
 }) {
   const qc = useQueryClient();
   const unassign = useMutation({
@@ -203,48 +418,26 @@ function TaskList({
       qc.invalidateQueries({ queryKey: ["sprint-tasks", sprintId] });
       qc.invalidateQueries({ queryKey: ["sprint", sprintId] });
       qc.invalidateQueries({ queryKey: ["sprint-burndown", sprintId] });
+      qc.invalidateQueries({ queryKey: ["backlog"] });
     },
   });
   if (tasks.length === 0) {
     return (
       <div className="mono rounded border border-dashed border-white/10 p-4 text-center text-xs text-chrome-dim">
-        nothing in this sprint yet
+        nothing in this sprint yet — drag something over from the backlog
       </div>
     );
   }
   return (
     <ul className="space-y-1">
       {tasks.map((t) => (
-        <li
+        <SprintTaskRow
           key={t.key}
-          className="flex items-center gap-3 rounded border border-white/10 bg-ink-subtle px-3 py-2"
-        >
-          <span className="mono shrink-0 whitespace-nowrap text-[10px] uppercase tracking-widest text-chrome-dim">
-            {t.status}
-          </span>
-          <Link
-            href={`/tasks/${t.key}`}
-            className="mono shrink-0 whitespace-nowrap text-xs text-accent hover:underline"
-          >
-            {t.key}
-          </Link>
-          <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={t.title}>
-            {t.title}
-          </span>
-          <span className="mono shrink-0 whitespace-nowrap text-xs text-chrome-dim">
-            {t.story_points != null ? `${t.story_points} pts` : "—"}
-          </span>
-          {canManage && (
-            <button
-              type="button"
-              onClick={() => unassign.mutate(t.key)}
-              className="text-chrome-dim hover:text-red-300"
-              aria-label="Remove from sprint"
-            >
-              <Trash2 size={12} />
-            </button>
-          )}
-        </li>
+          task={t}
+          draggable={draggable}
+          canManage={canManage}
+          onUnassign={() => unassign.mutate(t.key)}
+        />
       ))}
     </ul>
   );

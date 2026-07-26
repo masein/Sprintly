@@ -45,7 +45,10 @@ export default function DocsPage() {
               as you type, and typing a brand-new title then{" "}
               <kbd>↵</kbd> creates it straight into the sprint — the field clears
               and keeps focus, so you can plan a whole sprint without leaving the
-              keyboard.
+              keyboard. Prefer the mouse? The sprint page shows the{" "}
+              <span className="mono">backlog</span> in a side panel — drag a row
+              (by its grip) into the task list to commit it, or drag a sprint
+              task onto the panel to send it back to the pile.
             </p>
           </Section>
 
