@@ -18,6 +18,7 @@ import {
   listTaskLogs,
   startTimer,
   stopTimer,
+  taskTimeSummary,
   type TimeLog,
 } from "@/lib/timetracking";
 import type { ApiError } from "@/lib/api";
@@ -31,6 +32,10 @@ export function TaskTimer({ taskKey }: { taskKey: string }) {
   const logsQ = useQuery({
     queryKey: ["task-logs", taskKey],
     queryFn: () => listTaskLogs(taskKey),
+  });
+  const summaryQ = useQuery({
+    queryKey: ["time-summary", taskKey],
+    queryFn: () => taskTimeSummary(taskKey),
   });
 
   const running = timerQ.data?.running ?? null;
@@ -50,11 +55,15 @@ export function TaskTimer({ taskKey }: { taskKey: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["me-timer"] });
       qc.invalidateQueries({ queryKey: ["task-logs", taskKey] });
+      qc.invalidateQueries({ queryKey: ["time-summary", taskKey] });
     },
   });
   const del = useMutation({
     mutationFn: (id: string) => deleteLog(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["task-logs", taskKey] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task-logs", taskKey] });
+      qc.invalidateQueries({ queryKey: ["time-summary", taskKey] });
+    },
   });
 
   const [manualOpen, setManualOpen] = useState(false);
@@ -99,8 +108,21 @@ export function TaskTimer({ taskKey }: { taskKey: string }) {
           onSaved={() => {
             setManualOpen(false);
             qc.invalidateQueries({ queryKey: ["task-logs", taskKey] });
+            qc.invalidateQueries({ queryKey: ["time-summary", taskKey] });
           }}
         />
+      )}
+
+      {summaryQ.data && summaryQ.data.total_minutes > 0 && (
+        <div className="mono flex items-baseline gap-2 text-xs" data-testid="tracked-total">
+          <span className="text-chrome-dim">tracked</span>
+          <span className="text-chrome">{fmtMinutes(summaryQ.data.total_minutes)}</span>
+          {summaryQ.data.subtask_minutes > 0 && (
+            <span className="text-chrome-dim">
+              · {fmtMinutes(summaryQ.data.subtask_minutes)} in subtasks
+            </span>
+          )}
+        </div>
       )}
 
       <LogList logs={logsQ.data ?? []} onDelete={(id) => del.mutate(id)} />
