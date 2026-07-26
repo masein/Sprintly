@@ -97,6 +97,12 @@ export default function SprintDetailPage() {
         >
           ← {sprint.project_key} · sprints
         </Link>
+        <Link
+          href={`/projects/${sprint.project_key}`}
+          className="mono text-xs text-accent hover:underline"
+        >
+          ← board
+        </Link>
         <span
           className={`mono inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
             sprint.state === "active"
