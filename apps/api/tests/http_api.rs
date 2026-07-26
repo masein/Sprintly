@@ -731,3 +731,103 @@ async fn retro_note_editing_locks_with_the_retro(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
 }
+
+// ─── Retro summary editing (QA-5) ────────────────────────────────────────────
+
+#[sqlx::test(migrations = "./migrations")]
+async fn retro_summary_is_editable_after_close(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "sumlead").await;
+    make_project(&app, &token, "SUM").await;
+
+    let (status, sprint) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/SUM/sprints",
+        Some(&token),
+        Some(json!({
+            "name": "Summary Sprint",
+            "starts_at": "2026-06-19T00:00:00Z",
+            "ends_at": "2026-07-03T00:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{sprint:?}");
+    let sprint_id = sprint["id"].as_str().unwrap().to_string();
+
+    // Editing the summary before the sprint completes is refused.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/sprints/{sprint_id}"),
+        Some(&token),
+        Some(json!({ "summary_md": "premature" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    for step in ["start", "complete"] {
+        let (status, body) = send(
+            &app,
+            "POST",
+            &format!("/api/v1/sprints/{sprint_id}/{step}"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{step}: {body:?}");
+    }
+    let (_, retro) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint_id}/retro"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let retro_id = retro["id"].as_str().unwrap();
+    let (status, closed) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/retros/{retro_id}/close"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{closed:?}");
+
+    // The lead refines the generated summary.
+    let (status, updated) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/sprints/{sprint_id}"),
+        Some(&token),
+        Some(json!({ "summary_md": "# Reworked\n\nHuman words now." })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated:?}");
+    assert_eq!(updated["summary_md"], "# Reworked\n\nHuman words now.");
+
+    // Meta edits on a completed sprint stay refused.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/sprints/{sprint_id}"),
+        Some(&token),
+        Some(json!({ "name": "Rename after the fact" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // A non-member can't touch it.
+    let (stranger, _) = register(&app, "sumstranger").await;
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/sprints/{sprint_id}"),
+        Some(&stranger),
+        Some(json!({ "summary_md": "graffiti" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

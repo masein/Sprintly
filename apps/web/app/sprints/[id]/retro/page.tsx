@@ -18,6 +18,7 @@ import {
   createNote,
   deleteNote,
   editNote,
+  editSprint,
   getRetro,
   getSprint,
   promoteNote,
@@ -26,6 +27,7 @@ import {
   type RetroNote,
 } from "@/lib/sprints";
 import { me } from "@/lib/auth-bundle";
+import { getProject } from "@/lib/projects";
 import type { ApiError } from "@/lib/api";
 
 const COLUMNS: { kind: RetroNote["column_kind"]; label: string; hint: string }[] = [
@@ -52,6 +54,11 @@ export default function RetroPage() {
     enabled: !!sprintId,
   });
   const meQ = useQuery({ queryKey: ["me"], queryFn: () => me() });
+  const projectQ = useQuery({
+    queryKey: ["project", sprintQ.data?.project_key],
+    queryFn: () => getProject(sprintQ.data!.project_key),
+    enabled: !!sprintQ.data?.project_key,
+  });
 
   const close = useMutation({
     mutationFn: () => closeRetro(retroQ.data!.id),
@@ -95,6 +102,8 @@ export default function RetroPage() {
   const retro = retroQ.data;
   const sprint = sprintQ.data;
   const isClosed = retro.state === "closed";
+  const canEditSummary =
+    projectQ.data?.your_role === "lead" || meQ.data?.role === "admin";
 
   return (
     <AppShell>
@@ -126,21 +135,11 @@ export default function RetroPage() {
       </header>
 
       {isClosed && sprint.summary_md && (
-        <section className="mb-6 rounded-lg border border-white/10 bg-ink-subtle p-4">
-          <div className="mono mb-2 flex items-center justify-between text-xs uppercase tracking-widest text-chrome-dim">
-            <span>summary · markdown</span>
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard.writeText(sprint.summary_md ?? "");
-              }}
-              className="text-chrome-dim hover:text-chrome"
-            >
-              copy
-            </button>
-          </div>
-          <Markdown>{sprint.summary_md}</Markdown>
-        </section>
+        <SummarySection
+          sprintId={sprintId}
+          summary={sprint.summary_md}
+          canEdit={canEditSummary}
+        />
       )}
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -176,6 +175,102 @@ export default function RetroPage() {
         </div>
       )}
     </AppShell>
+  );
+}
+
+// ─── Summary (generated at close; refinable after) ──────────────────────────
+// The close step writes deterministic markdown from the notes. It's a draft,
+// not scripture — leads and admins can rework it here before sharing.
+
+function SummarySection({
+  sprintId,
+  summary,
+  canEdit,
+}: {
+  sprintId: string;
+  summary: string;
+  canEdit: boolean;
+}) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(summary);
+  const save = useMutation({
+    mutationFn: () => editSprint(sprintId, { summary_md: draft }),
+    onSuccess: () => {
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: ["sprint", sprintId] });
+    },
+    onError: (e) => alert((e as unknown as ApiError).message),
+  });
+
+  return (
+    <section className="mb-6 rounded-lg border border-white/10 bg-ink-subtle p-4">
+      <div className="mono mb-2 flex items-center justify-between text-xs uppercase tracking-widest text-chrome-dim">
+        <span>summary · markdown</span>
+        <span className="flex items-center gap-3">
+          {canEdit && !editing && (
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(summary);
+                setEditing(true);
+              }}
+              className="text-chrome-dim hover:text-chrome"
+            >
+              edit
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard.writeText(summary);
+            }}
+            className="text-chrome-dim hover:text-chrome"
+          >
+            copy
+          </button>
+        </span>
+      </div>
+      {editing ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (draft.trim()) save.mutate();
+          }}
+          className="space-y-2"
+        >
+          <textarea
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={14}
+            aria-label="edit summary"
+            className="mono block w-full rounded border border-white/10 bg-ink px-3 py-2 text-xs text-chrome focus:border-accent focus:outline-none"
+          />
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setDraft(summary);
+              }}
+              className="mono text-xs text-chrome-dim hover:text-chrome"
+            >
+              cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!draft.trim() || save.isPending}
+              className="mono rounded bg-accent px-3 py-1 text-xs text-accent-fg disabled:opacity-50"
+            >
+              {save.isPending ? "…" : "save"}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <Markdown>{summary}</Markdown>
+      )}
+    </section>
   );
 }
 

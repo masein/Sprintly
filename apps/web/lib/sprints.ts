@@ -56,7 +56,10 @@ export const createSprint = (
 
 export const editSprint = (
   id: string,
-  body: Partial<Pick<Sprint, "name" | "goal" | "starts_at" | "ends_at">>,
+  body: Partial<Pick<Sprint, "name" | "goal" | "starts_at" | "ends_at">> & {
+    /** Retro summary — accepted only once the sprint is completed. */
+    summary_md?: string;
+  },
 ) => api<Sprint>(`/sprints/${id}`, { method: "PATCH", body });
 
 export const startSprint = (id: string) =>
