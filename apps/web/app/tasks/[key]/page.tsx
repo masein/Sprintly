@@ -22,6 +22,8 @@ import { GitLinksPanel } from "@/components/GitLinksPanel";
 import { TaskTimer } from "@/components/TaskTimer";
 import { Avatar } from "@/components/Avatar";
 import { deleteTask, editTask, getTask, moveTask, type Task } from "@/lib/tasks";
+import { setTaskParent } from "@/lib/relations";
+import { search } from "@/lib/search";
 import { assignTaskEpic, listEpics } from "@/lib/roadmap";
 import { assignTaskToSprint, listSprints, unassignTaskFromSprint } from "@/lib/sprints";
 import { me } from "@/lib/auth-bundle";
@@ -284,19 +286,7 @@ function Sidebar({ task, canEdit }: { task: Task; canEdit: boolean }) {
       <h2 className="mono text-xs uppercase tracking-widest text-chrome-dim">
         details
       </h2>
-      {task.parent_key && (
-        <div className="flex items-center justify-between gap-3">
-          <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">
-            parent
-          </span>
-          <Link
-            href={`/tasks/${task.parent_key}`}
-            className="mono text-xs text-accent hover:underline"
-          >
-            ↳ {task.parent_key}
-          </Link>
-        </div>
-      )}
+      <ParentField task={task} canEdit={canEdit} />
       <StatusField task={task} canEdit={canEdit} />
       <Field
         label="priority"
@@ -372,6 +362,130 @@ function StatusField({ task, canEdit }: { task: Task; canEdit: boolean }) {
 
 // Assignee picker (QA F2): any project member, plus "unassigned". Setting it
 // reuses the task PATCH → the F5 assignment notification fires server-side.
+// ─── Parent (task ↔ subtask conversion) ──────────────────────────────────────
+// A top-level task can become a subtask ("make subtask of…"), a subtask can be
+// promoted back ("↑ promote") or moved under a different parent — the server
+// keeps the hierarchy one level deep and refuses demoting a task that has
+// subtasks of its own.
+
+function ParentField({ task, canEdit }: { task: Task; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const [picking, setPicking] = useState(false);
+  const [q, setQ] = useState("");
+  const hitsQ = useQuery({
+    queryKey: ["parent-search", task.key, q],
+    queryFn: () => search(q, 8),
+    enabled: picking && q.trim().length > 0,
+  });
+  const set = useMutation({
+    mutationFn: (parentKey: string | null) => setTaskParent(task.key, parentKey),
+    onSuccess: () => {
+      setPicking(false);
+      setQ("");
+      qc.invalidateQueries({ queryKey: ["task", task.key] });
+      qc.invalidateQueries({ queryKey: ["tasks", task.project_id] });
+      qc.invalidateQueries({ queryKey: ["subtasks"] });
+    },
+    onError: (e) => alert((e as unknown as ApiError).message),
+  });
+
+  if (!canEdit && !task.parent_key) return null;
+
+  const candidates = (hitsQ.data?.tasks ?? []).filter(
+    (t) => t.project_key === task.project_key && t.key !== task.key,
+  );
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-3">
+        <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">
+          parent
+        </span>
+        <span className="flex items-center gap-2">
+          {task.parent_key ? (
+            <>
+              <Link
+                href={`/tasks/${task.parent_key}`}
+                className="mono text-xs text-accent hover:underline"
+              >
+                ↳ {task.parent_key}
+              </Link>
+              {canEdit && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => set.mutate(null)}
+                    disabled={set.isPending}
+                    className="mono text-[11px] text-chrome-dim hover:text-chrome disabled:opacity-50"
+                    title="back to a top-level task"
+                  >
+                    ↑ promote
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPicking((v) => !v)}
+                    className="mono text-[11px] text-chrome-dim hover:text-chrome"
+                  >
+                    move…
+                  </button>
+                </>
+              )}
+            </>
+          ) : canEdit ? (
+            <button
+              type="button"
+              onClick={() => setPicking((v) => !v)}
+              className="mono text-[11px] text-chrome-dim hover:text-chrome"
+            >
+              make subtask of…
+            </button>
+          ) : null}
+        </span>
+      </div>
+      {picking && (
+        <div className="space-y-1">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setPicking(false);
+                setQ("");
+              }
+            }}
+            placeholder="search a task in this project…"
+            aria-label="parent task search"
+            className="block w-full rounded border border-white/10 bg-ink px-2 py-1 text-xs text-chrome focus:border-accent focus:outline-none"
+          />
+          {q.trim().length > 0 && (
+            <ul className="max-h-40 space-y-0.5 overflow-y-auto">
+              {candidates.length === 0 && !hitsQ.isLoading && (
+                <li className="mono px-1 text-[11px] text-chrome-dim">
+                  no matching task here
+                </li>
+              )}
+              {candidates.map((t) => (
+                <li key={t.key}>
+                  <button
+                    type="button"
+                    onClick={() => set.mutate(t.key)}
+                    disabled={set.isPending}
+                    className="mono flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-xs text-chrome hover:bg-white/5 disabled:opacity-50"
+                  >
+                    <span className="text-accent">{t.key}</span>
+                    <span className="truncate text-chrome-dim">{t.title}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AssigneeField({ task, canEdit }: { task: Task; canEdit: boolean }) {
   const qc = useQueryClient();
   const membersQ = useQuery({

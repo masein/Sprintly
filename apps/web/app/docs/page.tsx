@@ -45,7 +45,10 @@ export default function DocsPage() {
               as you type, and typing a brand-new title then{" "}
               <kbd>↵</kbd> creates it straight into the sprint — the field clears
               and keeps focus, so you can plan a whole sprint without leaving the
-              keyboard.
+              keyboard. Prefer the mouse? The sprint page shows the{" "}
+              <span className="mono">backlog</span> in a side panel — drag a row
+              (by its grip) into the task list to commit it, or drag a sprint
+              task onto the panel to send it back to the pile.
             </p>
           </Section>
 
@@ -85,7 +88,8 @@ export default function DocsPage() {
               <span className="mono">milestones</span> as dated markers. Assign a
               task to an epic from the task&apos;s sidebar. Dragging a bar to
               reschedule is a v2 idea; for now, edit an epic&apos;s dates in its
-              row and the bar moves.
+              row and the bar moves — and click its colour swatch to repaint
+              it whenever, not just at creation.
             </p>
           </Section>
 
@@ -100,6 +104,23 @@ export default function DocsPage() {
               (<span className="mono">↳ QAV-1</span>). It&apos;s still findable
               by key/title in search and shows up in your task list — it just
               stops masquerading as independent top-level work.
+            </p>
+            <p>
+              Time rolls up: a parent&apos;s{" "}
+              <span className="mono">tracked</span> line in the timer panel is
+              its own logs <em>plus</em> its direct subtasks&apos; (
+              <span className="mono">tracked 3h · 1h in subtasks</span>) — so
+              the parent tells the whole story without opening each child.
+            </p>
+            <p>
+              Hierarchy isn&apos;t a life sentence: the{" "}
+              <span className="mono">parent</span> row in a task&apos;s details
+              converts either way — <span className="mono">make subtask
+              of…</span> tucks a task under a parent (and drops it from its
+              sprint, since it rolls up now), <span className="mono">↑
+              promote</span> makes a subtask top-level again, and{" "}
+              <span className="mono">move…</span> shifts it under a different
+              parent. One level deep, same project — the server holds the line.
             </p>
           </Section>
 
@@ -200,6 +221,21 @@ export default function DocsPage() {
               can be added back — nothing is destroyed). Everyone else sees the
               same list, read-only. You can&apos;t remove the last lead — the
               server says no, and the panel shows you why.
+            </p>
+          </Section>
+
+          <Section icon={Sparkles} title="Retrospectives">
+            <p>
+              Completing a sprint opens its retro: four columns, anonymous
+              notes if you want them, votes, and{" "}
+              <span className="mono">promote to task</span> on action items.
+              While the retro is open you can <em>edit</em> your own
+              (non-anonymous) notes in place — an{" "}
+              <span className="mono">· edited</span> marker keeps things
+              honest. Closing the retro writes a markdown summary from the
+              notes and locks them; the summary is a draft, not scripture —
+              leads can <span className="mono">edit</span> it right on the
+              retro page until it reads like a human wrote it.
             </p>
           </Section>
 
@@ -353,6 +389,14 @@ export default function DocsPage() {
               approved week locks logs in its range. Monthly payroll
               aggregates billable minutes × your hourly rate (cents math, no
               floats). PDF + CSV exports.
+            </p>
+            <p>
+              The <span className="mono">clockwork</span> panel on My Day and
+              the <span className="mono">top contributors</span> panel on a
+              project&apos;s dashboard both step through past weeks with{" "}
+              <span className="mono">‹ ›</span> — history isn&apos;t locked to
+              the current week. On the dashboard, non-leads see their own logs
+              only.
             </p>
             <p>
               The <span className="mono">Time</span> tab on a project&apos;s{" "}

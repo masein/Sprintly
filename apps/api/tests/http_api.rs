@@ -557,3 +557,465 @@ async fn admin_can_change_a_user_email(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+// ─── Retro note editing (QA-4) ───────────────────────────────────────────────
+
+/// Drive a project to an open retro; returns (sprint_id, retro_id).
+async fn open_retro(app: &Router, token: &str, key: &str) -> (String, String) {
+    make_project(app, token, key).await;
+    let (status, sprint) = send(
+        app,
+        "POST",
+        &format!("/api/v1/projects/{key}/sprints"),
+        Some(token),
+        Some(json!({
+            "name": "Retro Sprint",
+            "starts_at": "2026-06-19T00:00:00Z",
+            "ends_at": "2026-07-03T00:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{sprint:?}");
+    let sprint_id = sprint["id"].as_str().unwrap().to_string();
+    for step in ["start", "complete"] {
+        let (status, body) = send(
+            app,
+            "POST",
+            &format!("/api/v1/sprints/{sprint_id}/{step}"),
+            Some(token),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{step}: {body:?}");
+    }
+    let (status, retro) = send(
+        app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint_id}/retro"),
+        Some(token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{retro:?}");
+    assert_eq!(retro["state"], "open");
+    let retro_id = retro["id"].as_str().unwrap().to_string();
+    (sprint_id, retro_id)
+}
+
+async fn fetch_first_note(app: &Router, token: &str, sprint_id: &str) -> Value {
+    let (status, retro) = send(
+        app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint_id}/retro"),
+        Some(token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    retro["notes"]["went_well"][0].clone()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn retro_note_editing_rules_over_http(pool: PgPool) {
+    let app = app(pool);
+    let (lead_token, lead) = register(&app, "retrolead").await;
+    let (sprint_id, retro_id) = open_retro(&app, &lead_token, "RNE").await;
+
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/retros/{retro_id}/notes"),
+        Some(&lead_token),
+        Some(json!({ "column_kind": "went_well", "body": "first draft" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // The DTO exposes author_id on a non-anonymous note, and no edit flag yet.
+    let note = fetch_first_note(&app, &lead_token, &sprint_id).await;
+    let note_id = note["id"].as_str().unwrap().to_string();
+    assert_eq!(note["author_id"], lead["id"]);
+    assert_eq!(note["edited"], false);
+
+    // The author edits their note.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/retro-notes/{note_id}"),
+        Some(&lead_token),
+        Some(json!({ "body": "second thoughts" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // A non-member can't touch it — membership is checked before ownership.
+    let (stranger_token, _) = register(&app, "retrostranger").await;
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/retro-notes/{note_id}"),
+        Some(&stranger_token),
+        Some(json!({ "body": "vandalism" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // The edit landed and is flagged as edited.
+    let note = fetch_first_note(&app, &lead_token, &sprint_id).await;
+    assert_eq!(note["body"], "second thoughts");
+    assert_eq!(note["edited"], true);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn retro_note_editing_locks_with_the_retro(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "retrocloser").await;
+    let (sprint_id, retro_id) = open_retro(&app, &token, "RNC").await;
+
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/retros/{retro_id}/notes"),
+        Some(&token),
+        Some(json!({ "column_kind": "went_well", "body": "for the record" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let note = fetch_first_note(&app, &token, &sprint_id).await;
+    let note_id = note["id"].as_str().unwrap().to_string();
+
+    // Anonymous notes expose no author_id even to their author.
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/retros/{retro_id}/notes"),
+        Some(&token),
+        Some(json!({ "column_kind": "went_well", "body": "whistleblowing", "anonymous": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (_, retro) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint_id}/retro"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let anon = retro["notes"]["went_well"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["anonymous"] == true)
+        .unwrap()
+        .clone();
+    assert_eq!(anon["author_id"], Value::Null);
+
+    // Close the retro → edits are refused, the summary already snapshotted.
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/retros/{retro_id}/close"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/retro-notes/{note_id}"),
+        Some(&token),
+        Some(json!({ "body": "revisionism" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+// ─── Retro summary editing (QA-5) ────────────────────────────────────────────
+
+#[sqlx::test(migrations = "./migrations")]
+async fn retro_summary_is_editable_after_close(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "sumlead").await;
+    make_project(&app, &token, "SUM").await;
+
+    let (status, sprint) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/SUM/sprints",
+        Some(&token),
+        Some(json!({
+            "name": "Summary Sprint",
+            "starts_at": "2026-06-19T00:00:00Z",
+            "ends_at": "2026-07-03T00:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{sprint:?}");
+    let sprint_id = sprint["id"].as_str().unwrap().to_string();
+
+    // Editing the summary before the sprint completes is refused.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/sprints/{sprint_id}"),
+        Some(&token),
+        Some(json!({ "summary_md": "premature" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    for step in ["start", "complete"] {
+        let (status, body) = send(
+            &app,
+            "POST",
+            &format!("/api/v1/sprints/{sprint_id}/{step}"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{step}: {body:?}");
+    }
+    let (_, retro) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint_id}/retro"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let retro_id = retro["id"].as_str().unwrap();
+    let (status, closed) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/retros/{retro_id}/close"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{closed:?}");
+
+    // The lead refines the generated summary.
+    let (status, updated) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/sprints/{sprint_id}"),
+        Some(&token),
+        Some(json!({ "summary_md": "# Reworked\n\nHuman words now." })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated:?}");
+    assert_eq!(updated["summary_md"], "# Reworked\n\nHuman words now.");
+
+    // Meta edits on a completed sprint stay refused.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/sprints/{sprint_id}"),
+        Some(&token),
+        Some(json!({ "name": "Rename after the fact" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // A non-member can't touch it.
+    let (stranger, _) = register(&app, "sumstranger").await;
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/sprints/{sprint_id}"),
+        Some(&stranger),
+        Some(json!({ "summary_md": "graffiti" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+// ─── Task ↔ subtask conversion (QA-9) ────────────────────────────────────────
+
+async fn make_task_http(app: &Router, token: &str, project: &str, title: &str) -> String {
+    let (status, task) = send(
+        app,
+        "POST",
+        &format!("/api/v1/projects/{project}/tasks"),
+        Some(token),
+        Some(json!({ "title": title })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task:?}");
+    task["key"].as_str().unwrap().to_string()
+}
+
+async fn set_parent(app: &Router, token: &str, key: &str, parent: Option<&str>) -> StatusCode {
+    let (status, body) = send(
+        app,
+        "PUT",
+        &format!("/api/v1/tasks/{key}/parent"),
+        Some(token),
+        Some(json!({ "parent_key": parent })),
+    )
+    .await;
+    assert!(
+        !status.is_server_error(),
+        "set_parent({key}, {parent:?}) → {status}: {body:?}"
+    );
+    status
+}
+
+async fn board_keys(app: &Router, token: &str, project: &str) -> Vec<String> {
+    let (status, list) = send(
+        app,
+        "GET",
+        &format!("/api/v1/projects/{project}/tasks"),
+        Some(token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["key"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn task_subtask_conversion_over_http(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "converter").await;
+    make_project(&app, &token, "CVT").await;
+    let a = make_task_http(&app, &token, "CVT", "parent to be").await;
+    let b = make_task_http(&app, &token, "CVT", "future subtask").await;
+    let c = make_task_http(&app, &token, "CVT", "second parent").await;
+
+    // Demote B under A → B leaves the board list.
+    assert_eq!(
+        set_parent(&app, &token, &b, Some(&a)).await,
+        StatusCode::NO_CONTENT
+    );
+    let keys = board_keys(&app, &token, "CVT").await;
+    assert!(keys.contains(&a) && keys.contains(&c) && !keys.contains(&b));
+    let (_, task_b) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{b}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(task_b["parent_key"], a.as_str());
+
+    // Guards: no nesting under a subtask; no demoting a task with children;
+    // no being your own parent.
+    assert_eq!(
+        set_parent(&app, &token, &c, Some(&b)).await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        set_parent(&app, &token, &a, Some(&c)).await,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        set_parent(&app, &token, &c, Some(&c)).await,
+        StatusCode::BAD_REQUEST
+    );
+
+    // Reparent B from A to C.
+    assert_eq!(
+        set_parent(&app, &token, &b, Some(&c)).await,
+        StatusCode::NO_CONTENT
+    );
+    let (_, task_b) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{b}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(task_b["parent_key"], c.as_str());
+
+    // Cross-project parents are refused.
+    make_project(&app, &token, "CVX").await;
+    let x = make_task_http(&app, &token, "CVX", "elsewhere").await;
+    assert_eq!(
+        set_parent(&app, &token, &b, Some(&x)).await,
+        StatusCode::BAD_REQUEST
+    );
+
+    // Promote B → back on the board.
+    assert_eq!(
+        set_parent(&app, &token, &b, None).await,
+        StatusCode::NO_CONTENT
+    );
+    let keys = board_keys(&app, &token, "CVT").await;
+    assert!(keys.contains(&b));
+    let (_, task_b) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{b}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(task_b["parent_key"], Value::Null);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn demoting_a_sprint_task_clears_its_sprint(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "demoter").await;
+    make_project(&app, &token, "DMS").await;
+    let a = make_task_http(&app, &token, "DMS", "the parent").await;
+    let b = make_task_http(&app, &token, "DMS", "committed then demoted").await;
+
+    let (status, sprint) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/DMS/sprints",
+        Some(&token),
+        Some(json!({
+            "name": "Sprint 1",
+            "starts_at": "2026-06-19T00:00:00Z",
+            "ends_at": "2026-07-03T00:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{sprint:?}");
+    let sprint_id = sprint["id"].as_str().unwrap();
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sprint_id}/tasks/{b}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Demote → sprint membership drops so the sprint doesn't count it twice.
+    assert_eq!(
+        set_parent(&app, &token, &b, Some(&a)).await,
+        StatusCode::NO_CONTENT
+    );
+    let (_, task_b) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{b}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(task_b["sprint_id"], Value::Null);
+    let (_, list) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint_id}/tasks"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 0);
+}

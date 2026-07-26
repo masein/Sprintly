@@ -88,6 +88,10 @@ pub struct EditSprintReq {
     pub goal: Option<String>,
     pub starts_at: Option<DateTime<Utc>>,
     pub ends_at: Option<DateTime<Utc>>,
+    /// The retro summary — editable only once the sprint is completed (the
+    /// generated markdown is a starting point, not scripture).
+    #[validate(length(min = 1, max = 20000))]
+    pub summary_md: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -232,13 +236,24 @@ async fn edit(
         return Err(AppError::Forbidden);
     }
     // We allow edits during 'planned' and 'active' (name/goal); date edits
-    // require 'planned'.
+    // require 'planned'. The retro summary is the inverse: it only exists
+    // once the sprint completes, so that's the only state where editing it
+    // makes sense.
     let cur_state: String = sqlx::query_scalar("SELECT state FROM sprints WHERE id = $1")
         .bind(id)
         .fetch_one(&state.db)
         .await?;
-    if cur_state == "completed" {
+    let touches_meta = req.name.is_some()
+        || req.goal.is_some()
+        || req.starts_at.is_some()
+        || req.ends_at.is_some();
+    if cur_state == "completed" && touches_meta {
         return Err(AppError::Conflict("sprint is completed".into()));
+    }
+    if req.summary_md.is_some() && cur_state != "completed" {
+        return Err(AppError::Conflict(
+            "no summary to edit until the sprint completes".into(),
+        ));
     }
     if (req.starts_at.is_some() || req.ends_at.is_some()) && cur_state != "planned" {
         return Err(AppError::Conflict(
@@ -248,10 +263,11 @@ async fn edit(
     sqlx::query(
         r#"
         UPDATE sprints SET
-            name      = COALESCE($2, name),
-            goal      = COALESCE($3, goal),
-            starts_at = COALESCE($4, starts_at),
-            ends_at   = COALESCE($5, ends_at)
+            name       = COALESCE($2, name),
+            goal       = COALESCE($3, goal),
+            starts_at  = COALESCE($4, starts_at),
+            ends_at    = COALESCE($5, ends_at),
+            summary_md = COALESCE($6, summary_md)
         WHERE id = $1
         "#,
     )
@@ -260,6 +276,7 @@ async fn edit(
     .bind(req.goal)
     .bind(req.starts_at)
     .bind(req.ends_at)
+    .bind(req.summary_md)
     .execute(&state.db)
     .await?;
     let dto = fetch_sprint(&state.db, id).await?;
