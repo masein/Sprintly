@@ -203,6 +203,21 @@ export default function DocsPage() {
             </p>
           </Section>
 
+          <Section icon={Sparkles} title="Retrospectives">
+            <p>
+              Completing a sprint opens its retro: four columns, anonymous
+              notes if you want them, votes, and{" "}
+              <span className="mono">promote to task</span> on action items.
+              While the retro is open you can <em>edit</em> your own
+              (non-anonymous) notes in place — an{" "}
+              <span className="mono">· edited</span> marker keeps things
+              honest. Closing the retro writes a markdown summary from the
+              notes and locks them; the summary is a draft, not scripture —
+              leads can <span className="mono">edit</span> it right on the
+              retro page until it reads like a human wrote it.
+            </p>
+          </Section>
+
           <Section icon={AtSign} title="Mentions">
             <p>
               Type <span className="mono">@</span> in a comment or a task
