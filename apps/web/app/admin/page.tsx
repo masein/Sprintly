@@ -1,5 +1,7 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
+
 // /admin — one page with five tabs. Mainly bookkeeping: users, audit, health,
 // backups, webhooks-scaffolding.
 
@@ -124,12 +126,22 @@ function UsersTab({ onAuthExpired }: { onAuthExpired: () => void }) {
       setUserRole(id, r),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }),
   });
+  // Show the minted URL instead of clipboard-and-pray: navigator.clipboard
+  // doesn't exist on plain-http deployments, and the old handler crashed
+  // before the admin ever saw the link.
+  const [resetInfo, setResetInfo] = useState<{
+    handle: string;
+    url: string;
+    expires_at: string;
+  } | null>(null);
+  const [resetCopied, setResetCopied] = useState(false);
   const reset = useMutation({
-    mutationFn: (id: string) => resetUserPassword(id),
-    onSuccess: (data) => {
-      navigator.clipboard.writeText(data.url).catch(() => {});
-      alert(`Reset URL copied to clipboard. Expires ${data.expires_at}.`);
+    mutationFn: ({ id }: { id: string; handle: string }) => resetUserPassword(id),
+    onSuccess: (data, vars) => {
+      setResetInfo({ handle: vars.handle, url: data.url, expires_at: data.expires_at });
+      setResetCopied(false);
     },
+    onError: (e) => alert((e as unknown as ApiError).message),
   });
 
   if (users.error) {
@@ -163,6 +175,47 @@ function UsersTab({ onAuthExpired }: { onAuthExpired: () => void }) {
           <option value="suspended">suspended</option>
         </select>
       </div>
+
+      {resetInfo && (
+        <div
+          data-testid="reset-url-banner"
+          className="space-y-1.5 rounded border border-accent/40 bg-accent/10 p-3"
+        >
+          <div className="mono flex items-center justify-between text-xs text-chrome">
+            <span>
+              single-use reset link for @{resetInfo.handle} · expires{" "}
+              {resetInfo.expires_at.slice(0, 16).replace("T", " ")} UTC
+            </span>
+            <button
+              type="button"
+              onClick={() => setResetInfo(null)}
+              className="text-chrome-dim hover:text-chrome"
+              aria-label="dismiss reset link"
+            >
+              :q
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              readOnly
+              value={resetInfo.url}
+              onFocus={(e) => e.target.select()}
+              aria-label="password reset url"
+              className="mono block w-full rounded border border-white/10 bg-ink px-2 py-1 text-xs text-chrome"
+            />
+            <button
+              type="button"
+              onClick={async () => setResetCopied(await copyText(resetInfo.url))}
+              className="mono shrink-0 rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              {resetCopied ? "copied" : "copy"}
+            </button>
+          </div>
+          <p className="mono text-[10px] text-chrome-dim">
+            shown once — hand it to the user over a channel you trust.
+          </p>
+        </div>
+      )}
 
       <ul className="space-y-1">
         {(users.data ?? []).map((u) => (
@@ -219,7 +272,7 @@ function UsersTab({ onAuthExpired }: { onAuthExpired: () => void }) {
             )}
             <button
               type="button"
-              onClick={() => reset.mutate(u.id)}
+              onClick={() => reset.mutate({ id: u.id, handle: u.handle })}
               className="mono inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] text-chrome-dim hover:border-white/20 hover:text-chrome"
               title="generate single-use reset URL"
             >
