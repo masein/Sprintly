@@ -1,5 +1,7 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
+
 // Settings section: personal API tokens. Create shows the secret once;
 // after that it's hashes all the way down. Revoke is immediate.
 
@@ -79,8 +81,7 @@ export function ApiTokensSection() {
               type="button"
               aria-label="copy token"
               onClick={async () => {
-                await navigator.clipboard.writeText(freshSecret);
-                setCopied(true);
+                setCopied(await copyText(freshSecret));
               }}
               className="text-chrome-dim hover:text-chrome"
             >
