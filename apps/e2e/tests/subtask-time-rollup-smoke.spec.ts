@@ -16,9 +16,12 @@ async function fill(page: Page, label: string, value: string) {
 
 async function logManual(page: Page, hours: string, minutes: string) {
   await page.getByRole("button", { name: /manual entry/i }).click();
-  await page.getByLabel("hours").fill(hours);
-  await page.getByLabel("minutes").fill(minutes);
-  await page.getByRole("button", { name: "add log" }).click();
+  // Scope to the timer card — the details panel's "estimate hours" input
+  // would otherwise collide with the bare "hours" label.
+  const timer = page.locator("section", { hasText: "manual entry" });
+  await timer.getByLabel("hours", { exact: true }).fill(hours);
+  await timer.getByLabel("minutes").fill(minutes);
+  await timer.getByRole("button", { name: "add log" }).click();
 }
 
 test.describe("subtask time rollup", () => {
