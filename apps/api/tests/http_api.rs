@@ -1019,3 +1019,53 @@ async fn demoting_a_sprint_task_clears_its_sprint(pool: PgPool) {
     .await;
     assert_eq!(list["items"].as_array().unwrap().len(), 0);
 }
+
+// ─── Honest 4xx messages (QA2-3) ─────────────────────────────────────────────
+
+#[sqlx::test(migrations = "./migrations")]
+async fn conflict_responses_carry_their_real_message(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "conflicter").await;
+    make_project(&app, &token, "CNF").await;
+
+    // Put a task in the first column, then try to delete that column.
+    let (status, task) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/CNF/tasks",
+        Some(&token),
+        Some(json!({ "title": "squatter" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task:?}");
+    let cols = columns(&app, &token, "CNF").await;
+    let first_col = &cols[0].0;
+
+    let (status, body) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/columns/{first_col}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    // The point of the fix: the handler's message survives to the client
+    // instead of being flattened to "That already exists."
+    assert_eq!(
+        body["error"]["message"],
+        "column still has tasks — move them first"
+    );
+
+    // BadRequest messages survive too.
+    let (status, body) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{}/parent", task["key"].as_str().unwrap()),
+        Some(&token),
+        Some(json!({ "parent_key": task["key"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"]["message"], "a task can't be its own parent");
+}
