@@ -110,9 +110,14 @@ pub struct EditTaskReq {
     /// double-option lets PATCH distinguish "not sent" from "set to null".
     #[serde(default, with = "double_option")]
     pub assignee_id: Option<Option<Uuid>>,
-    pub estimate_minutes: Option<i32>,
-    pub story_points: Option<i32>,
-    pub due_date: Option<NaiveDate>,
+    /// Clearable, same double-option contract as assignee_id — the sidebar
+    /// editors let you empty these out again.
+    #[serde(default, with = "double_option")]
+    pub estimate_minutes: Option<Option<i32>>,
+    #[serde(default, with = "double_option")]
+    pub story_points: Option<Option<i32>>,
+    #[serde(default, with = "double_option")]
+    pub due_date: Option<Option<NaiveDate>>,
     pub labels: Option<Vec<String>>,
 }
 
@@ -609,10 +614,7 @@ async fn edit_task(
             description       = COALESCE($3, description),
             type              = COALESCE($4, type),
             priority          = COALESCE($5, priority),
-            estimate_minutes  = COALESCE($6, estimate_minutes),
-            story_points      = COALESCE($7, story_points),
-            due_date          = COALESCE($8, due_date),
-            labels            = COALESCE($9, labels)
+            labels            = COALESCE($6, labels)
         WHERE  id = $1
         "#,
     )
@@ -621,12 +623,34 @@ async fn edit_task(
     .bind(req.description.as_deref())
     .bind(req.r#type.as_deref())
     .bind(req.priority.as_deref())
-    .bind(req.estimate_minutes)
-    .bind(req.story_points)
-    .bind(req.due_date)
     .bind(req.labels.as_deref())
     .execute(&mut *tx)
     .await?;
+
+    // Clearable planning fields: outer Some = the field was sent; the inner
+    // Option is the new value (None empties it). COALESCE can't express
+    // "set to NULL", hence the separate statements — same shape as assignee.
+    if let Some(v) = req.estimate_minutes {
+        sqlx::query(r#"UPDATE tasks SET estimate_minutes = $2 WHERE id = $1"#)
+            .bind(task_id)
+            .bind(v)
+            .execute(&mut *tx)
+            .await?;
+    }
+    if let Some(v) = req.story_points {
+        sqlx::query(r#"UPDATE tasks SET story_points = $2 WHERE id = $1"#)
+            .bind(task_id)
+            .bind(v)
+            .execute(&mut *tx)
+            .await?;
+    }
+    if let Some(v) = req.due_date {
+        sqlx::query(r#"UPDATE tasks SET due_date = $2 WHERE id = $1"#)
+            .bind(task_id)
+            .bind(v)
+            .execute(&mut *tx)
+            .await?;
+    }
 
     // Assignee is handled separately so it's clearable (unassign). Outer Some =
     // the field was sent; the inner Option is the new value (None = unassign).

@@ -303,13 +303,102 @@ function Sidebar({ task, canEdit }: { task: Task; canEdit: boolean }) {
       <AssigneeField task={task} canEdit={canEdit} />
       <SprintField task={task} canEdit={canEdit} />
       <EpicField task={task} canEdit={canEdit} />
-      {task.due_date && <Field label="due" value={task.due_date} />}
-      {task.estimate_minutes != null && (
-        <Field label="estimate" value={`${task.estimate_minutes} min`} />
-      )}
+      <PlanningFields task={task} canEdit={canEdit} />
       <LabelsField task={task} canEdit={canEdit} />
     </section>
   );
+}
+
+// ─── Planning fields (points / due / estimate) ───────────────────────────────
+// The schema and API have carried story_points, due_date, and
+// estimate_minutes since day one — the sidebar just never offered a way to
+// set them (they only showed read-only once an import filled them in).
+
+function PlanningFields({ task, canEdit }: { task: Task; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const patch = useMutation({
+    mutationFn: (p: Partial<Task>) => editTask(task.key, p),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["task", task.key] });
+      qc.invalidateQueries({ queryKey: ["tasks", task.project_id] });
+    },
+    onError: (e) => alert((e as unknown as ApiError).message),
+  });
+
+  if (!canEdit) {
+    return (
+      <>
+        {task.story_points != null && (
+          <Field label="points" value={String(task.story_points)} />
+        )}
+        {task.due_date && <Field label="due" value={task.due_date} />}
+        {task.estimate_minutes != null && (
+          <Field label="estimate" value={fmtEstimate(task.estimate_minutes)} />
+        )}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">
+          points
+        </span>
+        <input
+          type="number"
+          min={0}
+          max={999}
+          aria-label="story points"
+          defaultValue={task.story_points ?? ""}
+          onBlur={(e) => {
+            const v = e.target.value === "" ? null : Number(e.target.value);
+            if (v !== task.story_points) patch.mutate({ story_points: v });
+          }}
+          placeholder="—"
+          className="mono w-20 rounded border border-white/10 bg-ink px-1.5 py-0.5 text-right text-xs text-chrome"
+        />
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">
+          due
+        </span>
+        <input
+          type="date"
+          aria-label="due date"
+          defaultValue={task.due_date ?? ""}
+          onChange={(e) => patch.mutate({ due_date: e.target.value || null })}
+          className="mono rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
+        />
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">
+          estimate (h)
+        </span>
+        <input
+          type="number"
+          min={0}
+          step={0.5}
+          aria-label="estimate hours"
+          defaultValue={task.estimate_minutes != null ? task.estimate_minutes / 60 : ""}
+          onBlur={(e) => {
+            const mins =
+              e.target.value === "" ? null : Math.round(Number(e.target.value) * 60);
+            if (mins !== task.estimate_minutes) patch.mutate({ estimate_minutes: mins });
+          }}
+          placeholder="—"
+          className="mono w-20 rounded border border-white/10 bg-ink px-1.5 py-0.5 text-right text-xs text-chrome"
+        />
+      </div>
+    </>
+  );
+}
+
+function fmtEstimate(mins: number): string {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
 // Status picker (QA F6): a dropdown of the board's real columns. Choosing one

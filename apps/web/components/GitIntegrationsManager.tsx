@@ -1,5 +1,7 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
+
 // Connect a repo to the project: provider + repo + optional self-hosted URL
 // and API token. On create we show the webhook URL + secret exactly once —
 // paste both into the provider's webhook settings and you're wired up.
@@ -123,8 +125,7 @@ export function GitIntegrationsManager({
               value={fresh.url}
               copied={copied === "url"}
               onCopy={async () => {
-                await navigator.clipboard.writeText(fresh.url);
-                setCopied("url");
+                if (await copyText(fresh.url)) setCopied("url");
               }}
             />
             <SecretRow
@@ -132,8 +133,7 @@ export function GitIntegrationsManager({
               value={fresh.secret}
               copied={copied === "secret"}
               onCopy={async () => {
-                await navigator.clipboard.writeText(fresh.secret);
-                setCopied("secret");
+                if (await copyText(fresh.secret)) setCopied("secret");
               }}
             />
             <p className="mono text-[10px] text-chrome-dim">
