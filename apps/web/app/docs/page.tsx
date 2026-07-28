@@ -175,7 +175,11 @@ export default function DocsPage() {
               moves the card on the board too. The same panel has a{" "}
               <span className="mono">sprint</span> select — pick{" "}
               <span className="mono">backlog · none</span> to pull a task out of
-              its sprint, or drop it straight into another one.
+              its sprint, or drop it straight into another one. Planning lives
+              there too: <span className="mono">points</span> (feeds sprint
+              totals and velocity), <span className="mono">due</span> (feeds
+              the overdue/upcoming lists), and{" "}
+              <span className="mono">estimate (h)</span>.
             </p>
           </Section>
 

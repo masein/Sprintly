@@ -57,10 +57,13 @@ test.describe("clockwork history", () => {
     await test.step("log 1h against the task, dated last Monday", async () => {
       await page.goto(`/tasks/${key}-1`);
       await page.getByRole("button", { name: /manual entry/i }).click();
-      await page.locator('input[type="date"]').fill(lastMondayISO());
-      await page.getByLabel("hours").fill("1");
-      await page.getByLabel("minutes").fill("0");
-      await page.getByRole("button", { name: "add log" }).click();
+      // Scope to the timer card — the details panel has its own date ("due
+      // date") and hours ("estimate hours") inputs now.
+      const timer = page.locator("section", { hasText: "manual entry" });
+      await timer.locator('input[type="date"]').fill(lastMondayISO());
+      await timer.getByLabel("hours", { exact: true }).fill("1");
+      await timer.getByLabel("minutes").fill("0");
+      await timer.getByRole("button", { name: "add log" }).click();
       // The log list shows the entry once it lands.
       await expect(page.getByText("1h", { exact: true }).first()).toBeVisible();
     });
