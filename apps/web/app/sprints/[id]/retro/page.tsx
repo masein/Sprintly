@@ -27,6 +27,7 @@ import {
   type RetroNote,
 } from "@/lib/sprints";
 import { me } from "@/lib/auth-bundle";
+import { copyText } from "@/lib/clipboard";
 import { getProject } from "@/lib/projects";
 import type { ApiError } from "@/lib/api";
 
@@ -223,7 +224,7 @@ function SummarySection({
           <button
             type="button"
             onClick={() => {
-              navigator.clipboard.writeText(summary);
+              void copyText(summary);
             }}
             className="text-chrome-dim hover:text-chrome"
           >

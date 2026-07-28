@@ -476,10 +476,7 @@ function InvitesTab() {
             <button
               type="button"
               onClick={() => {
-                navigator.clipboard.writeText(minted.url).then(
-                  () => setCopied(true),
-                  () => setCopied(false),
-                );
+                void copyText(minted.url).then((ok) => setCopied(ok));
               }}
               className="mono inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] text-chrome-dim hover:border-white/20 hover:text-chrome"
             >
