@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Admin password reset actually works** — broken twice over: the minted link pointed at `/login?reset=…`, a parameter the login page never read (the real page is `/reset?token=…`), and the panel then tried to copy it with `navigator.clipboard`, which doesn't exist on plain-http deployments — crashing before the admin ever saw the URL. The link now points at the reset page, and the admin panel shows it in a copyable field (select-on-focus + a fallback-backed copy button) with its expiry, instead of clipboard-and-pray.
 - **Copy buttons work on plain-HTTP deployments** — every copy button in the app (retro summary, invite links, webhook secrets, API tokens, 2FA recovery codes, vault reveals, public status links) called `navigator.clipboard`, which only exists on https/localhost — on a bare-IP http deployment they all silently failed (reported: "Copy Summary in Retrospective is not functioning"). A shared helper now falls back to the legacy textarea trick and reports honestly whether the copy landed.
 
 - **Admins can manage any project's members from the UI** — the members panel showed global admins the read-only view unless they also happened to be a project lead, even though the API always allowed them to add members, change project roles, and remove people (admin short-circuits permission checks). The panel's manage controls now appear for global admins on every project. Reported from real usage: "adding a member — I couldn't find it."
