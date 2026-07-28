@@ -1,5 +1,7 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
+
 // One row in the vault list. Owns the reveal lifecycle for its own item:
 // click-to-reveal renders plaintext in local state for 10s with a countdown
 // then masks it. Copy uses the Clipboard API + a 30s auto-clear timer.
@@ -99,18 +101,19 @@ export function VaultItemRow({
       }
     }
     try {
-      await navigator.clipboard.writeText(plaintext);
+      if (!(await copyText(plaintext))) {
+        alert("Clipboard write failed — your browser blocked it.");
+        return;
+      }
       await markCopied(item.id).catch(() => {});
       // Schedule auto-wipe.
       if (clipTimer.current) clearTimeout(clipTimer.current);
       clipTimer.current = setTimeout(async () => {
         // Best-effort overwrite. Some browsers reject writes without a user
         // gesture; we then write empty which still clears in the common case.
-        try {
-          await navigator.clipboard.writeText("");
-        } catch {
+        await copyText("").catch(() => {
           /* nothing else to do */
-        }
+        });
       }, CLIPBOARD_TTL_MS);
     } catch {
       alert("Clipboard write failed — your browser blocked it.");
