@@ -1,5 +1,7 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
+
 // Project lead control for the public status page (F18): toggle it on/off and
 // copy the shareable, unauthenticated URL.
 
@@ -70,8 +72,7 @@ export function PublicStatusModal({
                 type="button"
                 aria-label="copy link"
                 onClick={async () => {
-                  await navigator.clipboard.writeText(status.url!);
-                  setCopied(true);
+                  setCopied(await copyText(status.url!));
                 }}
                 className="text-chrome-dim hover:text-chrome"
               >

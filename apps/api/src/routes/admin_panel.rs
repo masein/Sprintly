@@ -389,8 +389,10 @@ async fn reset_password(
     .await?;
     tx.commit().await?;
 
+    // The reset landing page is /reset?token=… — /login never consumed a
+    // `reset` param, so the previously-minted URL was a dead link.
     let url = format!(
-        "{base}/login?reset={token}",
+        "{base}/reset?token={token}",
         base = state.cfg.public_url.trim_end_matches('/'),
     );
     Ok(Json(ResetPasswordResp {

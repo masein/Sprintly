@@ -4,6 +4,7 @@
 // Calls /users/me; on 401 the api wrapper attempts a refresh exactly once.
 
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { me, logout, type Me } from "@/lib/auth-bundle";
@@ -11,6 +12,7 @@ import { Avatar } from "./Avatar";
 
 export function SessionBadge() {
   const router = useRouter();
+  const qc = useQueryClient();
   const [user, setUser] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -84,8 +86,11 @@ export function SessionBadge() {
         type="button"
         onClick={async () => {
           await logout().catch(() => {});
-          router.refresh();
           setUser(null);
+          // Land on the sign-in page with nothing cached — staying put with
+          // stale query data made logout look like it did nothing.
+          qc.clear();
+          router.push("/login");
         }}
         className="text-accent hover:underline"
       >
@@ -100,6 +105,7 @@ export function SessionBadge() {
 // row (that starvation was the whole header-overflow bug).
 export function SessionMenuContents({ onNavigate }: { onNavigate?: () => void }) {
   const router = useRouter();
+  const qc = useQueryClient();
   const [user, setUser] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -188,8 +194,9 @@ export function SessionMenuContents({ onNavigate }: { onNavigate?: () => void })
         onClick={async () => {
           onNavigate?.();
           await logout().catch(() => {});
-          router.refresh();
           setUser(null);
+          qc.clear();
+          router.push("/login");
         }}
         className="rounded px-2 py-1.5 text-left hover:bg-white/5"
       >
