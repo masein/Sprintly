@@ -15,7 +15,8 @@ export type ServerEvent =
   | { event: "task_deleted"; data: { project_id: string; task_id: string; key: string } }
   | { event: "comment_created"; data: { project_id: string; task_id: string; comment_id: string } }
   | { event: "presence_update"; data: { project_id: string; task_id: string | null; user_id: string; active: boolean } }
-  | { event: "notification_created"; data: { user_id: string; notification_id: string } };
+  | { event: "notification_created"; data: { user_id: string; notification_id: string } }
+  | { event: "member_changed"; data: { project_id: string; user_id: string } };
 
 type Listener = (e: ServerEvent) => void;
 
@@ -127,6 +128,14 @@ function routeToQueryCache(e: ServerEvent, qc: QueryClient) {
     case "notification_created":
       qc.invalidateQueries({ queryKey: ["notifications"] });
       qc.invalidateQueries({ queryKey: ["my-dashboard"] });
+      break;
+    case "member_changed":
+      // Roles gate what half the UI renders — refresh the project, its
+      // member list, and the projects index so a promotion (or removal)
+      // takes effect without the reported manual refresh.
+      qc.invalidateQueries({ queryKey: ["project"] });
+      qc.invalidateQueries({ queryKey: ["project-members"] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
       break;
     default:
       break;

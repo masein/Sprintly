@@ -32,7 +32,7 @@ use crate::{
         permissions::{can, Action, ProjectRole, Resource, Role as GlobalRole},
         projects as project_ctx,
     },
-    infra::AppState,
+    infra::{events, events::Event, AppState},
     middleware::CurrentUser,
     AppError, AppResult,
 };
@@ -474,6 +474,14 @@ async fn add_member(
     .bind(user.id)
     .execute(&state.db)
     .await?;
+    events::publish(
+        &state.redis,
+        &Event::MemberChanged {
+            project_id: ctx.id,
+            user_id: req.user_id,
+        },
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -496,6 +504,14 @@ async fn remove_member(
         .bind(target)
         .execute(&state.db)
         .await?;
+    events::publish(
+        &state.redis,
+        &Event::MemberChanged {
+            project_id: ctx.id,
+            user_id: target,
+        },
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -532,6 +548,14 @@ async fn change_member_role(
     .bind(&req.role)
     .execute(&state.db)
     .await?;
+    events::publish(
+        &state.redis,
+        &Event::MemberChanged {
+            project_id: ctx.id,
+            user_id: target,
+        },
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 

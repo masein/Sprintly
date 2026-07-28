@@ -143,6 +143,16 @@ async fn handle_socket(socket: WebSocket, state: AppState, user_id: Uuid) -> App
 }
 
 fn should_forward(ev: &Event, user_id: Uuid, accessible: &HashSet<Uuid>) -> bool {
+    // Membership changes go to the project's members AND the affected user —
+    // who, when just removed, no longer passes the project filter but still
+    // needs to hear their access changed.
+    if let Event::MemberChanged {
+        project_id,
+        user_id: target,
+    } = ev
+    {
+        return *target == user_id || accessible.contains(project_id);
+    }
     if let Some(target_user) = ev.user_scope() {
         return target_user == user_id;
     }

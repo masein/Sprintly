@@ -60,6 +60,10 @@ pub enum Event {
         user_id: Uuid,
         notification_id: Uuid,
     },
+    /// Membership added / role changed / removed. Scoped to the project AND
+    /// to the affected user (who, on removal, no longer passes the project
+    /// filter but still needs to hear about it).
+    MemberChanged { project_id: Uuid, user_id: Uuid },
 }
 
 impl Event {
@@ -73,7 +77,8 @@ impl Event {
             | Self::TaskMoved { project_id, .. }
             | Self::TaskDeleted { project_id, .. }
             | Self::CommentCreated { project_id, .. }
-            | Self::PresenceUpdate { project_id, .. } => Some(*project_id),
+            | Self::PresenceUpdate { project_id, .. }
+            | Self::MemberChanged { project_id, .. } => Some(*project_id),
             Self::NotificationCreated { .. } => None,
         }
     }

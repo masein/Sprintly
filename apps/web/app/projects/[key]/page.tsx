@@ -25,6 +25,7 @@ import {
   type Project,
 } from "@/lib/projects";
 import { me } from "@/lib/auth-bundle";
+import { subscribe } from "@/lib/ws";
 import type { ApiError } from "@/lib/api";
 
 export default function ProjectPage() {
@@ -53,6 +54,17 @@ export default function ProjectPage() {
       .then((u) => setIsAdmin(u.role === "admin"))
       .catch(() => {});
   }, []);
+
+  // This page holds project/boards in plain state (not TanStack), so the
+  // global WS→query-cache routing can't refresh it. Listen directly: a
+  // membership/role change re-fetches, so "you are …" and the manage
+  // controls update without the reported manual refresh.
+  useEffect(() => {
+    return subscribe((e) => {
+      if (e.event === "member_changed") void reload();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectKey]);
 
   async function reload() {
     try {
