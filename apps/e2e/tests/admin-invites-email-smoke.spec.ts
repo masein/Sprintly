@@ -84,8 +84,8 @@ test.describe("admin invites + email edit", () => {
       const input = page.getByLabel(`new email for @${handle}`);
       await input.fill("demo@sprintly.local");
       await input.press("Enter");
-      // The API maps every conflict to its house copy ("That already exists.").
-      await expect(page.getByText(/already exists/i)).toBeVisible();
+      // Conflicts speak plainly now — the handler's own message survives.
+      await expect(page.getByText(/that email is already taken/i)).toBeVisible();
     });
 
     await test.step("a fresh email saves", async () => {

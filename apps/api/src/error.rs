@@ -79,10 +79,10 @@ impl IntoResponse for AppError {
         let (status, code) = self.status_and_code();
 
         // Log 5xx loud, 4xx quiet. Never leak internal messages to clients.
-        let public_message = match &self {
+        let public_message: String = match &self {
             Self::Database(_) | Self::Redis(_) | Self::Crypto(_) | Self::Internal(_) => {
                 error!(error = ?self, status = %status, "server error");
-                "We broke it. Tell an admin and go get coffee."
+                "We broke it. Tell an admin and go get coffee.".into()
             }
             other => {
                 warn!(error = %other, status = %status, "client error");
@@ -108,15 +108,20 @@ impl IntoResponse for AppError {
     }
 }
 
-fn other_public_message(err: &AppError) -> &'static str {
+fn other_public_message(err: &AppError) -> String {
     match err {
-        AppError::NotFound => "Not found. This page is in a different branch.",
-        AppError::Unauthorized => "Sign in to continue.",
-        AppError::Forbidden => "You don't have access to this.",
-        AppError::RateLimited { .. } => "Slow down. Try again in a bit.",
-        AppError::Validation(_) => "Some fields look off. Check the form.",
-        AppError::BadRequest(_) => "That request didn't parse.",
-        AppError::Conflict(_) => "That already exists.",
-        _ => "Something went wrong.",
+        AppError::NotFound => "Not found. This page is in a different branch.".into(),
+        AppError::Unauthorized => "Sign in to continue.".into(),
+        AppError::Forbidden => "You don't have access to this.".into(),
+        AppError::RateLimited { .. } => "Slow down. Try again in a bit.".into(),
+        // Validator output is machine-shaped; keep the human summary.
+        AppError::Validation(_) => "Some fields look off. Check the form.".into(),
+        // BadRequest / Conflict messages are hand-written at their call
+        // sites for humans — deleting a non-empty column used to say
+        // "That already exists.", which was a flat lie.
+        AppError::BadRequest(msg) | AppError::Conflict(msg) if !msg.is_empty() => msg.clone(),
+        AppError::BadRequest(_) => "That request didn't parse.".into(),
+        AppError::Conflict(_) => "That conflicts with the current state.".into(),
+        _ => "Something went wrong.".into(),
     }
 }
