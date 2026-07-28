@@ -261,7 +261,10 @@ function SprintDropZone({
   return (
     <section
       ref={setNodeRef}
-      className={`rounded-lg transition ${
+      // min-w-0: grid children default to min-width auto, so one long
+      // unbreakable task title widened this column and shoved the sidebar
+      // off-viewport — bounding it lets the row-level truncation do its job.
+      className={`min-w-0 rounded-lg transition ${
         isOver ? "bg-accent/5 ring-1 ring-accent/40" : ""
       }`}
       data-testid="sprint-drop"
