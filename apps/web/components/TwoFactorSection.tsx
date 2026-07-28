@@ -1,5 +1,7 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
+
 // Settings section: two-factor auth (F11). Enrol shows a QR + secret, verifies
 // one code to switch it on, then reveals single-use recovery codes exactly
 // once. Disabling needs a current code (or a recovery code).
@@ -127,8 +129,7 @@ export function TwoFactorSection() {
             <button
               type="button"
               onClick={async () => {
-                await navigator.clipboard.writeText(recovery.join("\n"));
-                setCopied(true);
+                setCopied(await copyText(recovery.join("\n")));
               }}
               className="mono inline-flex items-center gap-1 text-[11px] text-accent hover:underline"
             >

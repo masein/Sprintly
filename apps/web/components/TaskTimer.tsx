@@ -173,14 +173,18 @@ function ManualEntry({
   return (
     <form
       onSubmit={submit}
+      data-testid="manual-entry-form"
       className="space-y-2 rounded border border-white/10 bg-ink p-3"
     >
-      <div className="flex items-center gap-2">
+      {/* flex-wrap + min-w-0: the sidebar is ~280px wide — date + h/m +
+          billable can't fit one line there, and without wrapping the row
+          poked out of the card. */}
+      <div className="flex flex-wrap items-center gap-2">
         <input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="mono rounded border border-white/10 bg-ink-subtle px-2 py-1 text-xs text-chrome"
+          className="mono min-w-0 rounded border border-white/10 bg-ink-subtle px-2 py-1 text-xs text-chrome"
         />
         <input
           type="number"
