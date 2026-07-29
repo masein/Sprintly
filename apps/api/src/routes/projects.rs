@@ -69,6 +69,10 @@ pub struct CreateProjectReq {
 pub struct EditProjectReq {
     #[validate(length(min = 1, max = 80))]
     pub name: Option<String>,
+    /// Renaming the key rewrites EVERY task key in the project (TST-12 →
+    /// OPS-12) in the same transaction. Old /projects/OLD and /tasks/OLD-n
+    /// URLs stop resolving — the client warns loudly before sending this.
+    pub key: Option<String>,
     #[validate(length(max = 4000))]
     pub description: Option<String>,
     #[validate(length(min = 1, max = 32))]
@@ -329,6 +333,8 @@ async fn edit(
     if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
+
+    let mut tx = state.db.begin().await?;
     sqlx::query(
         r#"
         UPDATE projects SET
@@ -346,8 +352,61 @@ async fn edit(
     .bind(req.icon)
     .bind(req.color)
     .bind(req.settings)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
+
+    // Key rename: rewrite the project key and every task key with it, one
+    // transaction. The projects-row UPDATE takes the same row lock next_key()
+    // takes to mint task numbers, so no task can be created with the old
+    // prefix while the rewrite is in flight.
+    if let Some(new_key) = req.key.as_deref() {
+        let new_key = new_key.to_ascii_uppercase();
+        validate_project_key(&new_key)?;
+        if new_key != key {
+            let renamed = sqlx::query("UPDATE projects SET key = $2 WHERE id = $1")
+                .bind(ctx.id)
+                .bind(&new_key)
+                .execute(&mut *tx)
+                .await;
+            if let Err(sqlx::Error::Database(db)) = &renamed {
+                if db.is_unique_violation() {
+                    return Err(AppError::Conflict(
+                        "that key belongs to another project".into(),
+                    ));
+                }
+            }
+            renamed?;
+            // TST-12 → OPS-12 for every task (incl. soft-deleted ones, so a
+            // restore doesn't resurrect a stale prefix).
+            sqlx::query(
+                r#"
+                UPDATE tasks
+                   SET key = $3 || substring(key FROM char_length($2) + 1)
+                 WHERE project_id = $1 AND key LIKE $2 || '-%'
+                "#,
+            )
+            .bind(ctx.id)
+            .bind(&key)
+            .bind(&new_key)
+            .execute(&mut *tx)
+            .await?;
+            // Notification links point at /tasks/<key>; keep them working.
+            // Project keys are globally unique, so the old prefix can only
+            // ever have belonged to this project.
+            sqlx::query(
+                r#"
+                UPDATE notifications
+                   SET link = replace(link, '/tasks/' || $1 || '-', '/tasks/' || $2 || '-')
+                 WHERE link LIKE '/tasks/' || $1 || '-%'
+                "#,
+            )
+            .bind(&key)
+            .bind(&new_key)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await?;
 
     let dto = fetch_project_dto(&state.db, ctx.id, user.id).await?;
     Ok(Json(dto))

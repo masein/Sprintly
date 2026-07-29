@@ -1069,3 +1069,87 @@ async fn conflict_responses_carry_their_real_message(pool: PgPool) {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"]["message"], "a task can't be its own parent");
 }
+
+// ─── Project key rename (QA2-9) ──────────────────────────────────────────────
+
+#[sqlx::test(migrations = "./migrations")]
+async fn project_key_rename_cascades_to_task_keys(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "renamer").await;
+    make_project(&app, &token, "OLD1").await;
+    for title in ["first", "second"] {
+        let (status, _) = send(
+            &app,
+            "POST",
+            "/api/v1/projects/OLD1/tasks",
+            Some(&token),
+            Some(json!({ "title": title })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+
+    // Rename the key.
+    let (status, project) = send(
+        &app,
+        "PATCH",
+        "/api/v1/projects/OLD1",
+        Some(&token),
+        Some(json!({ "key": "NEW1" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{project:?}");
+    assert_eq!(project["key"], "NEW1");
+
+    // The project answers at the new key, not the old one.
+    let (status, _) = send(&app, "GET", "/api/v1/projects/NEW1", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send(&app, "GET", "/api/v1/projects/OLD1", Some(&token), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Task keys were rewritten with it.
+    let (status, task) = send(&app, "GET", "/api/v1/tasks/NEW1-1", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK, "{task:?}");
+    assert_eq!(task["project_key"], "NEW1");
+    let (status, _) = send(&app, "GET", "/api/v1/tasks/OLD1-1", Some(&token), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The sequence keeps counting — no key reuse.
+    let (status, task) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/NEW1/tasks",
+        Some(&token),
+        Some(json!({ "title": "third" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(task["key"], "NEW1-3");
+
+    // A key another project owns is refused with the real message.
+    make_project(&app, &token, "TAKEN").await;
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        "/api/v1/projects/NEW1",
+        Some(&token),
+        Some(json!({ "key": "TAKEN" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        body["error"]["message"],
+        "that key belongs to another project"
+    );
+
+    // Format rules still apply.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        "/api/v1/projects/NEW1",
+        Some(&token),
+        Some(json!({ "key": "1BAD" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}

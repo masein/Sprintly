@@ -64,7 +64,11 @@ export const createProject = (p: {
 
 export const editProject = (
   key: string,
-  p: Partial<Pick<Project, "name" | "description" | "icon" | "color">>,
+  p: Partial<Pick<Project, "name" | "description" | "icon" | "color">> & {
+    /** Renames the project key AND rewrites every task key (TST-12 → OPS-12).
+     *  Old URLs stop resolving — warn before sending. */
+    key?: string;
+  },
 ) =>
   api<Project>(`/projects/${encodeURIComponent(key)}`, {
     method: "PATCH",
