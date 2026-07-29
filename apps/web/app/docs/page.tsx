@@ -226,6 +226,15 @@ export default function DocsPage() {
               same list, read-only. You can&apos;t remove the last lead — the
               server says no, and the panel shows you why.
             </p>
+            <p>
+              Leads can also rename the <span className="mono">project
+              key</span> (the pencil next to it in the header). Every task key
+              is rewritten with it (<span className="mono">TST-12</span> →{" "}
+              <span className="mono">OPS-12</span>) in one transaction, and
+              notification links follow — but old URLs, bookmarks, and keys
+              pasted into commit messages stop resolving. The confirm dialog
+              is wordy on purpose.
+            </p>
           </Section>
 
           <Section icon={Sparkles} title="Retrospectives">

@@ -133,12 +133,15 @@ export default function ProjectPage() {
             <Icon size={24} />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-              {project.key} · {project.member_count}{" "}
-              {project.member_count === 1 ? "member" : "members"}
-              {project.your_role && (
-                <> · you are <span className="text-chrome">{project.your_role}</span></>
-              )}
+            <div className="mono flex flex-wrap items-center gap-x-1 text-xs uppercase tracking-widest text-chrome-dim">
+              <KeyEditor project={project} canManage={canManage} router={router} />
+              <span>
+                · {project.member_count}{" "}
+                {project.member_count === 1 ? "member" : "members"}
+                {project.your_role && (
+                  <> · you are <span className="text-chrome">{project.your_role}</span></>
+                )}
+              </span>
             </div>
             {editingName ? (
               <InlineName
@@ -369,6 +372,99 @@ export default function ProjectPage() {
         </div>
       )}
     </AppShell>
+  );
+}
+
+// ─── Key editor (rename cascade) ─────────────────────────────────────────────
+// Changing the key rewrites every task key in the project (TST-12 → OPS-12)
+// in one transaction, then navigates to the new URL. Old links stop
+// resolving, so the confirm() spells that out before anything is sent.
+
+function KeyEditor({
+  project,
+  canManage,
+  router,
+}: {
+  project: Project;
+  canManage: boolean;
+  router: ReturnType<typeof useRouter>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(project.key);
+  const [busy, setBusy] = useState(false);
+
+  if (!canManage) return <span>{project.key}</span>;
+  if (!editing) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        {project.key}
+        <button
+          type="button"
+          onClick={() => {
+            setValue(project.key);
+            setEditing(true);
+          }}
+          aria-label="Change project key"
+          title="change the project key (rewrites every task key)"
+          className="text-chrome-dim hover:text-chrome"
+        >
+          <Pencil size={10} />
+        </button>
+      </span>
+    );
+  }
+  return (
+    <form
+      className="inline-flex items-center gap-1"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const next = value.trim().toUpperCase();
+        if (!next || next === project.key) {
+          setEditing(false);
+          return;
+        }
+        if (
+          !confirm(
+            `Rename ${project.key} to ${next}?\n\nEvery task key is rewritten ` +
+              `(${project.key}-12 becomes ${next}-12). Old links — bookmarks, ` +
+              `commit messages, anything written down — will stop resolving. ` +
+              `This is the whole project's identity; make sure the team knows.`,
+          )
+        ) {
+          return;
+        }
+        setBusy(true);
+        try {
+          const updated = await editProject(project.key, { key: next });
+          router.push(`/projects/${updated.key}`);
+        } catch (err) {
+          alert((err as unknown as ApiError).message);
+          setBusy(false);
+        }
+      }}
+    >
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value.toUpperCase())}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setEditing(false);
+        }}
+        maxLength={10}
+        aria-label="new project key"
+        className="mono w-24 rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs uppercase text-chrome focus:border-accent focus:outline-none"
+      />
+      <button type="submit" disabled={busy} className="text-accent hover:underline disabled:opacity-50">
+        {busy ? "…" : "rename"}
+      </button>
+      <button
+        type="button"
+        onClick={() => setEditing(false)}
+        className="text-chrome-dim hover:text-chrome"
+      >
+        :q
+      </button>
+    </form>
   );
 }
 
