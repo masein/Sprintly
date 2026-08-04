@@ -59,6 +59,12 @@ pub struct TimeLogDto {
     pub task_key: String,
     pub project_key: String,
     pub user_id: Uuid,
+    /// Who logged it — the list showed bare durations, so on a shared task you
+    /// couldn't tell whose hours you were looking at.
+    pub user_handle: String,
+    pub user_avatar_url: Option<String>,
+    pub user_avatar_style: Option<String>,
+    pub user_avatar_seed: Option<String>,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     pub duration_minutes: Option<i32>,
@@ -292,6 +298,10 @@ async fn list_for_task(
                t.key              AS "task_key!: String",
                p.key              AS "project_key!: String",
                tl.user_id         AS "user_id!: Uuid",
+               u.handle           AS "user_handle!: String",
+               u.avatar_url       AS "user_avatar_url?: String",
+               u.avatar_style     AS "user_avatar_style?: String",
+               u.avatar_seed      AS "user_avatar_seed?: String",
                tl.started_at      AS "started_at!: DateTime<Utc>",
                tl.ended_at,
                tl.duration_minutes,
@@ -300,6 +310,7 @@ async fn list_for_task(
         FROM   time_logs tl
         JOIN   tasks t ON t.id = tl.task_id
         JOIN   projects p ON p.id = t.project_id
+        JOIN   users u ON u.id = tl.user_id
         WHERE  tl.task_id = $1 AND tl.deleted_at IS NULL
         ORDER  BY tl.started_at DESC
         "#,
@@ -315,6 +326,10 @@ async fn list_for_task(
             task_key: r.task_key,
             project_key: r.project_key,
             user_id: r.user_id,
+            user_handle: r.user_handle,
+            user_avatar_url: r.user_avatar_url,
+            user_avatar_style: r.user_avatar_style,
+            user_avatar_seed: r.user_avatar_seed,
             started_at: r.started_at,
             ended_at: r.ended_at,
             duration_minutes: r.duration_minutes,
@@ -442,6 +457,10 @@ async fn fetch_log(db: &PgPool, id: Uuid) -> AppResult<TimeLogDto> {
                t.key              AS "task_key!: String",
                p.key              AS "project_key!: String",
                tl.user_id         AS "user_id!: Uuid",
+               u.handle           AS "user_handle!: String",
+               u.avatar_url       AS "user_avatar_url?: String",
+               u.avatar_style     AS "user_avatar_style?: String",
+               u.avatar_seed      AS "user_avatar_seed?: String",
                tl.started_at      AS "started_at!: DateTime<Utc>",
                tl.ended_at,
                tl.duration_minutes,
@@ -450,6 +469,7 @@ async fn fetch_log(db: &PgPool, id: Uuid) -> AppResult<TimeLogDto> {
         FROM   time_logs tl
         JOIN   tasks t ON t.id = tl.task_id
         JOIN   projects p ON p.id = t.project_id
+        JOIN   users u ON u.id = tl.user_id
         WHERE  tl.id = $1
         "#,
         id
@@ -462,6 +482,10 @@ async fn fetch_log(db: &PgPool, id: Uuid) -> AppResult<TimeLogDto> {
         task_key: r.task_key,
         project_key: r.project_key,
         user_id: r.user_id,
+        user_handle: r.user_handle,
+        user_avatar_url: r.user_avatar_url,
+        user_avatar_style: r.user_avatar_style,
+        user_avatar_seed: r.user_avatar_seed,
         started_at: r.started_at,
         ended_at: r.ended_at,
         duration_minutes: r.duration_minutes,
