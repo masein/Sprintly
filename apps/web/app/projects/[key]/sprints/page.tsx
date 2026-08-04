@@ -8,6 +8,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plus, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { createSprint, listSprints, type Sprint } from "@/lib/sprints";
 import { pluralize } from "@/lib/format";
 import type { ApiError } from "@/lib/api";
@@ -37,9 +38,7 @@ export default function SprintsPage() {
     <AppShell currentProjectKey={projectKey}>
       <header className="mb-6 flex items-end justify-between">
         <div>
-          <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-            sprintly · {projectKey} · sprints
-          </div>
+          <Breadcrumbs items={projectCrumbs(projectKey, "sprints")} />
           <h1 className="text-3xl font-semibold">Sprints.</h1>
         </div>
         <button

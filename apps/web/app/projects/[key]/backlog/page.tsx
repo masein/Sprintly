@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { CheckSquare, Plus, Square, Trash2, UserPlus, UserMinus } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
 import { getProject } from "@/lib/projects";
 import { listSprints } from "@/lib/sprints";
@@ -99,17 +100,12 @@ export default function BacklogPage() {
     <AppShell currentProjectKey={key}>
       <header className="mb-4 flex items-end justify-between">
         <div>
-          <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-            {key} · backlog
-          </div>
+          <Breadcrumbs items={projectCrumbs(key, "backlog")} />
           <h1 className="text-3xl font-semibold">The pile.</h1>
           <p className="mt-1 text-sm text-chrome-dim">
             Tasks with no sprint. Select a few and triage them in one go.
           </p>
         </div>
-        <Link href={`/projects/${key}`} className="mono text-xs text-accent hover:underline">
-          ← board
-        </Link>
       </header>
 
       {canManage && selected.size > 0 && (

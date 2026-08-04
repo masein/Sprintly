@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Plus, Archive } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CreateProjectModal, projectIcon } from "@/components/CreateProjectModal";
 import { listProjects, type Project } from "@/lib/projects";
 import type { ApiError } from "@/lib/api";
@@ -47,9 +48,7 @@ function ProjectsInner() {
     <AppShell>
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-            sprintly · projects
-          </div>
+          <Breadcrumbs items={[{ label: "sprintly", href: "/" }, { label: "projects" }]} />
           <h1 className="text-3xl font-semibold">Your projects.</h1>
         </div>
         <button

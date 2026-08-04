@@ -23,7 +23,7 @@ test.describe("Jira import", () => {
       await page.getByLabel("Email", { exact: false }).fill(email);
       await page.getByLabel("Password", { exact: false }).fill("correct-horse-battery-staple");
       await page.getByRole("button", { name: /\$ git init account/ }).click();
-      await expect(page).toHaveURL("/");
+      await expect(page).toHaveURL(/\/(me\/day)?$/);
     });
 
     await test.step("create a project", async () => {
