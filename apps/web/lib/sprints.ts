@@ -65,8 +65,26 @@ export const editSprint = (
 export const startSprint = (id: string) =>
   api<Sprint>(`/sprints/${id}/start`, { method: "POST" });
 
-export const completeSprint = (id: string) =>
-  api<Sprint>(`/sprints/${id}/complete`, { method: "POST" });
+/** Where a completing sprint's unfinished tasks go. */
+export type CarryOver =
+  | { to: "backlog" }
+  | { to: "sprint"; sprint_id: string }
+  | { to: "new_sprint"; name: string; starts_at: string; ends_at: string };
+
+export type CompleteSprintResult = {
+  sprint: Sprint;
+  carried_over: number;
+  carried_to: { id: string; name: string } | null;
+};
+
+export const completeSprint = (id: string, carry_over?: CarryOver) =>
+  api<CompleteSprintResult>(`/sprints/${id}/complete`, {
+    method: "POST",
+    body: carry_over ? { carry_over } : {},
+  });
+
+export const deleteSprint = (id: string) =>
+  api<void>(`/sprints/${id}`, { method: "DELETE" });
 
 export const assignTaskToSprint = (id: string, taskKey: string) =>
   api<void>(
