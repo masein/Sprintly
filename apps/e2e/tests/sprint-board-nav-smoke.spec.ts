@@ -2,6 +2,10 @@
 // matching the backlog page. QA report: "Add a '← Board' button in the
 // Sprint section, similar to the Backlog section."
 //
+// feat/breadcrumbs-nav moved that job into the breadcrumb trail — the project
+// key crumb is the link now, and the duplicate right-aligned `← board` is
+// gone. Same capability, one affordance instead of two.
+//
 // Pre-reqs: dev stack up (`just up`), SPRINTLY_OPEN_SIGNUP=true.
 
 import { test, expect, type Page } from "@playwright/test";
@@ -15,7 +19,7 @@ async function fill(page: Page, label: string, value: string) {
 }
 
 test.describe("sprint → board navigation", () => {
-  test("the sprint page has a ← board link that lands on the board", async ({ page }) => {
+  test("the sprint page links back to the board", async ({ page }) => {
     const handle = `e2e${rand()}`;
     const key = `SB${rand().slice(0, 3).toUpperCase()}`;
 
@@ -41,7 +45,8 @@ test.describe("sprint → board navigation", () => {
     await page.getByRole("button", { name: /\$ git init sprint/ }).click();
     await expect(page).toHaveURL(/\/sprints\/[0-9a-f-]+$/);
 
-    const boardLink = page.getByRole("link", { name: "← board" });
+    const crumbs = page.getByRole("navigation", { name: "breadcrumb" });
+    const boardLink = crumbs.getByRole("link", { name: key, exact: true });
     await expect(boardLink).toBeVisible();
     await boardLink.click();
     await expect(page).toHaveURL(new RegExp(`/projects/${key}$`));
