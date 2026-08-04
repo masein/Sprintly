@@ -6,6 +6,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { enableRealtime } from "@/lib/ws";
+import { markSignedIn } from "@/lib/session-signal";
 import {
   login,
   register,
@@ -20,6 +23,7 @@ type Mode = "login" | "register";
 
 export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
+  const qc = useQueryClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [handle, setHandle] = useState("");
@@ -43,6 +47,11 @@ export function AuthForm({ mode }: { mode: Mode }) {
   }, [mode]);
 
   function done() {
+    // A session exists now — bring realtime up (and let the achievement
+    // watcher start polling) without waiting for a reload; Providers only
+    // does that for visitors who already had a session on load.
+    markSignedIn();
+    enableRealtime(qc);
     router.push("/");
     router.refresh();
   }
