@@ -78,6 +78,10 @@ export function SessionBadge() {
         my day
       </Link>
       <span className="text-chrome-dim">·</span>
+      <Link href="/search" className="text-accent hover:underline">
+        search
+      </Link>
+      <span className="text-chrome-dim">·</span>
       <Link href="/settings" className="text-accent hover:underline">
         settings
       </Link>
@@ -181,6 +185,13 @@ export function SessionMenuContents({ onNavigate }: { onNavigate?: () => void })
         className="rounded px-2 py-1.5 text-left hover:bg-white/5"
       >
         my day
+      </Link>
+      <Link
+        href="/search"
+        onClick={onNavigate}
+        className="rounded px-2 py-1.5 text-left hover:bg-white/5"
+      >
+        search
       </Link>
       <Link
         href="/settings"

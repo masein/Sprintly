@@ -125,9 +125,11 @@ Built in order. Each one ships fully usable before the next begins.
     detail page with markdown (react-markdown + remark-gfm + rehype-sanitize),
     threaded comments + emoji reactions, activity feed, watchers, two-phase
     attachment upload with XHR progress ✓
-  - **C:** cross-project `/search` (tsvector + pg_trgm) + `/me/tasks`, cmd-K
+  - **C:** cross-project `/search` (tsvector + pg_trgm) + `/me/tasks`, a
+    Jira-style query language at `/search` with saved (optionally shared)
+    queries, cmd-K
     command palette w/ task search + actions + nav, global keyboard hotkeys
-    (`/` `?` `c` `g p` `g m` `g s`), board filter chips, subtasks + links
+    (`/` `?` `c` `g p` `g m` `g s` `g f`), board filter chips, subtasks + links
     panels on the task detail, konami → CRT mode, `sudo` / `rm -rf` /
     `:q` / `:wq` easter eggs ✓
 - [x] **M4** — Estimation & time tracking ✓
