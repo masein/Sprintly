@@ -6,10 +6,17 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Plus, X } from "lucide-react";
+import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
-import { createSprint, listSprints, type Sprint } from "@/lib/sprints";
+import {
+  createSprint,
+  deleteSprint,
+  editSprint,
+  listSprints,
+  type Sprint,
+} from "@/lib/sprints";
+import { getProject } from "@/lib/projects";
 import { pluralize } from "@/lib/format";
 import type { ApiError } from "@/lib/api";
 
@@ -24,6 +31,13 @@ export default function SprintsPage() {
     retry: (n, e) => (e as unknown as ApiError)?.status !== 401 && n < 1,
   });
   const [creating, setCreating] = useState(false);
+  const [filter, setFilter] = useState("");
+  const projectQ = useQuery({
+    queryKey: ["project", projectKey],
+    queryFn: () => getProject(projectKey),
+    enabled: !!projectKey,
+  });
+  const canManage = projectQ.data?.your_role === "lead";
 
   if (q.error) {
     const e = q.error as unknown as ApiError;
@@ -33,7 +47,16 @@ export default function SprintsPage() {
     }
   }
 
-  const items = q.data ?? [];
+  const all = q.data ?? [];
+  const needle = filter.trim().toLowerCase();
+  const items = needle
+    ? all.filter(
+        (s) =>
+          s.name.toLowerCase().includes(needle) ||
+          s.goal.toLowerCase().includes(needle) ||
+          s.state.includes(needle),
+      )
+    : all;
   return (
     <AppShell currentProjectKey={projectKey}>
       <header className="mb-6 flex items-end justify-between">
@@ -49,6 +72,29 @@ export default function SprintsPage() {
           <Plus size={14} /> new sprint
         </button>
       </header>
+
+      {all.length > 0 && (
+        <div className="mb-4 flex items-center gap-2 rounded border border-white/10 bg-ink-subtle px-2 py-1.5">
+          <Search size={12} className="shrink-0 text-chrome-dim" />
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="filter sprints by name, goal, or state…"
+            aria-label="search sprints"
+            className="mono w-full bg-transparent text-xs text-chrome placeholder:text-chrome-dim/60 focus:outline-none"
+          />
+          {filter && (
+            <button
+              type="button"
+              onClick={() => setFilter("")}
+              aria-label="clear sprint filter"
+              className="shrink-0 text-chrome-dim hover:text-chrome"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      )}
 
       {creating && (
         <CreateSprintForm
@@ -73,10 +119,16 @@ export default function SprintsPage() {
         </div>
       )}
 
+      {!q.isLoading && all.length > 0 && items.length === 0 && (
+        <div className="mono rounded border border-dashed border-white/10 p-6 text-center text-xs text-chrome-dim">
+          no sprint matches “{filter}”.
+        </div>
+      )}
+
       <ul className="space-y-2">
         {items.map((s) => (
           <li key={s.id}>
-            <SprintRow sprint={s} />
+            <SprintRow sprint={s} canManage={canManage} projectKey={projectKey} />
           </li>
         ))}
       </ul>
@@ -84,43 +136,176 @@ export default function SprintsPage() {
   );
 }
 
-function SprintRow({ sprint }: { sprint: Sprint }) {
-  return (
-    <Link
-      href={`/sprints/${sprint.id}`}
-      className="flex items-center gap-4 rounded border border-white/10 bg-ink-subtle px-4 py-3 transition hover:border-white/20"
-    >
-      <span
-        className={`mono inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
-          sprint.state === "active"
-            ? "border-accent bg-accent/10 text-accent"
-            : sprint.state === "planned"
-              ? "border-white/10 text-chrome-dim"
-              : "border-white/10 text-chrome-dim opacity-70"
-        }`}
+function SprintRow({
+  sprint,
+  canManage,
+  projectKey,
+}: {
+  sprint: Sprint;
+  canManage: boolean;
+  projectKey: string;
+}) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(sprint.name);
+  const [starts, setStarts] = useState(sprint.starts_at.slice(0, 10));
+  const [ends, setEnds] = useState(sprint.ends_at.slice(0, 10));
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["sprints", projectKey] });
+    qc.invalidateQueries({ queryKey: ["sprint", sprint.id] });
+  };
+  const save = useMutation({
+    mutationFn: () =>
+      editSprint(sprint.id, {
+        name,
+        starts_at: new Date(`${starts}T00:00:00Z`).toISOString(),
+        ends_at: new Date(`${ends}T00:00:00Z`).toISOString(),
+      }),
+    onSuccess: () => {
+      setEditing(false);
+      setError(null);
+      refresh();
+    },
+    onError: (e) => setError((e as unknown as ApiError).message),
+  });
+  const del = useMutation({
+    mutationFn: () => deleteSprint(sprint.id),
+    onSuccess: () => {
+      refresh();
+      qc.invalidateQueries({ queryKey: ["backlog", projectKey] });
+    },
+    onError: (e) => setError((e as unknown as ApiError).message),
+  });
+
+  // Editing is inline so the list stays the list — no modal, no navigation.
+  if (editing) {
+    return (
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (name.trim()) save.mutate();
+        }}
+        className="space-y-2 rounded border border-accent/40 bg-ink-subtle px-4 py-3"
       >
-        {sprint.state}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm text-chrome">{sprint.name}</div>
-        {sprint.goal && (
-          <div className="mono truncate text-[11px] text-chrome-dim">
-            {sprint.goal}
+        <input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          aria-label={`${sprint.name} name`}
+          className="mono block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="date"
+            value={starts}
+            onChange={(e) => setStarts(e.target.value)}
+            aria-label={`${sprint.name} start`}
+            className="mono rounded border border-white/10 bg-ink px-2 py-1 text-xs text-chrome"
+          />
+          <span className="mono text-[10px] text-chrome-dim">→</span>
+          <input
+            type="date"
+            value={ends}
+            onChange={(e) => setEnds(e.target.value)}
+            aria-label={`${sprint.name} end`}
+            className="mono rounded border border-white/10 bg-ink px-2 py-1 text-xs text-chrome"
+          />
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setName(sprint.name);
+                setStarts(sprint.starts_at.slice(0, 10));
+                setEnds(sprint.ends_at.slice(0, 10));
+                setError(null);
+              }}
+              className="mono text-xs text-chrome-dim hover:text-chrome"
+            >
+              cancel
+            </button>
+            <button
+              type="submit"
+              disabled={save.isPending || !name.trim()}
+              className="mono rounded bg-accent px-2 py-1 text-xs text-accent-fg disabled:opacity-50"
+            >
+              save
+            </button>
           </div>
+        </div>
+        {error && <div className="mono text-[11px] text-red-200">{error}</div>}
+      </form>
+    );
+  }
+
+  return (
+    <div className="group flex items-center gap-4 rounded border border-white/10 bg-ink-subtle px-4 py-3 transition hover:border-white/20">
+      <Link href={`/sprints/${sprint.id}`} className="flex min-w-0 flex-1 items-center gap-4">
+        <span
+          className={`mono inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
+            sprint.state === "active"
+              ? "border-accent bg-accent/10 text-accent"
+              : sprint.state === "planned"
+                ? "border-white/10 text-chrome-dim"
+                : "border-white/10 text-chrome-dim opacity-70"
+          }`}
+        >
+          {sprint.state}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm text-chrome">{sprint.name}</div>
+          {sprint.goal && (
+            <div className="mono truncate text-[11px] text-chrome-dim">
+              {sprint.goal}
+            </div>
+          )}
+        </div>
+        <div className="mono hidden shrink-0 text-[10px] text-chrome-dim sm:block">
+          {sprint.starts_at.slice(0, 10)} → {sprint.ends_at.slice(0, 10)}
+        </div>
+        <div className="mono shrink-0 text-xs text-chrome-dim">
+          {pluralize(sprint.task_count, "task")} · {sprint.done_points}/{sprint.total_points} pts
+        </div>
+        {sprint.state === "completed" && sprint.velocity_points != null && (
+          <span className="mono shrink-0 rounded border border-white/10 px-1.5 py-0.5 text-[10px] uppercase text-chrome-dim">
+            velocity {sprint.velocity_points}
+          </span>
         )}
-      </div>
-      <div className="mono text-[10px] text-chrome-dim">
-        {sprint.starts_at.slice(0, 10)} → {sprint.ends_at.slice(0, 10)}
-      </div>
-      <div className="mono text-xs text-chrome-dim">
-        {pluralize(sprint.task_count, "task")} · {sprint.done_points}/{sprint.total_points} pts
-      </div>
-      {sprint.state === "completed" && sprint.velocity_points != null && (
-        <span className="mono rounded border border-white/10 px-1.5 py-0.5 text-[10px] uppercase text-chrome-dim">
-          velocity {sprint.velocity_points}
+      </Link>
+      {canManage && (
+        <span className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            aria-label={`edit ${sprint.name}`}
+            title="rename / move the dates"
+            className="text-chrome-dim hover:text-chrome"
+          >
+            <Pencil size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                confirm(
+                  `Delete “${sprint.name}”?\n\nIts ${sprint.task_count} task(s) are NOT deleted — ` +
+                    `they go back to the backlog, ready to re-plan.`,
+                )
+              )
+                del.mutate();
+            }}
+            aria-label={`delete ${sprint.name}`}
+            title="delete the sprint (tasks return to the backlog)"
+            className="text-chrome-dim hover:text-red-300"
+          >
+            <Trash2 size={12} />
+          </button>
         </span>
       )}
-    </Link>
+      {error && <span className="mono shrink-0 text-[11px] text-red-200">{error}</span>}
+    </div>
   );
 }
 
