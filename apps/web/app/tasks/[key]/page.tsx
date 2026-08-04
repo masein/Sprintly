@@ -21,6 +21,7 @@ import { FieldValuesPanel } from "@/components/FieldValuesPanel";
 import { GitLinksPanel } from "@/components/GitLinksPanel";
 import { TaskTimer } from "@/components/TaskTimer";
 import { Avatar } from "@/components/Avatar";
+import { AssigneePicker } from "@/components/AssigneePicker";
 import { deleteTask, editTask, getTask, moveTask, type Task } from "@/lib/tasks";
 import { setTaskParent } from "@/lib/relations";
 import { search } from "@/lib/search";
@@ -622,19 +623,12 @@ function AssigneeField({ task, canEdit }: { task: Task; canEdit: boolean }) {
       <span className="mono text-[10px] uppercase tracking-widest text-chrome-dim">assignee</span>
       <div className="flex items-center gap-1.5">
         {currentAvatar}
-        <select
-          value={task.assignee_id ?? ""}
-          onChange={(e) => patch.mutate(e.target.value || null)}
-          aria-label="assignee"
-          className="mono max-w-[55%] truncate rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
-        >
-          <option value="">unassigned</option>
-          {members.map((m) => (
-            <option key={m.user_id} value={m.user_id}>
-              @{m.handle}
-            </option>
-          ))}
-        </select>
+        <AssigneePicker
+          members={members}
+          value={task.assignee_id}
+          onChange={(id) => patch.mutate(id)}
+          disabled={patch.isPending}
+        />
       </div>
     </div>
   );
