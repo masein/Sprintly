@@ -1237,20 +1237,6 @@ async fn completing_a_sprint_carries_unfinished_work(pool: PgPool) {
         &format!("/api/v1/sprints/{sprint}/start"),
         Some(&token),
         None,
-// ─── Settings merge + project appearance (QA3-11/12) ─────────────────────────
-
-#[sqlx::test(migrations = "./migrations")]
-async fn patch_me_merges_settings_instead_of_replacing(pool: PgPool) {
-    let app = app(pool);
-    let (token, _) = register(&app, "settingsmerger").await;
-
-    // Screen A stores its preference.
-    let (status, _) = send(
-        &app,
-        "PATCH",
-        "/api/v1/users/me",
-        Some(&token),
-        Some(json!({ "settings": { "coffee_meter": false } })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -1440,6 +1426,26 @@ async fn sprint_dates_editable_while_active_and_delete_frees_tasks(pool: PgPool)
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(task["sprint_id"], Value::Null);
+}
+
+// ─── Settings merge + project appearance (QA3-11/12) ─────────────────────────
+
+#[sqlx::test(migrations = "./migrations")]
+async fn patch_me_merges_settings_instead_of_replacing(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "settingsmerger").await;
+
+    // Screen A stores its preference.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        "/api/v1/users/me",
+        Some(&token),
+        Some(json!({ "settings": { "coffee_meter": false } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
     // Screen B stores a different one — without knowing about the first.
     let (status, me) = send(
         &app,
