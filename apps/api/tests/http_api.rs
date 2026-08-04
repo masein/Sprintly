@@ -1153,3 +1153,80 @@ async fn project_key_rename_cascades_to_task_keys(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+// ─── Settings merge + project appearance (QA3-11/12) ─────────────────────────
+
+#[sqlx::test(migrations = "./migrations")]
+async fn patch_me_merges_settings_instead_of_replacing(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "settingsmerger").await;
+
+    // Screen A stores its preference.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        "/api/v1/users/me",
+        Some(&token),
+        Some(json!({ "settings": { "coffee_meter": false } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Screen B stores a different one — without knowing about the first.
+    let (status, me) = send(
+        &app,
+        "PATCH",
+        "/api/v1/users/me",
+        Some(&token),
+        Some(json!({ "settings": { "project_order": ["ONE", "TWO"] } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Both survive: the old whole-blob write dropped coffee_meter here.
+    assert_eq!(me["settings"]["coffee_meter"], false);
+    assert_eq!(me["settings"]["project_order"][1], "TWO");
+
+    // Same key overwrites, as you'd expect.
+    let (_, me) = send(
+        &app,
+        "PATCH",
+        "/api/v1/users/me",
+        Some(&token),
+        Some(json!({ "settings": { "project_order": ["THREE"] } })),
+    )
+    .await;
+    assert_eq!(me["settings"]["project_order"], json!(["THREE"]));
+    assert_eq!(me["settings"]["coffee_meter"], false);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn project_icon_and_color_are_editable(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "repainter").await;
+    make_project(&app, &token, "PNT").await;
+
+    let (status, p) = send(
+        &app,
+        "PATCH",
+        "/api/v1/projects/PNT",
+        Some(&token),
+        Some(json!({ "icon": "rocket", "color": "#22d3ee" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{p:?}");
+    assert_eq!(p["icon"], "rocket");
+    assert_eq!(p["color"], "#22d3ee");
+
+    // Junk colour is refused, and the stored value is untouched.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        "/api/v1/projects/PNT",
+        Some(&token),
+        Some(json!({ "color": "octarine" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, p) = send(&app, "GET", "/api/v1/projects/PNT", Some(&token), None).await;
+    assert_eq!(p["color"], "#22d3ee");
+}
