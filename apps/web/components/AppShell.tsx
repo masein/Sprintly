@@ -29,7 +29,13 @@ export function AppShell({
     <div className="min-h-screen">
       <OfflineBanner />
       <TopBar currentProjectKey={currentProjectKey} />
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">{children}</main>
+      {/* max-w-7xl (1280px) left ultrawide monitors with a narrow column of
+          content and oceans of gutter; wide:max-w-[1600px] lets boards, tables,
+          and the sprint two-column layout actually use a ≥1440px screen while
+          keeping line lengths sane. Paddings scale with it. */}
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 wide:max-w-[1600px] wide:px-10">
+        {children}
+      </main>
     </div>
   );
 }
@@ -55,7 +61,7 @@ function TopBar({ currentProjectKey }: { currentProjectKey?: string }) {
 
   return (
     <header className="sticky top-0 z-20 border-b border-white/10 bg-ink/80 backdrop-blur">
-      <div className="mx-auto flex h-12 max-w-7xl items-center gap-2 px-4 sm:gap-3 sm:px-6">
+      <div className="mx-auto flex h-12 max-w-7xl items-center gap-2 px-4 sm:gap-3 sm:px-6 wide:max-w-[1600px] wide:px-10">
         <Link href="/" className="mono shrink-0 text-sm tracking-tight">
           <span className="font-semibold">sprintly</span>
           <span className="text-chrome-dim">/</span>

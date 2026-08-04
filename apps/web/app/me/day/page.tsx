@@ -10,6 +10,7 @@ import {
   AlertCircle, Clock, Eye, ListChecks, Timer,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
 import { StatTile } from "@/components/StatTile";
 import { WeekNav, thisMondayISO } from "@/components/WeekNav";
@@ -62,9 +63,7 @@ export default function MyDayPage() {
   return (
     <AppShell>
       <header className="mb-6">
-        <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-          sprintly · my day
-        </div>
+        <Breadcrumbs items={[{ label: "sprintly", href: "/" }, { label: "my day" }]} />
         <h1 className="text-3xl font-semibold">Today.</h1>
       </header>
 

@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import { Plus, X, Vault as VaultIcon } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
 import { VaultItemRow } from "@/components/VaultItemRow";
 import { VaultValueField } from "@/components/VaultValueField";
@@ -81,9 +82,13 @@ export default function VaultPage() {
     <AppShell currentProjectKey={projectKey}>
       <header className="mb-6 flex items-end justify-between">
         <div>
-          <div className="mono flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
-            <VaultIcon size={11} /> sprintly · {projectKey} · vault
-          </div>
+          <Breadcrumbs
+            items={[
+              { label: "sprintly", href: "/", icon: <VaultIcon size={11} /> },
+              { label: projectKey, href: `/projects/${projectKey}` },
+              { label: "vault" },
+            ]}
+          />
           <h1 className="text-3xl font-semibold">Secrets.</h1>
           <p className="mt-1 text-sm text-chrome-dim">
             Encrypted at rest with a per-project key. Reveal is rate-limited

@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
 import { ThroughputChart } from "@/components/ThroughputChart";
 import { TimeReportPanel } from "@/components/TimeReportPanel";
@@ -55,9 +56,9 @@ export default function MetricsPage() {
     <AppShell currentProjectKey={key}>
       <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-            {key} · {tab === "flow" ? "flow metrics" : "time report"}
-          </div>
+          <Breadcrumbs
+            items={projectCrumbs(key, tab === "flow" ? "flow metrics" : "time report")}
+          />
           <h1 className="text-3xl font-semibold">
             {tab === "flow" ? "How work flows." : "Where time went."}
           </h1>

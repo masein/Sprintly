@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { me, type Me, type ApiError } from "@/lib/auth-bundle";
 import { api } from "@/lib/api";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ApiTokensSection } from "@/components/ApiTokensSection";
 import { TwoFactorSection } from "@/components/TwoFactorSection";
 import { AvatarSettings } from "@/components/AvatarSettings";
@@ -106,9 +107,7 @@ export default function SettingsPage() {
   return (
     <Shell>
       <header className="space-y-2">
-        <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-          sprintly · settings
-        </div>
+        <Breadcrumbs items={[{ label: "sprintly", href: "/" }, { label: "settings" }]} />
         <h1 className="text-3xl font-semibold">Your profile.</h1>
         <p className="mono text-xs text-chrome-dim">
           @{user.handle} · {user.role} · joined{" "}
@@ -178,12 +177,6 @@ export default function SettingsPage() {
               saved {savedAt.toLocaleTimeString()}
             </span>
           )}
-          <Link
-            href="/"
-            className="mono ml-auto text-xs text-chrome-dim hover:text-chrome"
-          >
-            ← back
-          </Link>
         </div>
       </form>
 

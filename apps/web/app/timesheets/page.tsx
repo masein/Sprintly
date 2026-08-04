@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { Check, Download } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
 import {
   approveTimesheet,
@@ -60,9 +61,7 @@ export default function ApprovalsPage() {
   return (
     <AppShell>
       <header className="mb-6">
-        <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-          sprintly · approvals
-        </div>
+        <Breadcrumbs items={[{ label: "sprintly", href: "/" }, { label: "approvals" }]} />
         <h1 className="text-3xl font-semibold">Timesheets to review.</h1>
       </header>
 

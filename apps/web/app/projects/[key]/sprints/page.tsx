@@ -8,6 +8,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import {
   createSprint,
   deleteSprint,
@@ -60,9 +61,7 @@ export default function SprintsPage() {
     <AppShell currentProjectKey={projectKey}>
       <header className="mb-6 flex items-end justify-between">
         <div>
-          <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-            sprintly · {projectKey} · sprints
-          </div>
+          <Breadcrumbs items={projectCrumbs(projectKey, "sprints")} />
           <h1 className="text-3xl font-semibold">Sprints.</h1>
         </div>
         <button

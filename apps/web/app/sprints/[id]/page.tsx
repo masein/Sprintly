@@ -19,6 +19,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Play, CheckCircle2, GripVertical, Plus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { BurndownChart } from "@/components/BurndownChart";
 import { LoadError } from "@/components/LoadError";
 import { Markdown } from "@/components/Markdown";
@@ -144,18 +145,14 @@ export default function SprintDetailPage() {
   return (
     <AppShell currentProjectKey={sprint.project_key}>
       <div className="mb-4 flex items-center gap-3">
-        <Link
-          href={`/projects/${sprint.project_key}/sprints`}
-          className="mono text-xs text-chrome-dim hover:text-chrome"
-        >
-          ← {sprint.project_key} · sprints
-        </Link>
-        <Link
-          href={`/projects/${sprint.project_key}`}
-          className="mono text-xs text-accent hover:underline"
-        >
-          ← board
-        </Link>
+        <Breadcrumbs
+          items={[
+            { label: "sprintly", href: "/" },
+            { label: sprint.project_key, href: `/projects/${sprint.project_key}` },
+            { label: "sprints", href: `/projects/${sprint.project_key}/sprints` },
+            { label: sprint.name },
+          ]}
+        />
         <span
           className={`mono inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
             sprint.state === "active"
