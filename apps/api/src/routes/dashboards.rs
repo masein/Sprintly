@@ -121,6 +121,9 @@ pub struct MyDashboardDto {
     pub my_tasks_sample: Vec<MyTaskSample>,
     pub watched_changed_recently: Vec<WatchedRow>,
     pub time_this_week_minutes: i64,
+    /// Today in the *user's* timezone — the coffee meter is a daily gauge and
+    /// was reading the weekly total, so it pinned itself by Wednesday.
+    pub time_today_minutes: i64,
     pub running_timer: Option<RunningTimerRef>,
 }
 
@@ -565,6 +568,36 @@ async fn my_dashboard(
     .fetch_one(&state.db)
     .await?;
 
+    // ── time logged today, in the user's own timezone ──
+    // The coffee meter is a daily gauge; feeding it the weekly total pinned it
+    // by midweek. "Today" has to mean the user's day, not UTC's — an evening
+    // in Tehran is already tomorrow in UTC. Unknown tz names fall back to UTC
+    // rather than erroring the whole dashboard.
+    let tz: String = sqlx::query_scalar(
+        r#"
+        SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_timezone_names n WHERE n.name = u.timezone)
+                    THEN u.timezone ELSE 'UTC' END
+        FROM   users u WHERE u.id = $1
+        "#,
+    )
+    .bind(user.id)
+    .fetch_optional(&state.db)
+    .await?
+    .unwrap_or_else(|| "UTC".to_string());
+    let time_today_minutes: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COALESCE(SUM(duration_minutes), 0)::bigint
+        FROM   time_logs
+        WHERE  user_id = $1 AND deleted_at IS NULL
+          AND  ended_at IS NOT NULL
+          AND  (started_at AT TIME ZONE $2)::date = (now() AT TIME ZONE $2)::date
+        "#,
+    )
+    .bind(user.id)
+    .bind(&tz)
+    .fetch_one(&state.db)
+    .await?;
+
     // ── running timer ──
     let running = sqlx::query!(
         r#"
@@ -590,6 +623,7 @@ async fn my_dashboard(
         my_tasks_sample,
         watched_changed_recently,
         time_this_week_minutes,
+        time_today_minutes,
         running_timer: running,
     }))
 }
