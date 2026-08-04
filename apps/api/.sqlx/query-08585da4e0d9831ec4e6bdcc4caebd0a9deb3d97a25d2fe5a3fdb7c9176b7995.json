@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT name       AS \"name!: String\",\n                           state      AS \"state!: String\",\n                           project_id AS \"project_id!: Uuid\"\n                    FROM   sprints WHERE id = $1 AND deleted_at IS NULL\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "state!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_id!: Uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "08585da4e0d9831ec4e6bdcc4caebd0a9deb3d97a25d2fe5a3fdb7c9176b7995"
+}

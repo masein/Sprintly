@@ -11,6 +11,7 @@ import {
   AlertTriangle, Calendar, Clock, Flame, History, ListChecks, TrendingUp,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
 import { StatTile } from "@/components/StatTile";
 import { VelocityChart } from "@/components/VelocityChart";
@@ -86,9 +87,7 @@ export default function ProjectDashboardPage() {
     <AppShell currentProjectKey={projectKey}>
       <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-            sprintly · {projectKey} · dashboard
-          </div>
+          <Breadcrumbs items={projectCrumbs(projectKey, "dashboard")} />
           <h1 className="text-3xl font-semibold">At a glance.</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">

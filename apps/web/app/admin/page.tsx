@@ -13,6 +13,7 @@ import {
   Pencil, RotateCcw, Server, Shield, Users, Webhook,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { StatTile } from "@/components/StatTile";
 import {
   createInvite,
@@ -43,9 +44,7 @@ export default function AdminPage() {
   return (
     <AppShell>
       <header className="mb-6">
-        <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-          sprintly · admin
-        </div>
+        <Breadcrumbs items={[{ label: "sprintly", href: "/" }, { label: "admin" }]} />
         <h1 className="text-3xl font-semibold">Operations.</h1>
         <p className="mt-1 text-sm text-chrome-dim">
           Admin-only. Every action you take here is in the audit log.

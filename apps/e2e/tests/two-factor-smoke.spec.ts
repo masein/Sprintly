@@ -71,7 +71,7 @@ test.describe("F11 two-factor smoke", () => {
       await fill(page, "Email", email);
       await fill(page, "Password", password);
       await page.getByRole("button", { name: /\$ git init account/ }).click();
-      await expect(page).toHaveURL("/");
+      await expect(page).toHaveURL(/\/(me\/day)?$/);
     });
 
     let secret = "";
@@ -117,7 +117,7 @@ test.describe("F11 two-factor smoke", () => {
 
       await page.getByLabel(/authentication code/i).fill(totp(secret));
       await page.getByRole("button", { name: /\$ verify/ }).click();
-      await expect(page).toHaveURL("/");
+      await expect(page).toHaveURL(/\/(me\/day)?$/);
       await expect(page.getByText(`@${handle}`)).toBeVisible();
     });
   });
