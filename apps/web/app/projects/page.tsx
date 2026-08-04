@@ -7,7 +7,23 @@ import { Plus, Archive } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CreateProjectModal, projectIcon } from "@/components/CreateProjectModal";
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 import { listProjects, type Project } from "@/lib/projects";
+import { me, patchMe } from "@/lib/auth-bundle";
 import type { ApiError } from "@/lib/api";
 import { Sprint } from "@/components/Sprint";
 
@@ -26,9 +42,31 @@ function ProjectsInner() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(search?.get("new") === "1");
 
+  // Per-person card order lives in the user's own settings blob, so everyone
+  // arranges their own wall without touching anyone else's (QA: "can edit
+  // project cards order for each person"). Unknown/new keys keep the server's
+  // order at the end, so a project someone adds you to still shows up.
+  const [order, setOrder] = useState<string[]>([]);
+
+  function applyOrder(list: Project[], keys: string[]): Project[] {
+    if (keys.length === 0) return list;
+    const rank = new Map(keys.map((k, i) => [k, i]));
+    return [...list].sort(
+      (a, b) => (rank.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.key) ?? Number.MAX_SAFE_INTEGER),
+    );
+  }
+
   async function reload() {
     try {
-      setProjects(await listProjects());
+      const [list, who] = await Promise.all([listProjects(), me().catch(() => null)]);
+      const saved = Array.isArray(
+        (who?.settings as { project_order?: unknown } | undefined)?.project_order,
+      )
+        ? ((who!.settings as { project_order: string[] }).project_order)
+        : [];
+      setOrder(saved);
+      setProjects(applyOrder(list, saved));
+      return;
     } catch (e) {
       const err = e as unknown as ApiError;
       if (err.status === 401) {
@@ -36,6 +74,30 @@ function ProjectsInner() {
         return;
       }
       setError(err.message);
+    }
+  }
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+
+  async function onDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id || !projects) return;
+    const from = projects.findIndex((p) => p.key === active.id);
+    const to = projects.findIndex((p) => p.key === over.id);
+    if (from < 0 || to < 0) return;
+    const next = arrayMove(projects, from, to);
+    setProjects(next);
+    const keys = next.map((p) => p.key);
+    setOrder(keys);
+    // Best-effort persist: the visual move already happened, and a failed
+    // save just means the order isn't remembered next time — say so rather
+    // than snapping the cards back under the cursor.
+    try {
+      await patchMe({ settings: { project_order: keys } });
+    } catch {
+      setError("Couldn't save that order — it'll reset on reload.");
     }
   }
 
@@ -73,11 +135,15 @@ function ProjectsInner() {
       ) : projects.length === 0 ? (
         <EmptyState onCreate={() => setCreating(true)} />
       ) : (
-        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((p) => (
-            <ProjectCard key={p.id} project={p} />
-          ))}
-        </ul>
+        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+          <SortableContext items={projects.map((p) => p.key)} strategy={rectSortingStrategy}>
+            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 wide:grid-cols-4">
+              {projects.map((p) => (
+                <ProjectCard key={p.key} project={p} />
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
 
       <CreateProjectModal
@@ -94,11 +160,30 @@ function ProjectsInner() {
 
 function ProjectCard({ project }: { project: Project }) {
   const Icon = projectIcon(project.icon);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: project.key });
   return (
-    <li>
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={isDragging ? "z-20 opacity-70" : undefined}
+    >
+      <div className="relative">
+        {/* Drag by the grip only — the card itself stays a plain link, so a
+            click never turns into an accidental rearrangement. */}
+        <button
+          type="button"
+          {...attributes}
+          {...(listeners as React.DOMAttributes<HTMLButtonElement>)}
+          aria-label={`reorder ${project.key}`}
+          title="drag to reorder — your own arrangement"
+          className="absolute right-2 top-2 z-10 cursor-grab touch-none rounded p-1 text-chrome-dim opacity-0 transition hover:text-chrome focus-visible:opacity-100 group-hover:opacity-100 active:cursor-grabbing"
+        >
+          <GripVertical size={13} />
+        </button>
       <Link
         href={`/projects/${project.key}`}
-        className="block rounded-lg border border-white/10 bg-ink-subtle p-4 transition hover:border-white/20"
+        className="group block rounded-lg border border-white/10 bg-ink-subtle p-4 transition hover:border-white/20"
       >
         <div className="flex items-start gap-3">
           <div
@@ -128,6 +213,7 @@ function ProjectCard({ project }: { project: Project }) {
           </div>
         </div>
       </Link>
+      </div>
     </li>
   );
 }

@@ -14,7 +14,7 @@ import { MembersManager } from "@/components/MembersManager";
 import { PublicStatusModal } from "@/components/PublicStatusModal";
 import { TemplatesManager } from "@/components/TemplatesManager";
 import { WebhooksManager } from "@/components/WebhooksManager";
-import { projectIcon } from "@/components/CreateProjectModal";
+import { ProjectAppearance } from "@/components/ProjectAppearance";
 import {
   archiveProject,
   editProject,
@@ -114,7 +114,6 @@ export default function ProjectPage() {
     );
   }
 
-  const Icon = projectIcon(project.icon);
   const canManage = project.your_role === "lead";
   const defaultBoard = boards.find((b) => b.is_default) ?? boards[0];
 
@@ -126,12 +125,11 @@ export default function ProjectPage() {
             whole bug — a shared flex-wrap row let a dozen buttons eat the
             line before the title got a look at the remaining space). */}
         <div className="flex items-start gap-3">
-          <div
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg"
-            style={{ background: `${project.color}20`, color: project.color }}
-          >
-            <Icon size={24} />
-          </div>
+          <ProjectAppearance
+            project={project}
+            canEdit={canManage}
+            onChanged={setProject}
+          />
           <div className="min-w-0 flex-1">
             <div className="mono flex flex-wrap items-center gap-x-1 text-xs uppercase tracking-widest text-chrome-dim">
               <KeyEditor project={project} canManage={canManage} router={router} />
