@@ -11,6 +11,7 @@ import Link from "next/link";
 import { CheckSquare, Plus, Square, Trash2, UserPlus, UserMinus } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
+import { ListSearch, matchesTask } from "@/components/ListSearch";
 import { LoadError } from "@/components/LoadError";
 import { getProject } from "@/lib/projects";
 import { listSprints } from "@/lib/sprints";
@@ -42,6 +43,7 @@ export default function BacklogPage() {
   });
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const apply = useMutation({
@@ -82,7 +84,10 @@ export default function BacklogPage() {
   // mirrors the API's create-task gate.
   const canCreate =
     projectQ.data?.your_role === "lead" || projectQ.data?.your_role === "contributor";
-  const items = backlogQ.data ?? [];
+  const allItems = backlogQ.data ?? [];
+  // Search filters in place; bulk actions then apply to what you can see, which
+  // is the point — triage a slice without hand-picking rows.
+  const items = allItems.filter((t) => matchesTask(query, t));
   const sprints = (sprintsQ.data ?? []).filter((s) => s.state !== "completed");
 
   const allSelected = items.length > 0 && selected.size === items.length;
@@ -157,6 +162,19 @@ export default function BacklogPage() {
       )}
 
       <div className="rounded-lg border border-white/10 bg-ink-subtle">
+        <div className="border-b border-white/10 p-2">
+          <ListSearch
+            value={query}
+            onChange={setQuery}
+            label="search backlog tasks"
+            placeholder="search the pile by key, title, or label…"
+          />
+          {query.trim() && (
+            <div className="mono mt-1 px-1 text-[11px] text-chrome-dim">
+              {items.length} of {allItems.length} shown
+            </div>
+          )}
+        </div>
         {canCreate && (
           <BacklogQuickAdd
             projectKey={key}

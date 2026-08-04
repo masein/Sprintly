@@ -21,6 +21,7 @@ import { Play, CheckCircle2, GripVertical, Plus, Trash2, X } from "lucide-react"
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { BurndownChart } from "@/components/BurndownChart";
+import { ListSearch, matchesTask } from "@/components/ListSearch";
 import { LoadError } from "@/components/LoadError";
 import { Markdown } from "@/components/Markdown";
 import {
@@ -70,6 +71,11 @@ export default function SprintDetailPage() {
     queryFn: () => listBacklog(projectKey!),
     enabled: !!projectKey && sprintOpen,
   });
+
+  // Search over the sprint's tasks and the backlog panel at once — both lists
+  // are already loaded, so this is instant. (Named taskQuery, not `search`:
+  // lib/search's `search()` is already in scope here for the task typeahead.)
+  const [taskQuery, setTaskQuery] = useState("");
 
   const invalidateLists = () => {
     qc.invalidateQueries({ queryKey: ["sprint-tasks", id] });
@@ -223,11 +229,20 @@ export default function SprintDetailPage() {
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
           <SprintDropZone active={sprintOpen}>
-            <h2 className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
-              tasks ({tasksQ.data?.length ?? 0})
-            </h2>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="mono text-xs uppercase tracking-widest text-chrome-dim">
+                tasks ({tasksQ.data?.length ?? 0})
+              </h2>
+              <ListSearch
+                value={taskQuery}
+                onChange={setTaskQuery}
+                label="search sprint tasks"
+                placeholder="search this sprint + backlog…"
+                className="w-full sm:w-72"
+              />
+            </div>
             <TaskList
-              tasks={tasksQ.data ?? []}
+              tasks={(tasksQ.data ?? []).filter((t) => matchesTask(taskQuery, t))}
               sprintId={id}
               canManage={sprint.state !== "completed"}
               draggable={sprintOpen}
@@ -238,7 +253,10 @@ export default function SprintDetailPage() {
           </SprintDropZone>
           <aside>
             {sprintOpen && (
-              <BacklogPanel items={backlogQ.data ?? []} loading={backlogQ.isLoading} />
+              <BacklogPanel
+                items={(backlogQ.data ?? []).filter((t) => matchesTask(taskQuery, t))}
+                loading={backlogQ.isLoading}
+              />
             )}
             {burnQ.data && <BurndownChart points={burnQ.data.items} />}
             {sprint.summary_md && (

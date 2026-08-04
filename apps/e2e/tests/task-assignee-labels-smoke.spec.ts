@@ -12,6 +12,14 @@ function rand(): string {
   return Math.random().toString(36).slice(2, 8);
 }
 
+
+/** The assignee control is a searchable combobox now, not a native select. */
+async function pickAssignee(page: Page, handle: string) {
+  await page.getByLabel("assignee", { exact: true }).click();
+  await page.getByLabel("search assignee").fill(handle);
+  await page.getByRole("option", { name: new RegExp(`@${handle}`) }).click();
+}
+
 test.describe("QA F2/F3 — task assignee + labels", () => {
   test("assign a member and apply a label; both persist and show on the card", async ({ page }) => {
     const handle = `e2e${rand()}`;
@@ -56,7 +64,7 @@ test.describe("QA F2/F3 — task assignee + labels", () => {
     });
 
     await test.step("assign to the member and add the label", async () => {
-      await page.getByLabel("assignee", { exact: true }).selectOption({ label: `@${handle}` });
+      await pickAssignee(page, handle);
       await page.getByLabel("add label").selectOption({ label: "backend" });
       // The label chip shows on the task immediately.
       await expect(page.getByLabel(/remove backend/i)).toBeVisible();
@@ -65,7 +73,7 @@ test.describe("QA F2/F3 — task assignee + labels", () => {
     await test.step("reload: both persist", async () => {
       await page.reload();
       // Assignee is no longer "unassigned".
-      await expect(page.getByLabel("assignee", { exact: true })).not.toHaveValue("");
+      await expect(page.getByLabel("assignee", { exact: true })).toContainText(handle);
       await expect(page.getByLabel(/remove backend/i)).toBeVisible();
     });
 
