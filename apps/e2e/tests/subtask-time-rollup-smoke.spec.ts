@@ -36,7 +36,7 @@ test.describe("subtask time rollup", () => {
       await fill(page, "Email", `${handle}@sprintly.test`);
       await fill(page, "Password", "correct-horse-battery-staple");
       await page.getByRole("button", { name: /\$ git init account/ }).click();
-      await expect(page).toHaveURL("/");
+      await expect(page).toHaveURL(/\/(me\/day)?$/);
 
       await page.goto("/projects");
       await page.getByRole("button", { name: /new project/i }).first().click();

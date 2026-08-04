@@ -49,6 +49,7 @@ import { type BoardView, type GroupBy } from "@/lib/boardViews";
 import { TaskCard } from "./TaskCard";
 import { BoardFilters, toFilterDSL, type Chip } from "./BoardFilters";
 import { BoardViewBar } from "./BoardViewBar";
+import { ListSearch, matchesTask } from "./ListSearch";
 
 type Lane = { key: string; label: string; tasks: Task[] };
 
@@ -226,9 +227,14 @@ export function Board({
         ? (activeSprint?.id ?? undefined)
         : scope;
 
+  // Free-text search over what's already loaded: key, title, labels. The chips
+  // are a server-side filter DSL; this is the "where is that card" box QA
+  // asked for, and it stays instant by never leaving the browser.
+  const [search, setSearch] = useState("");
+
   const filter = chips.length > 0 ? toFilterDSL(chips) : undefined;
   // Don't fetch until the scope is resolved — avoids a flash of the wrong scope.
-  const { data: tasks = [] } = useTasks(
+  const { data: allTasks = [] } = useTasks(
     projectKey,
     projectId,
     filter,
@@ -236,6 +242,10 @@ export function Board({
     scope !== null,
   );
   const move = useMoveTask(projectId);
+  const tasks = useMemo(
+    () => (search.trim() ? allTasks.filter((t) => matchesTask(search, t)) : allTasks),
+    [allTasks, search],
+  );
 
   // Member handles for assignee swimlane labels (only fetched when needed).
   const membersQ = useQuery({
@@ -280,6 +290,20 @@ export function Board({
         chips={chips}
         onChange={(next) => { setChips(next); setActiveViewId(null); }}
       />
+      <div className="mb-3 flex items-center gap-2">
+        <ListSearch
+          value={search}
+          onChange={setSearch}
+          label="search board tasks"
+          placeholder="search cards by key, title, or label…"
+          className="w-full sm:w-80"
+        />
+        {search.trim() && (
+          <span className="mono shrink-0 text-[11px] text-chrome-dim">
+            {tasks.length} of {allTasks.length}
+          </span>
+        )}
+      </div>
       {error && (
         <div className="mono mb-3 rounded border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-200">
           {error}

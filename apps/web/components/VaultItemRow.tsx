@@ -13,10 +13,12 @@ import { copyText } from "@/lib/clipboard";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Eye, EyeOff, Copy, Trash2, RotateCw, History, Key, FileText, Server, KeyRound, Terminal,
+  Eye, EyeOff, Copy, Pencil, Trash2, RotateCw, History, Key, FileText, Server, KeyRound, Terminal,
 } from "lucide-react";
+import { VaultValueField } from "./VaultValueField";
 import {
   deleteVaultItem,
+  editVaultItem,
   markCopied,
   revealVaultItem,
   type VaultItem,
@@ -125,6 +127,31 @@ export function VaultItemRow({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["vault", projectKey] }),
   });
 
+  // Editing: metadata always, the secret only if you type/drop a new one —
+  // leaving the value blank keeps the stored ciphertext untouched.
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(item.name);
+  const [username, setUsername] = useState(item.username);
+  const [description, setDescription] = useState(item.description);
+  const [newValue, setNewValue] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: () =>
+      editVaultItem(item.id, {
+        name,
+        username,
+        description,
+        value: newValue || undefined,
+      }),
+    onSuccess: () => {
+      setEditing(false);
+      setNewValue("");
+      setEditError(null);
+      qc.invalidateQueries({ queryKey: ["vault", projectKey] });
+    },
+    onError: (e) => setEditError((e as unknown as ApiError).message),
+  });
+
   const Icon = KIND_ICON[item.kind] ?? Key;
 
   return (
@@ -138,6 +165,11 @@ export function VaultItemRow({
               {item.kind.replace("_", " ")}
             </span>
           </div>
+          {item.username && (
+            <div className="mono mt-0.5 text-[11px] text-chrome">
+              <span className="text-chrome-dim">user</span> {item.username}
+            </div>
+          )}
           {item.description && (
             <div className="mono mt-0.5 text-[11px] text-chrome-dim">
               {item.description}
@@ -153,6 +185,23 @@ export function VaultItemRow({
         >
           <History size={13} />
         </button>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => {
+              setName(item.name);
+              setUsername(item.username);
+              setDescription(item.description);
+              setNewValue("");
+              setEditing((v) => !v);
+            }}
+            className="text-chrome-dim hover:text-chrome"
+            title="edit"
+            aria-label={`edit ${item.name}`}
+          >
+            <Pencil size={13} />
+          </button>
+        )}
         {canEdit && (
           <button
             type="button"
@@ -179,6 +228,73 @@ export function VaultItemRow({
           </button>
         )}
       </div>
+
+      {editing && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) save.mutate();
+          }}
+          className="mt-2 space-y-2 border-t border-white/5 pt-2"
+        >
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            aria-label={`${item.name} name`}
+            className="block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
+          />
+          {item.kind === "password" && (
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="username"
+              aria-label={`${item.name} username`}
+              autoComplete="off"
+              className="block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
+            />
+          )}
+          <input
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="description (never the secret)"
+            aria-label={`${item.name} description`}
+            className="block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
+          />
+          <VaultValueField
+            kind={item.kind}
+            value={newValue}
+            onChange={setNewValue}
+            label="new secret value — leave empty to keep the current one"
+          />
+          {editError && (
+            <div className="mono text-[11px] text-red-200">{editError}</div>
+          )}
+          <div className="flex items-center justify-between">
+            <span className="mono text-[10px] text-chrome-dim">
+              {newValue
+                ? "saving re-encrypts under a fresh nonce (counts as a rotation)"
+                : "metadata only — the stored secret stays as it is"}
+            </span>
+            <span className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                className="mono text-xs text-chrome-dim hover:text-chrome"
+              >
+                cancel
+              </button>
+              <button
+                type="submit"
+                disabled={save.isPending || !name.trim()}
+                className="mono rounded bg-accent px-2 py-1 text-xs text-accent-fg disabled:opacity-50"
+              >
+                {save.isPending ? "saving…" : "save"}
+              </button>
+            </span>
+          </div>
+        </form>
+      )}
 
       <div className="mt-2 flex items-center gap-2 border-t border-white/5 pt-2">
         {revealed ? (

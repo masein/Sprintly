@@ -27,7 +27,7 @@ test.describe("retro summary editing", () => {
       await fill(page, "Email", `${handle}@sprintly.test`);
       await fill(page, "Password", "correct-horse-battery-staple");
       await page.getByRole("button", { name: /\$ git init account/ }).click();
-      await expect(page).toHaveURL("/");
+      await expect(page).toHaveURL(/\/(me\/day)?$/);
 
       await page.goto("/projects");
       await page.getByRole("button", { name: /new project/i }).first().click();
@@ -44,7 +44,13 @@ test.describe("retro summary editing", () => {
       await expect(page).toHaveURL(/\/sprints\/[0-9a-f-]+$/);
       await page.getByRole("button", { name: /start sprint/ }).click();
       await page.getByRole("button", { name: /complete \+ open retro/ }).click();
-      await expect(page).toHaveURL(/\/retro$/);
+      // Completing now asks where unfinished work goes before it commits — with
+      // nothing left over the default (leave it here) is fine, but the modal
+      // still has to be confirmed.
+      const completeModal = page.getByTestId("complete-sprint-modal");
+      await expect(completeModal).toBeVisible();
+      await completeModal.getByRole("button", { name: /complete sprint/ }).click();
+      await expect(page).toHaveURL(/\/retro$/, { timeout: 15_000 });
 
       await page.getByPlaceholder("add to went well…").fill("we shipped");
       await page.getByRole("button", { name: "add", exact: true }).first().click();

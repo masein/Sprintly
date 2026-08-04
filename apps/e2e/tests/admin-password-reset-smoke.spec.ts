@@ -27,7 +27,7 @@ test.describe("admin password reset", () => {
       await fill(page, "Email", `${victim}@sprintly.test`);
       await fill(page, "Password", "old-password-forgotten");
       await page.getByRole("button", { name: /\$ git init account/ }).click();
-      await expect(page).toHaveURL("/");
+      await expect(page).toHaveURL(/\/(me\/day)?$/);
     });
 
     let resetUrl = "";
@@ -38,7 +38,7 @@ test.describe("admin password reset", () => {
       await fill(admin, "Email", "demo@sprintly.local");
       await fill(admin, "Password", "sprintly");
       await admin.getByRole("button", { name: /\$ ssh sprintly/ }).click();
-      await expect(admin).toHaveURL("/");
+      await expect(admin).toHaveURL(/\/(me\/day)?$/);
 
       await admin.goto("/admin");
       await admin.getByPlaceholder("search handle / email / name").fill(victim);
@@ -69,7 +69,7 @@ test.describe("admin password reset", () => {
       await fill(fresh, "Email", `${victim}@sprintly.test`);
       await fill(fresh, "Password", "brand-new-password-1");
       await fresh.getByRole("button", { name: /\$ ssh sprintly/ }).click();
-      await expect(fresh).toHaveURL("/");
+      await expect(fresh).toHaveURL(/\/(me\/day)?$/);
       await ctx.close();
     });
   });
