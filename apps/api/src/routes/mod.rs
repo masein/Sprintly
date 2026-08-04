@@ -14,6 +14,7 @@ pub mod health;
 pub mod import_export;
 pub mod integrations;
 pub mod invoicing;
+pub mod jql;
 pub mod labels;
 pub mod metrics;
 pub mod notifications;

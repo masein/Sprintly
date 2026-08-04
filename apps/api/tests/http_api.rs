@@ -1504,3 +1504,263 @@ async fn project_icon_and_color_are_editable(pool: PgPool) {
     let (_, p) = send(&app, "GET", "/api/v1/projects/PNT", Some(&token), None).await;
     assert_eq!(p["color"], "#22d3ee");
 }
+
+// ── JQL search + saved queries (feat/jql-search) ─────────────────────────
+
+async fn jql(app: &Router, token: &str, q: &str) -> (StatusCode, Value) {
+    let encoded = q
+        .replace('%', "%25")
+        .replace(' ', "%20")
+        .replace('"', "%22")
+        .replace('#', "%23")
+        .replace('&', "%26")
+        .replace('+', "%2B")
+        .replace('=', "%3D")
+        .replace('(', "%28")
+        .replace(')', "%29")
+        .replace(',', "%2C")
+        .replace('<', "%3C")
+        .replace('>', "%3E")
+        .replace('~', "%7E");
+    send(
+        app,
+        "GET",
+        &format!("/api/v1/search/jql?jql={encoded}"),
+        Some(token),
+        None,
+    )
+    .await
+}
+
+fn keys(body: &Value) -> Vec<String> {
+    body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["key"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn jql_filters_tasks_and_never_leaves_your_projects(pool: PgPool) {
+    let app = app(pool);
+    // The very first account is bootstrapped as an admin, and admins can see
+    // every project — so burn one to make alice and bob ordinary members.
+    let _ = register(&app, "jqlroot").await;
+    let (alice, _) = register(&app, "jqlalice").await;
+    let (bob, _) = register(&app, "jqlbob").await;
+    make_project(&app, &alice, "JQLA").await;
+    make_project(&app, &bob, "JQLB").await;
+    let a1 = make_task_http(&app, &alice, "JQLA", "alpha login bug").await;
+    let a2 = make_task_http(&app, &alice, "JQLA", "beta export crash").await;
+    let b1 = make_task_http(&app, &bob, "JQLB", "alpha login bug").await;
+
+    // An empty query is "everything I can see" — and no more.
+    let (status, body) = jql(&app, &alice, "").await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let mine = keys(&body);
+    assert!(mine.contains(&a1) && mine.contains(&a2), "{mine:?}");
+    assert!(!mine.contains(&b1), "alice saw bob's task: {mine:?}");
+    assert_eq!(body["total"], 2);
+
+    // Text match narrows within that scope.
+    let (status, body) = jql(&app, &alice, "title ~ alpha").await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(keys(&body), vec![a1.clone()]);
+
+    // Bob's identical title is his own, still invisible to alice.
+    let (_, body) = jql(&app, &bob, "title ~ alpha").await;
+    assert_eq!(keys(&body), vec![b1]);
+
+    // currentUser() resolves per caller. Nothing is assigned yet, so the
+    // negative form is what proves the substitution happened at all.
+    let (status, body) = jql(&app, &alice, "assignee is empty").await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["total"], 2);
+    let (status, body) = jql(&app, &alice, "assignee = currentUser()").await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["total"], 0);
+
+    // in-lists, ORDER BY, and a field the schema really has.
+    let (status, body) = jql(
+        &app,
+        &alice,
+        "status in (todo, in_progress) AND project = JQLA ORDER BY key ASC",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(keys(&body), vec![a1, a2]);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn jql_syntax_errors_say_where(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "jqlerr").await;
+    make_project(&app, &token, "JQLE").await;
+
+    for bad in [
+        "banana = 3",
+        "status todo",
+        "(status = todo",
+        "points = high",
+    ] {
+        let (status, body) = jql(&app, &token, bad).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "`{bad}` should be rejected: {body:?}"
+        );
+        let msg = body["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            msg.contains("character"),
+            "`{bad}` should point at a position, got: {msg}"
+        );
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn saved_queries_round_trip(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "jqlsave").await;
+
+    let (status, made) = send(
+        &app,
+        "POST",
+        "/api/v1/search/queries",
+        Some(&token),
+        Some(
+            json!({ "name": "My open work", "jql": "assignee = currentUser() AND status != done" }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{made:?}");
+    let id = made["id"].as_str().unwrap().to_string();
+    assert_eq!(made["is_mine"], true);
+    assert_eq!(made["is_shared"], false);
+
+    let (status, body) = send(&app, "GET", "/api/v1/search/queries", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+    assert_eq!(body["items"][0]["owner_handle"], "jqlsave");
+
+    // Same name again is a conflict that says so, not a duplicate row.
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/api/v1/search/queries",
+        Some(&token),
+        Some(json!({ "name": "my open WORK", "jql": "status = todo" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body:?}");
+
+    // An unparseable query is refused at save time — storing it would just
+    // hand the surprise to whoever loads it later.
+    let (status, body) = send(
+        &app,
+        "POST",
+        "/api/v1/search/queries",
+        Some(&token),
+        Some(json!({ "name": "broken", "jql": "banana = 3" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body:?}");
+
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/search/queries/{id}"),
+        Some(&token),
+        Some(json!({ "name": "Everything of mine", "is_shared": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["name"], "Everything of mine");
+    assert_eq!(body["is_shared"], true);
+
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/search/queries/{id}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/search/queries/{id}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_shared_query_is_readable_by_all_and_editable_by_its_owner_only(pool: PgPool) {
+    let app = app(pool);
+    let (owner, _) = register(&app, "jqlowner").await;
+    let (other, _) = register(&app, "jqlother").await;
+
+    let (status, made) = send(
+        &app,
+        "POST",
+        "/api/v1/search/queries",
+        Some(&owner),
+        Some(json!({ "name": "Team triage", "jql": "priority = p0", "is_shared": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{made:?}");
+    let id = made["id"].as_str().unwrap().to_string();
+
+    let (status, body) = send(&app, "GET", "/api/v1/search/queries", Some(&other), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"][0]["name"], "Team triage");
+    assert_eq!(body["items"][0]["is_mine"], false);
+    assert_eq!(body["items"][0]["owner_handle"], "jqlowner");
+
+    // Sharing lends the query, not the pen.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/search/queries/{id}"),
+        Some(&other),
+        Some(json!({ "jql": "priority = p3" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/search/queries/{id}"),
+        Some(&other),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A private query stays private.
+    let (_, made2) = send(
+        &app,
+        "POST",
+        "/api/v1/search/queries",
+        Some(&owner),
+        Some(json!({ "name": "Mine only", "jql": "status = todo" })),
+    )
+    .await;
+    assert_eq!(made2["is_shared"], false);
+    let (_, body) = send(&app, "GET", "/api/v1/search/queries", Some(&other), None).await;
+    let names: Vec<&str> = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["Team triage"],
+        "private query leaked: {names:?}"
+    );
+}

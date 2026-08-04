@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { ChevronDown, FolderPlus, FolderKanban, Menu, X } from "lucide-react";
+import { ChevronDown, FolderPlus, FolderKanban, Menu, Search, X } from "lucide-react";
 import { listProjects, type Project } from "@/lib/projects";
 import { SessionBadge, SessionMenuContents } from "./SessionBadge";
 import { RunningTimerChip } from "./RunningTimerChip";
@@ -68,6 +68,16 @@ function TopBar({ currentProjectKey }: { currentProjectKey?: string }) {
         </Link>
 
         <ProjectSwitcher currentProjectKey={currentProjectKey} />
+
+        {/* Query search. The label folds away on narrow screens — the header
+            row is exactly where things used to overflow. */}
+        <Link
+          href="/search"
+          className="mono inline-flex shrink-0 items-center gap-1 rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+        >
+          <Search size={11} />
+          <span className="hidden sm:inline">search</span>
+        </Link>
 
         <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
           {/* The coffee meter is a nicety; hide it on the narrowest screens. */}
