@@ -73,6 +73,9 @@ pub struct VaultItemDto {
     pub name: String,
     pub kind: String,
     pub description: String,
+    /// Account the secret belongs to — `name` carries the site/host/url.
+    /// Empty for kinds where it makes no sense.
+    pub username: String,
     pub key_version: i32,
     pub created_by: Option<Uuid>,
     pub last_rotated_at: DateTime<Utc>,
@@ -87,6 +90,8 @@ pub struct CreateItemReq {
     pub kind: String,
     #[validate(length(max = 4000))]
     pub description: Option<String>,
+    #[validate(length(max = 200))]
+    pub username: Option<String>,
     /// The plaintext secret. Discarded server-side after encryption.
     #[validate(length(min = 1, max = 65536))]
     pub value: String,
@@ -98,6 +103,8 @@ pub struct EditItemReq {
     pub name: Option<String>,
     #[validate(length(max = 4000))]
     pub description: Option<String>,
+    #[validate(length(max = 200))]
+    pub username: Option<String>,
     /// If provided, the row is re-encrypted under a fresh nonce. Key version
     /// follows the current `SPRINTLY_VAULT_KEY_VERSION` so writes naturally
     /// migrate to the latest key.
@@ -168,8 +175,8 @@ async fn create_item(
     let insert = sqlx::query(
         r#"
         INSERT INTO vault_items
-            (id, project_id, name, kind, description, encrypted_payload, nonce, key_version, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            (id, project_id, name, kind, description, username, encrypted_payload, nonce, key_version, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         "#,
     )
     .bind(item_id)
@@ -177,6 +184,7 @@ async fn create_item(
     .bind(&req.name)
     .bind(&req.kind)
     .bind(req.description.as_deref().unwrap_or(""))
+    .bind(req.username.as_deref().unwrap_or(""))
     .bind(&ciphertext)
     .bind(nonce.as_slice())
     .bind(key_version)
@@ -220,6 +228,7 @@ async fn list_items(
                v.name            AS "name!: String",
                v.kind            AS "kind!: String",
                v.description     AS "description!: String",
+               v.username        AS "username!: String",
                v.key_version     AS "key_version!: i32",
                v.created_by,
                v.last_rotated_at AS "last_rotated_at!: DateTime<Utc>",
@@ -252,6 +261,7 @@ async fn list_items(
             name: r.name,
             kind: r.kind,
             description: r.description,
+            username: r.username,
             key_version: r.key_version,
             created_by: r.created_by,
             last_rotated_at: r.last_rotated_at,
@@ -305,6 +315,7 @@ async fn edit_item(
         UPDATE vault_items SET
             name              = COALESCE($2, name),
             description       = COALESCE($3, description),
+            username          = COALESCE($7, username),
             encrypted_payload = COALESCE($4, encrypted_payload),
             nonce             = COALESCE($5, nonce),
             key_version       = COALESCE($6, key_version),
@@ -318,6 +329,7 @@ async fn edit_item(
     .bind(new_ct.as_deref())
     .bind(new_nonce.as_ref().map(|n| n.as_slice()))
     .bind(new_version)
+    .bind(req.username.as_deref())
     .execute(&mut *tx)
     .await?;
 
@@ -615,6 +627,7 @@ async fn fetch_item(db: &PgPool, id: Uuid) -> AppResult<VaultItemDto> {
                v.name            AS "name!: String",
                v.kind            AS "kind!: String",
                v.description     AS "description!: String",
+               v.username        AS "username!: String",
                v.key_version     AS "key_version!: i32",
                v.created_by,
                v.last_rotated_at AS "last_rotated_at!: DateTime<Utc>",
@@ -635,6 +648,7 @@ async fn fetch_item(db: &PgPool, id: Uuid) -> AppResult<VaultItemDto> {
         name: r.name,
         kind: r.kind,
         description: r.description,
+        username: r.username,
         key_version: r.key_version,
         created_by: r.created_by,
         last_rotated_at: r.last_rotated_at,
