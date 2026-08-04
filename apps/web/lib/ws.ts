@@ -40,15 +40,26 @@ let backoffMs = 1000;
 const MAX_BACKOFF = 30_000;
 const listeners = new Set<Listener>();
 let intentionalClose = false;
+// Realtime is for signed-in sessions. Opening the socket on /login or the
+// landing page just produced failed handshakes (three per page view, logged
+// as console errors) and blocked back/forward-cache restoration.
+let enabled = false;
 
-export function connectWs(qc: QueryClient): () => void {
+/** Open the shared socket, if it isn't already. Safe to call repeatedly. */
+export function enableRealtime(qc: QueryClient): void {
+  if (enabled) return;
+  enabled = true;
   intentionalClose = false;
+  backoffMs = 1000;
   open(qc);
-  return () => {
-    intentionalClose = true;
-    if (socket && socket.readyState <= 1) socket.close(1000);
-    socket = null;
-  };
+}
+
+/** Close it and stay closed — used on logout and by signed-out pages. */
+export function disableRealtime(): void {
+  enabled = false;
+  intentionalClose = true;
+  if (socket && socket.readyState <= 1) socket.close(1000);
+  socket = null;
 }
 
 export function subscribe(fn: Listener): () => void {
@@ -65,7 +76,7 @@ export function sendPresence(projectId: string, taskId: string | null, active: b
 }
 
 function open(qc: QueryClient) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || !enabled) return;
   try {
     socket = new WebSocket(resolveWsUrl());
   } catch (e) {
@@ -97,7 +108,7 @@ function open(qc: QueryClient) {
 }
 
 function scheduleReconnect(qc: QueryClient) {
-  if (intentionalClose) return;
+  if (intentionalClose || !enabled) return;
   const delay = backoffMs;
   backoffMs = Math.min(MAX_BACKOFF, Math.floor(backoffMs * 1.7));
   setTimeout(() => open(qc), delay);
