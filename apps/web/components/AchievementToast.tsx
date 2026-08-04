@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { Trophy, X } from "lucide-react";
 import { listMyAchievements, type AwardedRow } from "@/lib/achievements";
+import { isSignedIn, onSessionChange } from "@/lib/session-signal";
 import { fire } from "@/lib/confetti";
 
 const SEEN_KEY = "sprintly:achievements:seen";
@@ -41,6 +42,10 @@ export function AchievementToast() {
     let seen = loadSeen();
 
     async function poll() {
+      // /me/achievements needs a session. On /login and the landing page this
+      // only ever produced a 401 in the console, so don't ask until there is
+      // somebody to ask about.
+      if (!isSignedIn()) return;
       try {
         const items = await listMyAchievements();
         if (!alive) return;
@@ -66,8 +71,14 @@ export function AchievementToast() {
 
     void poll();
     const i = window.setInterval(poll, 60_000);
+    // Sign in mid-session (no reload) and we start on the next tick — except
+    // we'd rather not make you wait a minute for your first confetti.
+    const off = onSessionChange((on) => {
+      if (on) void poll();
+    });
     return () => {
       alive = false;
+      off();
       window.clearInterval(i);
     };
   }, []);

@@ -3,10 +3,16 @@
 //!   POST   /projects/:key/sprints            — create (planned)
 //!   GET    /projects/:key/sprints            — list (newest first)
 //!   GET    /sprints/:id                      — detail
-//!   PATCH  /sprints/:id                      — edit name/goal/dates while planned
+//!   PATCH  /sprints/:id                      — edit name/goal/dates (dates while
+//!                                              planned or active), retro summary
+//!   DELETE /sprints/:id                      — soft delete; its tasks fall back
+//!                                              to the backlog, never deleted
 //!   POST   /sprints/:id/start                — planned → active (kicks off WS)
 //!   POST   /sprints/:id/complete             — active → completed, opens retro,
-//!                                              snapshots velocity_points
+//!                                              snapshots velocity_points, and
+//!                                              optionally carries unfinished
+//!                                              work to the backlog / another
+//!                                              sprint / a brand-new one
 //!   POST   /sprints/:id/tasks/:task_key      — assign task to sprint
 //!   DELETE /sprints/:id/tasks/:task_key      — unassign
 //!   GET    /sprints/:id/tasks                — list tasks in sprint
@@ -38,7 +44,10 @@ use crate::{
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/projects/:key/sprints", post(create).get(list_for_project))
-        .route("/sprints/:id", get(detail).patch(edit))
+        .route(
+            "/sprints/:id",
+            get(detail).patch(edit).delete(delete_sprint),
+        )
         .route("/sprints/:id/start", post(start))
         .route("/sprints/:id/complete", post(complete))
         .route(
@@ -92,6 +101,43 @@ pub struct EditSprintReq {
     /// generated markdown is a starting point, not scripture).
     #[validate(length(min = 1, max = 20000))]
     pub summary_md: Option<String>,
+}
+
+/// Where a completing sprint's unfinished work goes. Absent = leave it in
+/// the completed sprint (the old behaviour).
+#[derive(Debug, Deserialize)]
+#[serde(tag = "to", rename_all = "snake_case")]
+pub enum CarryOver {
+    /// Sprint-less: back to the pile.
+    Backlog,
+    /// An existing planned/active sprint in the same project.
+    Sprint { sprint_id: Uuid },
+    /// Spin up a fresh sprint and move the work there.
+    NewSprint {
+        name: String,
+        starts_at: DateTime<Utc>,
+        ends_at: DateTime<Utc>,
+    },
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct CompleteSprintReq {
+    pub carry_over: Option<CarryOver>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CompleteSprintResp {
+    pub sprint: SprintDto,
+    /// How many unfinished tasks moved (0 when nothing was carried over).
+    pub carried_over: i64,
+    /// The sprint they landed in — set for both `sprint` and `new_sprint`.
+    pub carried_to: Option<SprintRef>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SprintRef {
+    pub id: Uuid,
+    pub name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -255,9 +301,12 @@ async fn edit(
             "no summary to edit until the sprint completes".into(),
         ));
     }
-    if (req.starts_at.is_some() || req.ends_at.is_some()) && cur_state != "planned" {
+    // Dates stay editable while the sprint is planned *or* active — moving a
+    // running sprint's end date is routine. Completed sprints stay frozen
+    // (guarded above) so history and velocity keep meaning what they said.
+    if (req.starts_at.is_some() || req.ends_at.is_some()) && cur_state == "completed" {
         return Err(AppError::Conflict(
-            "can only change dates while planned".into(),
+            "can't change the dates of a completed sprint".into(),
         ));
     }
     sqlx::query(
@@ -323,7 +372,10 @@ async fn complete(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
+    // Optional body: older clients (and the CLI) POST nothing at all.
+    body: Option<Json<CompleteSprintReq>>,
 ) -> AppResult<impl IntoResponse> {
+    let req = body.map(|Json(b)| b).unwrap_or_default();
     let project_id = project_of_sprint(&state.db, id).await?;
     let ctx = project_ctx::load_by_id(&state.db, project_id, user.id).await?;
     if !can(&user.as_actor(), Action::ManageBoards, ctx.as_resource()) {
@@ -372,10 +424,128 @@ async fn complete(
     .bind(id)
     .execute(&mut *tx)
     .await?;
+
+    // Carry the unfinished work somewhere useful. Velocity was snapshotted
+    // above from done tasks only, so moving the rest can't skew it.
+    let mut carried_to: Option<SprintRef> = None;
+    let mut carried_over: i64 = 0;
+    if let Some(carry) = req.carry_over {
+        let target: Option<Uuid> = match carry {
+            CarryOver::Backlog => None,
+            CarryOver::Sprint { sprint_id } => {
+                if sprint_id == id {
+                    return Err(AppError::BadRequest(
+                        "can't carry work into the sprint you're completing".into(),
+                    ));
+                }
+                let row = sqlx::query!(
+                    r#"
+                    SELECT name       AS "name!: String",
+                           state      AS "state!: String",
+                           project_id AS "project_id!: Uuid"
+                    FROM   sprints WHERE id = $1 AND deleted_at IS NULL
+                    "#,
+                    sprint_id
+                )
+                .fetch_optional(&mut *tx)
+                .await?
+                .ok_or(AppError::NotFound)?;
+                if row.project_id != project_id {
+                    return Err(AppError::BadRequest(
+                        "that sprint belongs to another project".into(),
+                    ));
+                }
+                if row.state == "completed" {
+                    return Err(AppError::Conflict(
+                        "that sprint is already completed — pick another".into(),
+                    ));
+                }
+                carried_to = Some(SprintRef {
+                    id: sprint_id,
+                    name: row.name,
+                });
+                Some(sprint_id)
+            }
+            CarryOver::NewSprint {
+                name,
+                starts_at,
+                ends_at,
+            } => {
+                let name = name.trim().to_string();
+                if name.is_empty() || name.chars().count() > 80 {
+                    return Err(AppError::Validation(
+                        "sprint name must be 1-80 chars".into(),
+                    ));
+                }
+                if ends_at <= starts_at {
+                    return Err(AppError::Validation(
+                        "ends_at must be after starts_at".into(),
+                    ));
+                }
+                let new_id = Uuid::now_v7();
+                sqlx::query(
+                    r#"
+                    INSERT INTO sprints (id, project_id, name, goal, starts_at, ends_at)
+                    VALUES ($1, $2, $3, '', $4, $5)
+                    "#,
+                )
+                .bind(new_id)
+                .bind(project_id)
+                .bind(&name)
+                .bind(starts_at)
+                .bind(ends_at)
+                .execute(&mut *tx)
+                .await?;
+                carried_to = Some(SprintRef { id: new_id, name });
+                Some(new_id)
+            }
+        };
+        // Everything not done — subtasks included, they follow their own row.
+        let moved = sqlx::query(
+            r#"
+            UPDATE tasks SET sprint_id = $2
+             WHERE sprint_id = $1 AND status <> 'done' AND deleted_at IS NULL
+            "#,
+        )
+        .bind(id)
+        .bind(target)
+        .execute(&mut *tx)
+        .await?;
+        carried_over = moved.rows_affected() as i64;
+    }
     tx.commit().await?;
 
     let dto = fetch_sprint(&state.db, id).await?;
-    Ok(Json(dto))
+    Ok(Json(CompleteSprintResp {
+        sprint: dto,
+        carried_over,
+        carried_to,
+    }))
+}
+
+/// Soft-delete a sprint. Its tasks are NOT deleted — they fall back to the
+/// backlog, so deleting a mis-created sprint can't lose work.
+async fn delete_sprint(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<impl IntoResponse> {
+    let project_id = project_of_sprint(&state.db, id).await?;
+    let ctx = project_ctx::load_by_id(&state.db, project_id, user.id).await?;
+    if !can(&user.as_actor(), Action::ManageBoards, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+    let mut tx = state.db.begin().await?;
+    sqlx::query(r#"UPDATE tasks SET sprint_id = NULL WHERE sprint_id = $1"#)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(r#"UPDATE sprints SET deleted_at = now() WHERE id = $1"#)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn assign_task(

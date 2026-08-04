@@ -23,7 +23,7 @@ async function register(page: Page, handle: string, name: string) {
   await fill(page, "Email", `${handle}@sprintly.test`);
   await fill(page, "Password", "correct-horse-battery-staple");
   await page.getByRole("button", { name: /\$ git init account/ }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL(/\/(me\/day)?$/);
 }
 
 test.describe("admin manages project members", () => {
@@ -58,7 +58,7 @@ test.describe("admin manages project members", () => {
       await fill(admin, "Email", "demo@sprintly.local");
       await fill(admin, "Password", "sprintly");
       await admin.getByRole("button", { name: /\$ ssh sprintly/ }).click();
-      await expect(admin).toHaveURL("/");
+      await expect(admin).toHaveURL(/\/(me\/day)?$/);
 
       await admin.goto(`/projects/${key}`);
       await admin.getByRole("button", { name: /members/i }).click();

@@ -9,6 +9,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { me, logout, type Me } from "@/lib/auth-bundle";
 import { Avatar } from "./Avatar";
+import { disableRealtime } from "@/lib/ws";
+import { markSignedOut } from "@/lib/session-signal";
 
 export function SessionBadge() {
   const router = useRouter();
@@ -90,6 +92,8 @@ export function SessionBadge() {
         type="button"
         onClick={async () => {
           await logout().catch(() => {});
+          disableRealtime();
+          markSignedOut();
           setUser(null);
           // Land on the sign-in page with nothing cached — staying put with
           // stale query data made logout look like it did nothing.
@@ -205,6 +209,8 @@ export function SessionMenuContents({ onNavigate }: { onNavigate?: () => void })
         onClick={async () => {
           onNavigate?.();
           await logout().catch(() => {});
+          disableRealtime();
+          markSignedOut();
           setUser(null);
           qc.clear();
           router.push("/login");

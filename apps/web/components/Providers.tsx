@@ -8,7 +8,9 @@ import {
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query";
-import { connectWs } from "@/lib/ws";
+import { enableRealtime } from "@/lib/ws";
+import { markSignedIn } from "@/lib/session-signal";
+import { me } from "@/lib/auth-bundle";
 import { applyStoredTheme } from "@/lib/theme";
 import { KeyboardHotkeys } from "./KeyboardHotkeys";
 import { AchievementToast } from "./AchievementToast";
@@ -31,8 +33,25 @@ export function Providers({ children }: { children: React.ReactNode }) {
   // possible. The flash is brief because Next pre-renders with the default.
   useEffect(() => applyStoredTheme(), []);
 
-  // Open one shared WS connection per tab; close it on unmount.
-  useEffect(() => connectWs(client), [client]);
+  // Open one shared WS connection per tab — but only for a signed-in
+  // session. Connecting unconditionally meant /login and the landing page
+  // fired failed handshakes (console errors, and back/forward-cache blocked)
+  // for visitors who have no session to subscribe with. AuthForm calls
+  // enableRealtime() itself the moment a sign-in succeeds, so realtime is
+  // live without waiting for a reload.
+  useEffect(() => {
+    let cancelled = false;
+    void me()
+      .then(() => {
+        if (cancelled) return;
+        markSignedIn();
+        enableRealtime(client);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
 
   return (
     <QueryClientProvider client={client}>

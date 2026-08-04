@@ -27,7 +27,7 @@ test.describe("my day live updates", () => {
       await fill(page, "Email", `${handle}@sprintly.test`);
       await fill(page, "Password", "correct-horse-battery-staple");
       await page.getByRole("button", { name: /\$ git init account/ }).click();
-      await expect(page).toHaveURL("/");
+      await expect(page).toHaveURL(/\/(me\/day)?$/);
 
       await page.goto("/projects");
       await page.getByRole("button", { name: /new project/i }).first().click();
@@ -53,13 +53,11 @@ test.describe("my day live updates", () => {
     await test.step("assign the task to me from a second tab", async () => {
       const other = await context.newPage();
       await other.goto(`/tasks/${key}-1`);
-      const assignee = other.getByLabel("assignee", { exact: true });
-      // Pick myself (the only member).
-      const myValue = await assignee
-        .locator("option", { hasText: `@${handle}` })
-        .getAttribute("value");
-      await assignee.selectOption(myValue!);
-      await expect(assignee).not.toHaveValue("");
+      // Pick myself (the only member) through the searchable picker.
+      await other.getByLabel("assignee", { exact: true }).click();
+      await other.getByLabel("search assignee").fill(handle);
+      await other.getByRole("option", { name: new RegExp(`@${handle}`) }).click();
+      await expect(other.getByLabel("assignee", { exact: true })).toContainText(handle);
       await other.close();
     });
 

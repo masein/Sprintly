@@ -11,6 +11,7 @@ import {
   ThumbsUp, Trash2, ArrowRight, Lock, Pencil, Sparkles,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
 import { Markdown } from "@/components/Markdown";
 import {
@@ -109,12 +110,15 @@ export default function RetroPage() {
   return (
     <AppShell>
       <div className="mb-4 flex items-center gap-3">
-        <Link
-          href={`/sprints/${sprintId}`}
-          className="mono text-xs text-chrome-dim hover:text-chrome"
-        >
-          ← {sprint.name}
-        </Link>
+        <Breadcrumbs
+          items={[
+            { label: "sprintly", href: "/" },
+            { label: sprint.project_key, href: `/projects/${sprint.project_key}` },
+            { label: "sprints", href: `/projects/${sprint.project_key}/sprints` },
+            { label: sprint.name, href: `/sprints/${sprintId}` },
+            { label: "retro" },
+          ]}
+        />
         <span
           className={`mono inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
             isClosed

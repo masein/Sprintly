@@ -10,6 +10,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Play, Square, Plus, ChevronDown } from "lucide-react";
+import { Avatar } from "./Avatar";
+import { fmtLocal, localDateISO, localTimeHHMM, localToUtcISO } from "@/lib/localtime";
 import {
   createManualLog,
   currentTimer,
@@ -137,7 +139,11 @@ function ManualEntry({
   taskKey: string;
   onSaved: () => void;
 }) {
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // Local date AND time. The old form hardcoded 09:00 local and rendered logs
+  // in UTC, which is where QA's mysterious "5:30" came from (09:00 in a +03:30
+  // zone). Now you say when the work started, and we store the real instant.
+  const [date, setDate] = useState(() => localDateISO());
+  const [time, setTime] = useState(() => localTimeHHMM());
   const [hours, setHours] = useState("0");
   const [minutes, setMinutes] = useState("30");
   const [note, setNote] = useState("");
@@ -155,7 +161,7 @@ function ManualEntry({
     setBusy(true);
     setError(null);
     try {
-      const startedAt = new Date(`${date}T09:00:00`).toISOString();
+      const startedAt = localToUtcISO(date, time);
       await createManualLog(taskKey, {
         started_at: startedAt,
         duration_minutes: mins,
@@ -184,6 +190,15 @@ function ManualEntry({
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
+          aria-label="log date"
+          className="mono min-w-0 rounded border border-white/10 bg-ink-subtle px-2 py-1 text-xs text-chrome"
+        />
+        <input
+          type="time"
+          value={time}
+          onChange={(e) => setTime(e.target.value)}
+          aria-label="start time"
+          title="when the work started, in your timezone"
           className="mono min-w-0 rounded border border-white/10 bg-ink-subtle px-2 py-1 text-xs text-chrome"
         />
         <input
@@ -257,6 +272,16 @@ function LogList({
           key={l.id}
           className="mono flex items-center gap-2 text-xs text-chrome-dim"
         >
+          <Avatar
+            size={14}
+            user={{
+              userId: l.user_id,
+              handle: l.user_handle,
+              avatarUrl: l.user_avatar_url,
+              avatarStyle: l.user_avatar_style,
+              avatarSeed: l.user_avatar_seed,
+            }}
+          />
           <span className="text-chrome">
             {l.duration_minutes != null ? fmtMinutes(l.duration_minutes) : "running…"}
           </span>
@@ -265,9 +290,13 @@ function LogList({
               non-billable
             </span>
           )}
-          <span className="truncate">{l.note || ""}</span>
-          <span className="ml-auto text-[10px]">
-            {new Date(l.started_at).toISOString().slice(0, 16).replace("T", " ")}
+          {/* Notes get truncated to fit the sidebar; the full text (and who
+              logged it) lives in the tooltip instead of being lost. */}
+          <span className="truncate" title={l.note ? `@${l.user_handle}: ${l.note}` : `@${l.user_handle}`}>
+            {l.note || ""}
+          </span>
+          <span className="ml-auto shrink-0 text-[10px]" title={`started ${fmtLocal(l.started_at)}`}>
+            {fmtLocal(l.started_at)}
           </span>
           <button
             type="button"
