@@ -124,7 +124,11 @@ async fn patch_me(
         UPDATE users SET
             display_name = COALESCE($2, display_name),
             timezone     = COALESCE($3, timezone),
-            settings     = COALESCE($4, settings)
+            -- Shallow-merge settings instead of replacing the blob: two
+            -- independent preferences (the coffee-meter toggle, the personal
+            -- project order) are written by different screens, and a
+            -- whole-object write from one silently dropped the other's key.
+            settings     = COALESCE(settings, '{}'::jsonb) || COALESCE($4, '{}'::jsonb)
         WHERE id = $1
         "#,
     )

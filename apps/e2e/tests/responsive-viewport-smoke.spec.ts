@@ -32,7 +32,7 @@ async function setup(page: Page): Promise<{ key: string; taskUrl: string }> {
   await fill(page, "Email", `${handle}@sprintly.test`);
   await fill(page, "Password", "correct-horse-battery-staple");
   await page.getByRole("button", { name: /\$ git init account/ }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL(/\/(me\/day)?$/);
 
   await page.goto("/projects");
   await page.getByRole("button", { name: /new project/i }).first().click();
@@ -53,7 +53,9 @@ async function setup(page: Page): Promise<{ key: string; taskUrl: string }> {
 async function assertNoHorizontalOverflow(page: Page, label: string) {
   // Wait for the shell to mount before measuring — a pre-hydration read would
   // pass trivially and mask real overflow once content settles.
-  await expect(page.getByRole("link", { name: "sprintly" })).toBeVisible();
+  // The wordmark, not the breadcrumb root — both link to "/" and both contain
+  // "sprintly", so an inexact name matches two elements.
+  await expect(page.getByRole("link", { name: "sprintly/", exact: true })).toBeVisible();
   const { scrollWidth, innerWidth } = await page.evaluate(() => ({
     scrollWidth: document.scrollingElement!.scrollWidth,
     innerWidth: window.innerWidth,

@@ -18,6 +18,8 @@ export type VaultItem = {
   name: string;
   kind: VaultKind;
   description: string;
+  /** Account the secret belongs to (password kind); "" when unused. */
+  username: string;
   key_version: number;
   created_by: string | null;
   last_rotated_at: string;
@@ -50,7 +52,13 @@ export const listVaultItems = (projectKey: string) =>
 
 export const createVaultItem = (
   projectKey: string,
-  body: { name: string; kind: VaultKind; description?: string; value: string },
+  body: {
+    name: string;
+    kind: VaultKind;
+    description?: string;
+    username?: string;
+    value: string;
+  },
 ) =>
   api<VaultItem>(`/projects/${encodeURIComponent(projectKey)}/vault`, {
     method: "POST",
@@ -59,7 +67,7 @@ export const createVaultItem = (
 
 export const editVaultItem = (
   id: string,
-  body: { name?: string; description?: string; value?: string },
+  body: { name?: string; description?: string; username?: string; value?: string },
 ) => api<VaultItem>(`/vault/${id}`, { method: "PATCH", body });
 
 export const deleteVaultItem = (id: string) =>

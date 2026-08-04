@@ -8,9 +8,9 @@
 import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
 import { Flag, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
 import { getProject } from "@/lib/projects";
 import {
@@ -79,14 +79,9 @@ export default function TimelinePage() {
     <AppShell currentProjectKey={key}>
       <header className="mb-6 flex items-end justify-between">
         <div>
-          <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
-            {key} · roadmap
-          </div>
+          <Breadcrumbs items={projectCrumbs(key, "roadmap")} />
           <h1 className="text-3xl font-semibold">The shape of the quarter.</h1>
         </div>
-        <Link href={`/projects/${key}`} className="mono text-xs text-accent hover:underline">
-          ← board
-        </Link>
       </header>
 
       <Timeline epics={epics} milestones={milestones} />

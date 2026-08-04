@@ -1153,3 +1153,354 @@ async fn project_key_rename_cascades_to_task_keys(pool: PgPool) {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+// ─── Sprint completion carry-over + delete (QA3-1, QA3-2) ────────────────────
+
+/// Create a sprint and return its id.
+async fn make_sprint(app: &Router, token: &str, project: &str, name: &str) -> String {
+    let (status, sprint) = send(
+        app,
+        "POST",
+        &format!("/api/v1/projects/{project}/sprints"),
+        Some(token),
+        Some(json!({
+            "name": name,
+            "starts_at": "2026-06-19T00:00:00Z",
+            "ends_at": "2026-07-03T00:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{sprint:?}");
+    sprint["id"].as_str().unwrap().to_string()
+}
+
+async fn sprint_task_keys(app: &Router, token: &str, sprint_id: &str) -> Vec<String> {
+    let (status, list) = send(
+        app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint_id}/tasks"),
+        Some(token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["key"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn completing_a_sprint_carries_unfinished_work(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "carrier").await;
+    make_project(&app, &token, "CRY").await;
+    let done = make_task_http(&app, &token, "CRY", "finished").await;
+    let open = make_task_http(&app, &token, "CRY", "still going").await;
+    let sprint = make_sprint(&app, &token, "CRY", "Sprint 1").await;
+    let next = make_sprint(&app, &token, "CRY", "Sprint 2").await;
+
+    for key in [&done, &open] {
+        let (status, _) = send(
+            &app,
+            "POST",
+            &format!("/api/v1/sprints/{sprint}/tasks/{key}"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+    // Mark one done — status follows the column, so move it to the done one.
+    let done_col = columns(&app, &token, "CRY")
+        .await
+        .into_iter()
+        .find(|(_, cat)| cat == "done")
+        .expect("a done column")
+        .0;
+    let (status, moved) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{done}/move"),
+        Some(&token),
+        Some(json!({ "column_id": done_col })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{moved:?}");
+    assert_eq!(moved["status"], "done");
+
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sprint}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Complete, carrying the leftovers into Sprint 2.
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sprint}/complete"),
+        Some(&token),
+        Some(json!({ "carry_over": { "to": "sprint", "sprint_id": next } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["sprint"]["state"], "completed");
+    assert_eq!(body["carried_over"], 1);
+    assert_eq!(body["carried_to"]["id"], next.as_str());
+
+    // The unfinished one moved; the done one stayed for the record.
+    assert_eq!(
+        sprint_task_keys(&app, &token, &next).await,
+        vec![open.clone()]
+    );
+    assert_eq!(sprint_task_keys(&app, &token, &sprint).await, vec![done]);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn carry_over_to_backlog_and_to_a_new_sprint(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "carrier2").await;
+    make_project(&app, &token, "CR2").await;
+
+    // Round 1: carry to the backlog.
+    let a = make_task_http(&app, &token, "CR2", "leftover a").await;
+    let s1 = make_sprint(&app, &token, "CR2", "Sprint 1").await;
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{s1}/tasks/{a}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{s1}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{s1}/complete"),
+        Some(&token),
+        Some(json!({ "carry_over": { "to": "backlog" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["carried_over"], 1);
+    assert_eq!(body["carried_to"], Value::Null);
+    assert!(sprint_task_keys(&app, &token, &s1).await.is_empty());
+    let (_, task) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{a}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(task["sprint_id"], Value::Null);
+
+    // Round 2: carry into a brand-new sprint created on the spot.
+    let s2 = make_sprint(&app, &token, "CR2", "Sprint 2").await;
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{s2}/tasks/{a}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{s2}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{s2}/complete"),
+        Some(&token),
+        Some(json!({ "carry_over": {
+            "to": "new_sprint",
+            "name": "Sprint 3",
+            "starts_at": "2026-07-06T00:00:00Z",
+            "ends_at": "2026-07-20T00:00:00Z",
+        }})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["carried_over"], 1);
+    assert_eq!(body["carried_to"]["name"], "Sprint 3");
+    let fresh = body["carried_to"]["id"].as_str().unwrap();
+    assert_eq!(sprint_task_keys(&app, &token, fresh).await, vec![a]);
+    // The new sprint starts life planned, not running.
+    let (_, s) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{fresh}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s["state"], "planned");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn sprint_dates_editable_while_active_and_delete_frees_tasks(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "sprintedit").await;
+    make_project(&app, &token, "SED").await;
+    let key = make_task_http(&app, &token, "SED", "homeless soon").await;
+    let s = make_sprint(&app, &token, "SED", "Sprint 1").await;
+    send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{s}/tasks/{key}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{s}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+
+    // Dates move while the sprint is running (used to be planned-only).
+    let (status, body) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/sprints/{s}"),
+        Some(&token),
+        Some(json!({ "name": "Sprint 1 (extended)", "ends_at": "2026-07-17T00:00:00Z" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["name"], "Sprint 1 (extended)");
+    assert!(body["ends_at"].as_str().unwrap().starts_with("2026-07-17"));
+
+    // Delete: the sprint goes, the task returns to the backlog.
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/sprints/{s}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{s}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, task) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{key}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(task["sprint_id"], Value::Null);
+}
+
+// ─── Settings merge + project appearance (QA3-11/12) ─────────────────────────
+
+#[sqlx::test(migrations = "./migrations")]
+async fn patch_me_merges_settings_instead_of_replacing(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "settingsmerger").await;
+
+    // Screen A stores its preference.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        "/api/v1/users/me",
+        Some(&token),
+        Some(json!({ "settings": { "coffee_meter": false } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Screen B stores a different one — without knowing about the first.
+    let (status, me) = send(
+        &app,
+        "PATCH",
+        "/api/v1/users/me",
+        Some(&token),
+        Some(json!({ "settings": { "project_order": ["ONE", "TWO"] } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Both survive: the old whole-blob write dropped coffee_meter here.
+    assert_eq!(me["settings"]["coffee_meter"], false);
+    assert_eq!(me["settings"]["project_order"][1], "TWO");
+
+    // Same key overwrites, as you'd expect.
+    let (_, me) = send(
+        &app,
+        "PATCH",
+        "/api/v1/users/me",
+        Some(&token),
+        Some(json!({ "settings": { "project_order": ["THREE"] } })),
+    )
+    .await;
+    assert_eq!(me["settings"]["project_order"], json!(["THREE"]));
+    assert_eq!(me["settings"]["coffee_meter"], false);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn project_icon_and_color_are_editable(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "repainter").await;
+    make_project(&app, &token, "PNT").await;
+
+    let (status, p) = send(
+        &app,
+        "PATCH",
+        "/api/v1/projects/PNT",
+        Some(&token),
+        Some(json!({ "icon": "rocket", "color": "#22d3ee" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{p:?}");
+    assert_eq!(p["icon"], "rocket");
+    assert_eq!(p["color"], "#22d3ee");
+
+    // Junk colour is refused, and the stored value is untouched.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        "/api/v1/projects/PNT",
+        Some(&token),
+        Some(json!({ "color": "octarine" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, p) = send(&app, "GET", "/api/v1/projects/PNT", Some(&token), None).await;
+    assert_eq!(p["color"], "#22d3ee");
+}

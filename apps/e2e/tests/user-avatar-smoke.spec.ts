@@ -10,6 +10,14 @@ function rand(): string {
   return Math.random().toString(36).slice(2, 8);
 }
 
+
+/** The assignee control is a searchable combobox now, not a native select. */
+async function pickAssignee(page: Page, handle: string) {
+  await page.getByLabel("assignee", { exact: true }).click();
+  await page.getByLabel("search assignee").fill(handle);
+  await page.getByRole("option", { name: new RegExp(`@${handle}`) }).click();
+}
+
 test.describe("user avatars", () => {
   test("a generated avatar shows on the card and on task detail", async ({ page }) => {
     const handle = `e2e${rand()}`;
@@ -23,7 +31,7 @@ test.describe("user avatars", () => {
       await fill(page, "Email", `${handle}@sprintly.test`);
       await fill(page, "Password", "correct-horse-battery-staple");
       await page.getByRole("button", { name: /\$ git init account/ }).click();
-      await expect(page).toHaveURL("/");
+      await expect(page).toHaveURL(/\/(me\/day)?$/);
     });
 
     await test.step("create a project", async () => {
@@ -43,11 +51,11 @@ test.describe("user avatars", () => {
       await expect(page.getByText("Pixel me")).toBeVisible();
       await page.getByRole("link", { name: new RegExp(`${key}-\\d+`) }).first().click();
       await expect(page).toHaveURL(new RegExp(`/tasks/${key}-\\d+`));
-      await page.getByLabel("assignee", { exact: true }).selectOption({ label: `@${handle}` });
+      await pickAssignee(page, handle);
     });
 
     await test.step("task detail shows the assignee's avatar + handle", async () => {
-      const assigneeRow = page.getByLabel("assignee").locator("..");
+      const assigneeRow = page.getByLabel("assignee").locator("../..");
       await expect(assigneeRow.getByRole("img", { name })).toBeVisible();
     });
 
