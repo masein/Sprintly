@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { Pencil, X, Check, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { Markdown } from "@/components/Markdown";
 import { CommentThread } from "@/components/CommentThread";
 import { MentionTextarea } from "@/components/MentionTextarea";
@@ -81,25 +82,16 @@ export default function TaskPage() {
   return (
     <AppShell currentProjectKey={task.project_key}>
       <div className="mb-4 flex items-center gap-3">
-        <Link
-          href={`/projects/${task.project_key}`}
-          className="mono text-xs text-chrome-dim hover:text-chrome"
-        >
-          ← {task.project_key}
-        </Link>
-        <span className="mono text-xs text-chrome-dim">/</span>
-        {task.parent_key && (
-          <>
-            <Link
-              href={`/tasks/${task.parent_key}`}
-              className="mono text-xs text-chrome-dim hover:text-chrome"
-            >
-              {task.parent_key}
-            </Link>
-            <span className="mono text-xs text-chrome-dim">/</span>
-          </>
-        )}
-        <span className="mono text-xs text-accent">{task.key}</span>
+        <Breadcrumbs
+          items={[
+            { label: "sprintly", href: "/" },
+            { label: task.project_key, href: `/projects/${task.project_key}` },
+            ...(task.parent_key
+              ? [{ label: task.parent_key, href: `/tasks/${task.parent_key}` }]
+              : []),
+            { label: task.key },
+          ]}
+        />
         {canDelete && (
           <button
             type="button"

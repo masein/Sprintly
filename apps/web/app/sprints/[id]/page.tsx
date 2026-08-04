@@ -19,6 +19,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Play, CheckCircle2, GripVertical, Plus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { BurndownChart } from "@/components/BurndownChart";
 import { ListSearch, matchesTask } from "@/components/ListSearch";
 import { LoadError } from "@/components/LoadError";
@@ -29,8 +30,11 @@ import {
   getBurndown,
   getSprint,
   listSprintTasks,
+  listSprints,
   startSprint,
   unassignTaskFromSprint,
+  type CarryOver,
+  type Sprint,
   type SprintTask,
 } from "@/lib/sprints";
 import { listBacklog } from "@/lib/templates";
@@ -106,10 +110,14 @@ export default function SprintDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sprint", id] }),
     onError: (e) => alert((e as unknown as ApiError).message),
   });
+  const [completing, setCompleting] = useState(false);
   const complete = useMutation({
-    mutationFn: () => completeSprint(id),
-    onSuccess: () => {
+    mutationFn: (carry?: CarryOver) => completeSprint(id, carry),
+    onSuccess: (res) => {
+      setCompleting(false);
       qc.invalidateQueries({ queryKey: ["sprint", id] });
+      qc.invalidateQueries({ queryKey: ["sprints", sprintQ.data?.project_key] });
+      qc.invalidateQueries({ queryKey: ["backlog", sprintQ.data?.project_key] });
       // Confetti is allowed: closing a sprint (per docs/PERSONALITY.md).
       void import("@/lib/confetti").then((m) => m.fire(120));
       // Brief pause so the user actually sees the confetti before nav.
@@ -143,18 +151,14 @@ export default function SprintDetailPage() {
   return (
     <AppShell currentProjectKey={sprint.project_key}>
       <div className="mb-4 flex items-center gap-3">
-        <Link
-          href={`/projects/${sprint.project_key}/sprints`}
-          className="mono text-xs text-chrome-dim hover:text-chrome"
-        >
-          ← {sprint.project_key} · sprints
-        </Link>
-        <Link
-          href={`/projects/${sprint.project_key}`}
-          className="mono text-xs text-accent hover:underline"
-        >
-          ← board
-        </Link>
+        <Breadcrumbs
+          items={[
+            { label: "sprintly", href: "/" },
+            { label: sprint.project_key, href: `/projects/${sprint.project_key}` },
+            { label: "sprints", href: `/projects/${sprint.project_key}/sprints` },
+            { label: sprint.name },
+          ]}
+        />
         <span
           className={`mono inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
             sprint.state === "active"
@@ -203,10 +207,7 @@ export default function SprintDetailPage() {
         {sprint.state === "active" && (
           <button
             type="button"
-            onClick={() => {
-              if (!confirm("Complete this sprint? Opens the retro.")) return;
-              complete.mutate();
-            }}
+            onClick={() => setCompleting(true)}
             disabled={complete.isPending}
             className="mono inline-flex items-center gap-2 rounded bg-accent px-3 py-2 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
           >
@@ -214,6 +215,16 @@ export default function SprintDetailPage() {
           </button>
         )}
       </div>
+
+      {completing && (
+        <CompleteSprintModal
+          sprint={sprint}
+          unfinished={(tasksQ.data ?? []).filter((t) => t.status !== "done").length}
+          busy={complete.isPending}
+          onCancel={() => setCompleting(false)}
+          onConfirm={(carry) => complete.mutate(carry)}
+        />
+      )}
 
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
@@ -261,6 +272,238 @@ export default function SprintDetailPage() {
       </DndContext>
     </AppShell>
   );
+}
+
+// ─── Completion modal (carry-over) ───────────────────────────────────────────
+// Completing a sprint used to silently strand whatever wasn't done in the
+// closed sprint. Now it asks: send the leftovers to the backlog, into another
+// sprint, or into a fresh one you name right here.
+
+function CompleteSprintModal({
+  sprint,
+  unfinished,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  sprint: Sprint;
+  unfinished: number;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (carry?: CarryOver) => void;
+}) {
+  type Choice = "leave" | "backlog" | "sprint" | "new_sprint";
+  const [choice, setChoice] = useState<Choice>(unfinished > 0 ? "backlog" : "leave");
+  const [targetId, setTargetId] = useState("");
+  const [name, setName] = useState(nextSprintName(sprint.name));
+  const [starts, setStarts] = useState(() => new Date().toISOString().slice(0, 10));
+  const [ends, setEnds] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    return d.toISOString().slice(0, 10);
+  });
+
+  const sprintsQ = useQuery({
+    queryKey: ["sprints", sprint.project_key],
+    queryFn: () => listSprints(sprint.project_key),
+  });
+  const candidates = (sprintsQ.data ?? []).filter(
+    (s) => s.id !== sprint.id && s.state !== "completed",
+  );
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (unfinished === 0 || choice === "leave") return onConfirm(undefined);
+    if (choice === "backlog") return onConfirm({ to: "backlog" });
+    if (choice === "sprint") {
+      if (!targetId) return;
+      return onConfirm({ to: "sprint", sprint_id: targetId });
+    }
+    if (!name.trim()) return;
+    onConfirm({
+      to: "new_sprint",
+      name: name.trim(),
+      starts_at: new Date(`${starts}T00:00:00Z`).toISOString(),
+      ends_at: new Date(`${ends}T00:00:00Z`).toISOString(),
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <form
+        onSubmit={submit}
+        data-testid="complete-sprint-modal"
+        className="max-h-[90vh] w-full max-w-lg space-y-4 overflow-y-auto rounded-lg border border-white/10 bg-ink p-5"
+      >
+        <header className="space-y-1">
+          <h2 className="mono text-xs uppercase tracking-widest text-chrome-dim">
+            complete {sprint.name}
+          </h2>
+          <p className="text-sm text-chrome">
+            {unfinished === 0 ? (
+              <>Everything here is done. Clean finish.</>
+            ) : (
+              <>
+                <span className="mono text-accent">{unfinished}</span>{" "}
+                {unfinished === 1 ? "task isn't" : "tasks aren't"} done yet. Where
+                should {unfinished === 1 ? "it" : "they"} go?
+              </>
+            )}
+          </p>
+        </header>
+
+        {unfinished > 0 && (
+          <div className="space-y-2">
+            <Radio
+              name="carry"
+              value="backlog"
+              checked={choice === "backlog"}
+              onChange={() => setChoice("backlog")}
+              label="move to the backlog"
+              hint="sprint-less again, ready to re-plan"
+            />
+            <Radio
+              name="carry"
+              value="sprint"
+              checked={choice === "sprint"}
+              onChange={() => setChoice("sprint")}
+              label="move to another sprint"
+              hint={candidates.length === 0 ? "no other open sprint" : undefined}
+              disabled={candidates.length === 0}
+            />
+            {choice === "sprint" && candidates.length > 0 && (
+              <select
+                value={targetId}
+                onChange={(e) => setTargetId(e.target.value)}
+                aria-label="target sprint"
+                className="mono ml-6 block w-[calc(100%-1.5rem)] rounded border border-white/10 bg-ink-subtle px-2 py-1 text-xs text-chrome"
+              >
+                <option value="">pick a sprint…</option>
+                {candidates.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} · {c.state}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Radio
+              name="carry"
+              value="new_sprint"
+              checked={choice === "new_sprint"}
+              onChange={() => setChoice("new_sprint")}
+              label="move to a new sprint"
+              hint="created planned — start it when you're ready"
+            />
+            {choice === "new_sprint" && (
+              <div className="ml-6 space-y-2">
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  aria-label="new sprint name"
+                  placeholder="Sprint 24"
+                  className="mono block w-full rounded border border-white/10 bg-ink-subtle px-2 py-1 text-xs text-chrome focus:border-accent focus:outline-none"
+                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={starts}
+                    onChange={(e) => setStarts(e.target.value)}
+                    aria-label="new sprint start"
+                    className="mono rounded border border-white/10 bg-ink-subtle px-2 py-1 text-xs text-chrome"
+                  />
+                  <span className="mono text-[10px] text-chrome-dim">→</span>
+                  <input
+                    type="date"
+                    value={ends}
+                    onChange={(e) => setEnds(e.target.value)}
+                    aria-label="new sprint end"
+                    className="mono rounded border border-white/10 bg-ink-subtle px-2 py-1 text-xs text-chrome"
+                  />
+                </div>
+              </div>
+            )}
+            <Radio
+              name="carry"
+              value="leave"
+              checked={choice === "leave"}
+              onChange={() => setChoice("leave")}
+              label="leave them here"
+              hint="they stay in this completed sprint"
+            />
+          </div>
+        )}
+
+        <p className="mono text-[11px] text-chrome-dim">
+          Completing snapshots velocity and opens the retro. The sprint itself
+          can&apos;t be re-opened.
+        </p>
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="mono text-xs text-chrome-dim hover:text-chrome"
+          >
+            :q
+          </button>
+          <button
+            type="submit"
+            disabled={busy || (choice === "sprint" && !targetId)}
+            className="mono inline-flex items-center gap-2 rounded bg-accent px-3 py-2 text-xs font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
+          >
+            <CheckCircle2 size={13} /> {busy ? "completing…" : "complete sprint"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function Radio({
+  name,
+  value,
+  checked,
+  onChange,
+  label,
+  hint,
+  disabled,
+}: {
+  name: string;
+  value: string;
+  checked: boolean;
+  onChange: () => void;
+  label: string;
+  hint?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <label
+      className={`flex items-start gap-2 text-sm ${
+        disabled ? "opacity-50" : "cursor-pointer"
+      }`}
+    >
+      <input
+        type="radio"
+        name={name}
+        value={value}
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+        className="mt-1"
+      />
+      <span>
+        <span className="text-chrome">{label}</span>
+        {hint && <span className="mono block text-[10px] text-chrome-dim">{hint}</span>}
+      </span>
+    </label>
+  );
+}
+
+/** "Sprint 12" → "Sprint 13"; anything else gets a " (next)" suffix. */
+function nextSprintName(current: string): string {
+  const m = current.match(/^(.*?)(\d+)\s*$/);
+  if (!m) return `${current} (next)`;
+  return `${m[1]}${Number(m[2]) + 1}`;
 }
 
 // ─── Sprint ↔ backlog drag (QA: "show the backlog in the sprint view") ──────

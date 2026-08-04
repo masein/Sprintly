@@ -25,7 +25,7 @@ async function register(page: Page, u: { display: string; handle: string; email:
   await fill(page, "Email", u.email);
   await fill(page, "Password", u.password);
   await page.getByRole("button", { name: /\$ git init account/ }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL(/\/(me\/day)?$/);
 }
 
 async function logout(page: Page) {
@@ -39,7 +39,7 @@ async function login(page: Page, email: string, password: string) {
   await fill(page, "Email", email);
   await fill(page, "Password", password);
   await page.getByRole("button", { name: /\$ ssh sprintly/ }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL(/\/(me\/day)?$/);
 }
 
 test.describe("project members UI", () => {

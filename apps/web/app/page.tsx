@@ -1,7 +1,11 @@
-// Landing page. Shows the boot status + a session badge that reflects auth.
-// The real authed home page (dashboard) lands in M6.
+// Landing page — the marketing/boot view, for people who aren't signed in.
+// Anyone with a session gets bounced to My Day (QA: "set the landing page to
+// automatically redirect users to the My Day view"), which is where an actual
+// working day starts. The redirect is client-side because the session lives in
+// an HttpOnly cookie the API validates, not in a readable server session.
 
 import Link from "next/link";
+import { LandingRedirect } from "@/components/LandingRedirect";
 import { SessionBadge } from "@/components/SessionBadge";
 import { Sprint } from "@/components/Sprint";
 import { APP_VERSION } from "@/lib/version";
@@ -12,6 +16,7 @@ export default function Home() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col justify-center gap-10 px-6 py-20">
+      <LandingRedirect />
       <div className="flex items-center justify-between">
         <div className="mono text-xs uppercase tracking-widest text-chrome-dim">
           sprintly · v{APP_VERSION}
