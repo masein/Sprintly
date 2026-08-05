@@ -97,6 +97,8 @@ export type MyDashboard = {
   my_tasks_sample: MyTaskSample[];
   watched_changed_recently: WatchedRow[];
   time_this_week_minutes: number;
+  /** Today in the user's timezone — what the coffee meter gauges. */
+  time_today_minutes: number;
   running_timer: RunningTimerRef | null;
 };
 

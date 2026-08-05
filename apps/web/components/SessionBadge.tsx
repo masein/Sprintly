@@ -9,6 +9,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { me, logout, type Me } from "@/lib/auth-bundle";
 import { Avatar } from "./Avatar";
+import { disableRealtime } from "@/lib/ws";
+import { markSignedOut } from "@/lib/session-signal";
 
 export function SessionBadge() {
   const router = useRouter();
@@ -78,6 +80,10 @@ export function SessionBadge() {
         my day
       </Link>
       <span className="text-chrome-dim">·</span>
+      <Link href="/search" className="text-accent hover:underline">
+        search
+      </Link>
+      <span className="text-chrome-dim">·</span>
       <Link href="/settings" className="text-accent hover:underline">
         settings
       </Link>
@@ -86,6 +92,8 @@ export function SessionBadge() {
         type="button"
         onClick={async () => {
           await logout().catch(() => {});
+          disableRealtime();
+          markSignedOut();
           setUser(null);
           // Land on the sign-in page with nothing cached — staying put with
           // stale query data made logout look like it did nothing.
@@ -183,6 +191,13 @@ export function SessionMenuContents({ onNavigate }: { onNavigate?: () => void })
         my day
       </Link>
       <Link
+        href="/search"
+        onClick={onNavigate}
+        className="rounded px-2 py-1.5 text-left hover:bg-white/5"
+      >
+        search
+      </Link>
+      <Link
         href="/settings"
         onClick={onNavigate}
         className="rounded px-2 py-1.5 text-left hover:bg-white/5"
@@ -194,6 +209,8 @@ export function SessionMenuContents({ onNavigate }: { onNavigate?: () => void })
         onClick={async () => {
           onNavigate?.();
           await logout().catch(() => {});
+          disableRealtime();
+          markSignedOut();
           setUser(null);
           qc.clear();
           router.push("/login");

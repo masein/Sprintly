@@ -76,6 +76,13 @@ const ACTIONS: Action[] = [
     run: ({ router, close }) => { router.push("/me/day"); close(); },
   },
   {
+    id: "go-search",
+    label: "search with a query",
+    hint: "g f",
+    icon: Search,
+    run: ({ router, close }) => { router.push("/search"); close(); },
+  },
+  {
     id: "go-settings",
     label: "go to settings",
     hint: "g s",

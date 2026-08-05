@@ -6,6 +6,7 @@
 //   /                 → open palette
 //   ?                 → open palette in help mode (sends "?" as query)
 //   g p / g m / g s   → navigate to projects / my-tasks / settings
+//   g f               → navigate to search (f for filter — g s is settings)
 //   c                 → focus the leftmost board's "add card" (best-effort
 //                       — uses the data-add-card-button hook below)
 //
@@ -69,6 +70,7 @@ export function KeyboardHotkeys() {
           k === "m" ? "/me/tasks" :
           k === "d" ? "/me/day" :
           k === "s" ? "/settings" :
+          k === "f" ? "/search" :
           null;
         if (dest) {
           e.preventDefault();

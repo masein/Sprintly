@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT q.id           AS \"id!: Uuid\",\n               q.name         AS \"name!: String\",\n               q.jql          AS \"jql!: String\",\n               q.is_shared    AS \"is_shared!: bool\",\n               q.user_id      AS \"user_id!: Uuid\",\n               u.handle       AS \"owner_handle!: String\",\n               q.created_at   AS \"created_at!: DateTime<Utc>\",\n               q.updated_at   AS \"updated_at!: DateTime<Utc>\"\n        FROM   saved_queries q\n        JOIN   users u ON u.id = q.user_id\n        WHERE  q.user_id = $1 OR q.is_shared\n        ORDER BY (q.user_id = $1) DESC, lower(q.name)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "jql!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "is_shared!: bool",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "owner_handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "567ed18d20be74c692bb48fe8235030793f67a26002fd304f7351ff06207d963"
+}
