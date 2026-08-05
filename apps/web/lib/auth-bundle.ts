@@ -6,6 +6,7 @@ export {
   register,
   logout,
   me,
+  patchMe,
   setMyAvatar,
   twoFactorLogin,
   isTwoFactorChallenge,

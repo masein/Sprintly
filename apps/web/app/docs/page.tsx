@@ -6,7 +6,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { ArrowDownUp, AtSign, Book, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, ListTree, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, Smile, TerminalSquare, Users, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
+import { ArrowDownUp, AtSign, Book, Search, FileStack, GanttChartSquare, GitBranch, KeyRound, ListChecks, ListTree, LogIn, Receipt, Rows3, Share2, ShieldCheck, Smartphone, Smile, TerminalSquare, Users, Vault, Webhook, Coffee, Sparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Sprint } from "@/components/Sprint";
 import { triggerRtfm } from "@/lib/achievements";
@@ -36,7 +36,7 @@ export default function DocsPage() {
               <li><kbd>/</kbd> — open palette in search mode</li>
               <li><kbd>?</kbd> — shortcut help</li>
               <li><kbd>c</kbd> — new card in leftmost column</li>
-              <li><kbd>g p</kbd> projects · <kbd>g m</kbd> my tasks · <kbd>g d</kbd> my day · <kbd>g s</kbd> settings</li>
+              <li><kbd>g p</kbd> projects · <kbd>g m</kbd> my tasks · <kbd>g d</kbd> my day · <kbd>g s</kbd> settings · <kbd>g f</kbd> search</li>
               <li><kbd>:q</kbd> close modal · <kbd>:wq</kbd> save &amp; close</li>
             </ul>
             <p className="mt-2">
@@ -210,6 +210,55 @@ export default function DocsPage() {
               picker hands the task to any project member — or{" "}
               <span className="mono">unassigned</span>. Assigning notifies the new
               owner and shows their avatar on the card.
+            </p>
+          </Section>
+
+          <Section icon={Search} title="Query search & saved queries">
+            <p>
+              <span className="mono">/search</span> (<kbd>g f</kbd>, or{" "}
+              <span className="mono">search</span> in the header) runs a query
+              language over every task you can see — a query can narrow that
+              set, never widen it. An empty query means everything.
+            </p>
+            <p>
+              A condition is{" "}
+              <span className="mono">field operator value</span>. Fields:{" "}
+              <span className="mono">
+                key · project · title · description · text · status · priority ·
+                type · assignee · reporter · label · sprint · epic · parent ·
+                points · estimate · due · created · updated · completed
+              </span>
+              . Operators:{" "}
+              <span className="mono">
+                = != ~ (contains) !~ &gt; &gt;= &lt; &lt;= · in (a, b) · not in
+                (a, b) · is empty · is not empty
+              </span>
+              . Join them with <span className="mono">AND</span> /{" "}
+              <span className="mono">OR</span> (AND binds tighter),
+              negate with <span className="mono">NOT</span>, group with
+              parentheses, and sort with{" "}
+              <span className="mono">ORDER BY field ASC|DESC</span>.
+            </p>
+            <p>
+              Quote anything with spaces. <span className="mono">currentUser()</span>{" "}
+              is you. Dates take an ISO day, <span className="mono">today</span>,
+              or an offset — <span className="mono">-7d</span>,{" "}
+              <span className="mono">2w</span>,{" "}
+              <span className="mono">-1m</span>. A syntax error tells you what it
+              didn&apos;t understand and which character it gave up on.
+            </p>
+            <p className="mono text-xs text-chrome-dim">
+              assignee = currentUser() AND status != done ORDER BY priority ASC
+              <br />
+              type = bug AND priority in (p0, p1) AND label = backend
+              <br />
+              due &lt; today AND status != done ORDER BY due ASC
+            </p>
+            <p>
+              Save a query you keep retyping: it becomes a named chip on the
+              page. Tick <span className="mono">share with everyone</span> and
+              your team gets it too — shared queries are readable by everyone and
+              editable only by whoever saved them.
             </p>
           </Section>
 

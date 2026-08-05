@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT project_id AS \"project_id!: Uuid\",\n                  board_id   AS \"board_id!: Uuid\",\n                  column_id  AS \"column_id!: Uuid\"\n           FROM tasks WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "project_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "board_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "column_id!: Uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e021a568371ad0cd8bcd46a060a917bb222669566f4db6e19664619ac550db38"
+}

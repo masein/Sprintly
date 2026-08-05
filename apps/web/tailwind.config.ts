@@ -12,6 +12,11 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // Tailwind's 2xl is 1536px, which leaves 1440-class laptops and
+      // ultrawides in the same narrow column as a 1280px screen. `wide`
+      // is the breakpoint QA asked for: above it, the shell's container and
+      // the multi-column layouts get room instead of gutter.
+      screens: { wide: "1440px" },
       fontFamily: {
         sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: [

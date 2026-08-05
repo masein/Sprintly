@@ -40,6 +40,7 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::tasks::router())
         .merge(routes::task_detail::router())
         .merge(routes::search::router())
+        .merge(routes::jql::router())
         .merge(routes::time_logs::router())
         .merge(routes::time_reports::router())
         .merge(routes::timesheets::router())

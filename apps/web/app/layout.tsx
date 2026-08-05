@@ -7,6 +7,10 @@ export const metadata: Metadata = {
   title: "Sprintly",
   description: "Self-hosted project management for software teams.",
   appleWebApp: { capable: true, title: "Sprintly", statusBarStyle: "black-translucent" },
+  // Without an explicit <link rel="icon">, every browser guesses /favicon.ico
+  // — which we don't ship, so each page load logged a 404. Point at the SVG
+  // that already exists in public/.
+  icons: { icon: [{ url: "/icon.svg", type: "image/svg+xml" }], apple: "/icon.svg" },
 };
 
 export const viewport: Viewport = {

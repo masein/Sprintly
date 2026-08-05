@@ -1,0 +1,49 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE saved_queries\n        SET    name      = COALESCE($2, name),\n               jql       = COALESCE($3, jql),\n               is_shared = COALESCE($4, is_shared),\n               updated_at = now()\n        WHERE  id = $1\n        RETURNING name       AS \"name!: String\",\n                  jql        AS \"jql!: String\",\n                  is_shared  AS \"is_shared!: bool\",\n                  created_at AS \"created_at!: DateTime<Utc>\",\n                  updated_at AS \"updated_at!: DateTime<Utc>\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "jql!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "is_shared!: bool",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "55d715012e22a401c7a0cd128f11dbb95d91453fa81a92d094187660394809fe"
+}

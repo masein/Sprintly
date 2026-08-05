@@ -82,7 +82,9 @@ Core: `users`, `sessions`, `refresh_tokens`, `projects`, `project_members`,
 `task_reactions`, `task_attachments`, `task_activity`, `task_links`, `sprints`,
 `sprint_retros`, `retro_notes`, `retro_votes`, `time_logs`, `timesheets`,
 `vault_items`, `vault_access`, `vault_audit_log`, `notifications`, `webhooks`,
-`achievements`, `user_achievements`.
+`achievements`, `user_achievements`. Search: `saved_queries` (a named
+query-language string per user, optionally `is_shared` with everyone; unique on
+`(user_id, lower(name))`).
 
 ## Indexes (planned minimum)
 
@@ -96,3 +98,9 @@ Core: `users`, `sessions`, `refresh_tokens`, `projects`, `project_members`,
 Search uses a `tsvector` column on `tasks` kept current by a trigger, plus
 `pg_trgm` for fuzzy matches. Both extensions are enabled in the initial
 migration.
+
+The query language (`/search/jql`, parsed in `domain::jql`) compiles to a
+parameterised `WHERE` over `tasks` joined to `projects`, both `users` sides,
+`sprints`, `epics`, and the parent task. It reads only existing columns — no
+schema of its own beyond `saved_queries` — and the caller's accessible-project
+list is always ANDed in outside the parsed expression.
