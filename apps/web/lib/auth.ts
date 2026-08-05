@@ -86,6 +86,18 @@ export const logout = () => api<void>("/auth/logout", { method: "POST" });
 
 export const me = () => api<Me>("/users/me");
 
+/**
+ * Self-edit: display name, timezone, and the free-form `settings` blob.
+ * `settings` is shallow-merged server-side, so a caller can persist one
+ * preference (e.g. `project_order`) without reading and rewriting the rest —
+ * and without clobbering a key some other screen owns.
+ */
+export const patchMe = (p: {
+  display_name?: string;
+  timezone?: string;
+  settings?: Record<string, unknown>;
+}) => api<Me>("/users/me", { method: "PATCH", body: p });
+
 // Replace the whole avatar in one shot. `url` is an uploaded/linked image
 // (data: or https:), `style`/`seed` describe the generated avatar. Send all
 // null to revert to the deterministic default.

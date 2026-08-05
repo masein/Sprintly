@@ -23,7 +23,7 @@ async function login(page: Page, email: string, password: string) {
   await fill(page, "Email", email);
   await fill(page, "Password", password);
   await page.getByRole("button", { name: /\$ ssh sprintly/ }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL(/\/(me\/day)?$/);
 }
 
 async function logout(page: Page) {
@@ -66,7 +66,7 @@ test.describe("admin invites + email edit", () => {
       await fill(page, "Email", email);
       await fill(page, "Password", password);
       await page.getByRole("button", { name: /\$ git init account/ }).click();
-      await expect(page).toHaveURL("/");
+      await expect(page).toHaveURL(/\/(me\/day)?$/);
       // The session badge shows the global role — admin, straight away.
       await expect(page.getByText("admin", { exact: true })).toBeVisible();
     });

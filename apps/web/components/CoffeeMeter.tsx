@@ -40,14 +40,17 @@ export function CoffeeMeter() {
     ?.coffee_meter !== false;
   if (!enabled) return null;
 
-  const minutes = d.data?.time_this_week_minutes ?? 0;
+  // Daily, not weekly: the thresholds below are a day's worth of coffee, and
+  // feeding them the week's total pinned the bar by Wednesday (QA: "the
+  // time-bar 0-100 is for daily time log but the number is for weekly").
+  const minutes = d.data?.time_today_minutes ?? 0;
   const pct = Math.min(100, (minutes / MAX_MINUTES) * 100);
   const tooltip = vibe(minutes);
 
   return (
     <div
       className="mono group relative flex items-center gap-1.5 rounded border border-white/10 bg-ink-subtle px-2 py-1 text-xs text-chrome-dim"
-      title={tooltip}
+      title={`${tooltip} · ${(minutes / HOUR).toFixed(1)}h logged today`}
     >
       <Coffee size={12} className="text-accent" />
       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-ink">

@@ -8,6 +8,10 @@ export type TimeLog = {
   task_key: string;
   project_key: string;
   user_id: string;
+  user_handle: string;
+  user_avatar_url: string | null;
+  user_avatar_style: string | null;
+  user_avatar_seed: string | null;
   started_at: string;
   ended_at: string | null;
   duration_minutes: number | null;

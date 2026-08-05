@@ -12,8 +12,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import { Plus, X, Vault as VaultIcon } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
 import { VaultItemRow } from "@/components/VaultItemRow";
+import { VaultValueField } from "@/components/VaultValueField";
 import {
   createVaultItem,
   listVaultItems,
@@ -80,9 +82,13 @@ export default function VaultPage() {
     <AppShell currentProjectKey={projectKey}>
       <header className="mb-6 flex items-end justify-between">
         <div>
-          <div className="mono flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
-            <VaultIcon size={11} /> sprintly · {projectKey} · vault
-          </div>
+          <Breadcrumbs
+            items={[
+              { label: "sprintly", href: "/", icon: <VaultIcon size={11} /> },
+              { label: projectKey, href: `/projects/${projectKey}` },
+              { label: "vault" },
+            ]}
+          />
           <h1 className="text-3xl font-semibold">Secrets.</h1>
           <p className="mt-1 text-sm text-chrome-dim">
             Encrypted at rest with a per-project key. Reveal is rate-limited
@@ -168,6 +174,7 @@ function CreateVaultForm({
   const [name, setName] = useState("");
   const [kind, setKind] = useState<VaultKind>("password");
   const [description, setDescription] = useState("");
+  const [username, setUsername] = useState("");
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -177,6 +184,7 @@ function CreateVaultForm({
         name,
         kind,
         description: description || undefined,
+        username: username || undefined,
         value,
       }),
     onSuccess: () => {
@@ -211,7 +219,8 @@ function CreateVaultForm({
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="name (e.g. prod DB password)"
+          placeholder="name — the host / url / service (e.g. db.prod.internal)"
+          aria-label="vault item name"
           required
           className="flex-1 rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
         />
@@ -225,20 +234,24 @@ function CreateVaultForm({
           ))}
         </select>
       </div>
+      {kind === "password" && (
+        <input
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="username (optional — the account this password belongs to)"
+          aria-label="vault item username"
+          autoComplete="off"
+          className="block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
+        />
+      )}
       <input
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="description (optional, NEVER put the secret here)"
+        aria-label="vault item description"
         className="block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
       />
-      <textarea
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        required
-        rows={kind === "env_file" || kind === "ssh_key" ? 6 : 2}
-        placeholder="the actual secret value"
-        className="mono block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
-      />
+      <VaultValueField kind={kind} value={value} onChange={setValue} required />
       {error && (
         <div className="mono rounded border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-200">
           {error}

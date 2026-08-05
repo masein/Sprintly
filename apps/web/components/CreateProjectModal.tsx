@@ -257,3 +257,6 @@ export function CreateProjectModal({
 export function projectIcon(id: string) {
   return ICONS[id] ?? Folder;
 }
+
+/** The pickable icon ids, in display order — shared with the appearance editor. */
+export const ICON_IDS = Object.keys(ICONS);

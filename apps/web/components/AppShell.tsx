@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { ChevronDown, FolderPlus, FolderKanban, Menu, X } from "lucide-react";
+import { ChevronDown, FolderPlus, FolderKanban, Menu, Search, X } from "lucide-react";
 import { listProjects, type Project } from "@/lib/projects";
 import { SessionBadge, SessionMenuContents } from "./SessionBadge";
 import { RunningTimerChip } from "./RunningTimerChip";
@@ -29,7 +29,13 @@ export function AppShell({
     <div className="min-h-screen">
       <OfflineBanner />
       <TopBar currentProjectKey={currentProjectKey} />
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">{children}</main>
+      {/* max-w-7xl (1280px) left ultrawide monitors with a narrow column of
+          content and oceans of gutter; wide:max-w-[1600px] lets boards, tables,
+          and the sprint two-column layout actually use a ≥1440px screen while
+          keeping line lengths sane. Paddings scale with it. */}
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 wide:max-w-[1600px] wide:px-10">
+        {children}
+      </main>
     </div>
   );
 }
@@ -55,13 +61,23 @@ function TopBar({ currentProjectKey }: { currentProjectKey?: string }) {
 
   return (
     <header className="sticky top-0 z-20 border-b border-white/10 bg-ink/80 backdrop-blur">
-      <div className="mx-auto flex h-12 max-w-7xl items-center gap-2 px-4 sm:gap-3 sm:px-6">
+      <div className="mx-auto flex h-12 max-w-7xl items-center gap-2 px-4 sm:gap-3 sm:px-6 wide:max-w-[1600px] wide:px-10">
         <Link href="/" className="mono shrink-0 text-sm tracking-tight">
           <span className="font-semibold">sprintly</span>
           <span className="text-chrome-dim">/</span>
         </Link>
 
         <ProjectSwitcher currentProjectKey={currentProjectKey} />
+
+        {/* Query search. The label folds away on narrow screens — the header
+            row is exactly where things used to overflow. */}
+        <Link
+          href="/search"
+          className="mono inline-flex shrink-0 items-center gap-1 rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+        >
+          <Search size={11} />
+          <span className="hidden sm:inline">search</span>
+        </Link>
 
         <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
           {/* The coffee meter is a nicety; hide it on the narrowest screens. */}

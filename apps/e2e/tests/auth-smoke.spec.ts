@@ -33,7 +33,7 @@ test.describe("M1 auth smoke", () => {
       await fill(page, "Email", email);
       await fill(page, "Password", password);
       await page.getByRole("button", { name: /\$ git init account/ }).click();
-      await expect(page).toHaveURL("/");
+      await expect(page).toHaveURL(/\/(me\/day)?$/);
     });
 
     await test.step("signed-in badge appears", async () => {
@@ -63,7 +63,7 @@ test.describe("M1 auth smoke", () => {
       await fill(page, "Email", email);
       await fill(page, "Password", password);
       await page.getByRole("button", { name: /\$ ssh sprintly/ }).click();
-      await expect(page).toHaveURL("/");
+      await expect(page).toHaveURL(/\/(me\/day)?$/);
       await expect(page.getByText(`@${handle}`)).toBeVisible();
     });
   });

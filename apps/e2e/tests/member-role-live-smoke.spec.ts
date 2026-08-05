@@ -21,7 +21,7 @@ async function register(page: Page, handle: string, name: string) {
   await fill(page, "Email", `${handle}@sprintly.test`);
   await fill(page, "Password", "correct-horse-battery-staple");
   await page.getByRole("button", { name: /\$ git init account/ }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL(/\/(me\/day)?$/);
 }
 
 test.describe("member role changes are live", () => {

@@ -18,7 +18,11 @@ html[data-theme="midnight"] {
   --chrome:     #e6e6ea;
   --chrome-dim: #9b9ba3;
   --accent:     #7c5cff;
-  --accent-fg:  #ffffff;
+  /* Near-black, not white: white on this violet is 4.35:1, under the 4.5
+     WCAG AA floor for 14px text (Lighthouse flagged the primary button).
+     Darkening the accent instead would have hurt `text-accent` on the ink
+     background, which is the same token's other job. 4.64:1 here. */
+  --accent-fg:  #07060d;
   --rule:       rgba(255,255,255,0.10);
 }
 html[data-theme="daylight"] {
