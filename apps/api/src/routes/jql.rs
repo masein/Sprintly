@@ -221,7 +221,10 @@ fn explain(e: sqlx::Error) -> AppError {
     AppError::from(e)
 }
 
-async fn fields() -> AppResult<impl IntoResponse> {
+/// The field list is a constant, but it's still part of an authenticated API —
+/// every sibling route here requires a session, and this one shipped without
+/// one by omission (auth in this codebase is per-handler, via the extractor).
+async fn fields(_user: CurrentUser) -> AppResult<impl IntoResponse> {
     Ok(Json(serde_json::json!({ "fields": jql::field_names() })))
 }
 
