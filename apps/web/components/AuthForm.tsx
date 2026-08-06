@@ -16,6 +16,7 @@ import {
   isTwoFactorChallenge,
   isMustChangePassword,
   changePasswordForced,
+  requestPasswordReset,
   type ApiError,
 } from "@/lib/auth-bundle";
 
@@ -37,6 +38,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
   // Set when a provisioned account must set a new password before getting in.
   const [resetChallenge, setResetChallenge] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  // "Forgot password" step: its own view, like the 2FA and forced-reset ones.
+  const [forgot, setForgot] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
 
   // Minted invite links land here as /register?invite=<token> — prefill the
   // field so the invitee doesn't have to fish the token out of the URL.
@@ -54,6 +58,28 @@ export function AuthForm({ mode }: { mode: Mode }) {
     enableRealtime(qc);
     router.push("/");
     router.refresh();
+  }
+
+  async function onSubmitForgot(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await requestPasswordReset(email.trim());
+      // The server answers the same way whether or not that address exists —
+      // it won't confirm who has an account here — so the UI must not either.
+      setForgotSent(true);
+    } catch (err) {
+      const e2 = err as ApiError;
+      // A 429 is the only failure worth naming: it means "you've asked a lot".
+      setError(
+        e2?.status === 429
+          ? "That's a lot of reset requests. Give it an hour."
+          : e2?.message ?? "Couldn't send that. Try again in a moment.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -214,6 +240,61 @@ export function AuthForm({ mode }: { mode: Mode }) {
     );
   }
 
+  if (forgot) {
+    return (
+      <form onSubmit={onSubmitForgot} className="space-y-5" aria-label="reset password">
+        <p className="text-sm text-chrome-dim">
+          Give us the email on the account. If it exists, a reset link lands in
+          the inbox — the link is good for 30 minutes, and once.
+        </p>
+        <Field
+          label="Email"
+          type="email"
+          value={email}
+          onChange={setEmail}
+          autoComplete="email"
+          required
+        />
+        {forgotSent && (
+          <div
+            role="status"
+            data-testid="reset-sent"
+            className="mono rounded border border-accent/30 bg-accent/10 p-3 text-sm text-chrome"
+          >
+            Sent, assuming that address has an account here. Check the inbox —
+            and the spam folder, since this mail is new.
+          </div>
+        )}
+        {error && (
+          <div
+            role="alert"
+            className="mono rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200"
+          >
+            {error}
+          </div>
+        )}
+        <button
+          type="submit"
+          disabled={submitting || !email.trim()}
+          className="mono w-full rounded bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {submitting ? "sending…" : "$ mail me a link"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setForgot(false);
+            setForgotSent(false);
+            setError(null);
+          }}
+          className="mono w-full text-xs text-chrome-dim hover:text-chrome"
+        >
+          ← back to sign in
+        </button>
+      </form>
+    );
+  }
+
   return (
     <form onSubmit={onSubmit} className="space-y-5">
       {mode === "register" && (
@@ -286,6 +367,21 @@ export function AuthForm({ mode }: { mode: Mode }) {
             ? "$ ssh sprintly"
             : "$ git init account"}
       </button>
+
+      {/* The reset endpoints shipped in M1; until now nothing in the UI
+          reached them, so a forgotten password meant asking an admin. */}
+      {mode === "login" && (
+        <button
+          type="button"
+          onClick={() => {
+            setForgot(true);
+            setError(null);
+          }}
+          className="mono w-full text-xs text-chrome-dim hover:text-chrome"
+        >
+          forgot your password?
+        </button>
+      )}
     </form>
   );
 }
