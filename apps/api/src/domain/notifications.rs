@@ -108,6 +108,24 @@ pub async fn notify(
     .execute(db)
     .await?;
 
+    // Hand the email off to the job queue rather than sending here: the HTTP
+    // request shouldn't wait on a mail server, and the queue already gives us
+    // retries with backoff and at-most-one-worker-per-row. The worker decides
+    // whether to actually send, so a preference changed a second from now is
+    // still respected.
+    if let Err(e) = sqlx::query(
+        r#"INSERT INTO jobs (id, kind, payload) VALUES ($1, 'send_notification_email', $2)"#,
+    )
+    .bind(Uuid::now_v7())
+    .bind(serde_json::json!({ "notification_id": id }))
+    .execute(db)
+    .await
+    {
+        // A notification that exists in-app but never emails is a far better
+        // outcome than a failed comment post, so this never propagates.
+        tracing::warn!(error = %e, %recipient, "could not enqueue notification email");
+    }
+
     publish(
         redis,
         &Event::NotificationCreated {

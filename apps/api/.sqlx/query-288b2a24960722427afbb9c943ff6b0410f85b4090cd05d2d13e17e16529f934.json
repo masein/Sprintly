@@ -1,0 +1,57 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT n.kind    AS \"kind!: String\",\n               n.title   AS \"title!: String\",\n               n.body,\n               n.link,\n               n.user_id AS \"user_id!: Uuid\",\n               u.email   AS \"email!: String\"\n        FROM   notifications n\n        JOIN   users u ON u.id = n.user_id\n        WHERE  n.id = $1 AND u.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "kind!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "body",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "link",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "user_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "email!: String",
+        "type_info": {
+          "Custom": {
+            "name": "citext",
+            "kind": "Simple"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "288b2a24960722427afbb9c943ff6b0410f85b4090cd05d2d13e17e16529f934"
+}

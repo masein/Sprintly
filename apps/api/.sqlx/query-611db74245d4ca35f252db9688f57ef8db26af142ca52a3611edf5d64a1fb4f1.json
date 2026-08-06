@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO email_prefs (user_id, unsubscribe_token)\n        VALUES ($1, gen_random_bytes(32))\n        ON CONFLICT (user_id) DO UPDATE SET user_id = email_prefs.user_id\n        RETURNING unsubscribe_token AS \"unsubscribe_token!: Vec<u8>\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "unsubscribe_token!: Vec<u8>",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "611db74245d4ca35f252db9688f57ef8db26af142ca52a3611edf5d64a1fb4f1"
+}

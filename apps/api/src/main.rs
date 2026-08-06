@@ -81,7 +81,14 @@ async fn cmd_serve() -> anyhow::Result<()> {
     let state = infra::AppState::connect(&cfg).await?;
     // Background worker: achievement scans, backups, and webhook delivery. The
     // vault master key lets it decrypt webhook signing secrets.
-    sprintly_api::jobs::spawn(state.db.clone(), cfg.vault.master_key);
+    sprintly_api::jobs::spawn(
+        state.db.clone(),
+        cfg.vault.master_key,
+        sprintly_api::jobs::MailCtx {
+            mailer: state.mailer.clone(),
+            public_url: cfg.public_url.clone(),
+        },
+    );
     let router = app::router(state.clone());
 
     let listener = tokio::net::TcpListener::bind(&cfg.api_bind).await?;

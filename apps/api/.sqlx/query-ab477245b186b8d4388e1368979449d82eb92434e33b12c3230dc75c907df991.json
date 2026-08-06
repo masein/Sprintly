@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT mode        AS \"mode!: String\",\n               kinds       AS \"kinds!: Value\",\n               digest_hour AS \"digest_hour!: i16\"\n        FROM   email_prefs\n        WHERE  user_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mode!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "kinds!: Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "digest_hour!: i16",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ab477245b186b8d4388e1368979449d82eb92434e33b12c3230dc75c907df991"
+}
