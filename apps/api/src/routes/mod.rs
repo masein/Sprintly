@@ -9,6 +9,7 @@ pub mod backups;
 pub mod board_views;
 pub mod boards;
 pub mod dashboards;
+pub mod email_prefs;
 pub mod fields;
 pub mod health;
 pub mod import_export;

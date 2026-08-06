@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE email_prefs\n        SET    mode        = COALESCE($2, mode),\n               -- Shallow-merge the kinds map, same contract as user settings:\n               -- a client toggling one switch can't drop the others.\n               kinds       = kinds || COALESCE($3, '{}'::jsonb),\n               digest_hour = COALESCE($4, digest_hour),\n               updated_at  = now()\n        WHERE  user_id = $1\n        RETURNING mode        AS \"mode!: String\",\n                  kinds       AS \"kinds!: Value\",\n                  digest_hour AS \"digest_hour!: i16\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mode!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "kinds!: Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "digest_hour!: i16",
+        "type_info": "Int2"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Jsonb",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cb45d4ac24b51e0654f5e2a39210259246f87946f5e0a0e1473665593664258d"
+}

@@ -14,6 +14,7 @@ import { api } from "@/lib/api";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ApiTokensSection } from "@/components/ApiTokensSection";
 import { TwoFactorSection } from "@/components/TwoFactorSection";
+import { EmailPrefsSection } from "@/components/EmailPrefsSection";
 import { AvatarSettings } from "@/components/AvatarSettings";
 import { setTheme as applyTheme, type Theme } from "@/lib/theme";
 
@@ -181,6 +182,8 @@ export default function SettingsPage() {
       </form>
 
       <AvatarSettings user={user} onUpdated={setUser} />
+
+      <EmailPrefsSection />
 
       <TwoFactorSection />
 

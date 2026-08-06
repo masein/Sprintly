@@ -220,3 +220,81 @@ mod tests {
         let _ = build(&cfg); // constructs without panicking
     }
 }
+
+/// Hex-encode the unsubscribe token for a URL. Lowercase, no separators.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// One notification, one email. Plain text on purpose: no HTML part to get
+/// mangled, and a new sending domain has an easier time with plain mail.
+pub fn notification(
+    public_url: &str,
+    unsubscribe_token: &[u8],
+    title: &str,
+    body: Option<&str>,
+    link: Option<&str>,
+    to: &str,
+) -> Message {
+    let base = public_url.trim_end_matches('/');
+    let mut text = String::new();
+    text.push_str(title);
+    text.push_str("\n\n");
+    if let Some(b) = body {
+        if !b.trim().is_empty() {
+            text.push_str(b.trim());
+            text.push_str("\n\n");
+        }
+    }
+    if let Some(l) = link {
+        text.push_str(&format!("  {base}{l}\n\n"));
+    }
+    text.push_str(&format!(
+        "—\nYou're getting this because Sprintly notified you.\n\
+         Change what email you get: {base}/settings\n\
+         Stop all Sprintly email: {base}/api/v1/email/unsubscribe?token={}\n",
+        hex(unsubscribe_token)
+    ));
+    Message {
+        to: to.to_string(),
+        // No "Sprintly:" prefix — the From line already says who it's from, and
+        // the subject is more useful holding the actual headline.
+        subject: title.to_string(),
+        body: text,
+    }
+}
+
+/// The daily digest: everything that happened since the last one, in one mail.
+/// `items` are (title, link) pairs in the order they arrived.
+pub fn digest(
+    public_url: &str,
+    unsubscribe_token: &[u8],
+    items: &[(String, Option<String>)],
+    to: &str,
+) -> Message {
+    let base = public_url.trim_end_matches('/');
+    let n = items.len();
+    let mut text = format!(
+        "{n} thing{} happened in Sprintly since your last digest.\n\n",
+        if n == 1 { "" } else { "s" }
+    );
+    for (title, link) in items {
+        text.push_str(&format!("• {title}\n"));
+        if let Some(l) = link {
+            text.push_str(&format!("  {base}{l}\n"));
+        }
+    }
+    text.push_str(&format!(
+        "\n—\nChange what email you get: {base}/settings\n\
+         Stop all Sprintly email: {base}/api/v1/email/unsubscribe?token={}\n",
+        hex(unsubscribe_token)
+    ));
+    Message {
+        to: to.to_string(),
+        subject: format!(
+            "Sprintly digest — {n} update{}",
+            if n == 1 { "" } else { "s" }
+        ),
+        body: text,
+    }
+}
