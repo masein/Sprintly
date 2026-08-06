@@ -12,6 +12,8 @@ export {
   isTwoFactorChallenge,
   isMustChangePassword,
   changePasswordForced,
+  requestPasswordReset,
+  confirmPasswordReset,
   type Me,
   type AvatarPayload,
   type AuthResponse,
