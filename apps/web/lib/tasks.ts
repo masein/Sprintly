@@ -75,6 +75,10 @@ export const editTask = (taskKey: string, body: Partial<Task>) =>
 export const deleteTask = (taskKey: string) =>
   api<void>(`/tasks/${encodeURIComponent(taskKey)}`, { method: "DELETE" });
 
+/** Undo a (soft) delete. Only valid while the task is actually deleted. */
+export const restoreTask = (taskKey: string) =>
+  api<void>(`/tasks/${encodeURIComponent(taskKey)}/restore`, { method: "POST" });
+
 export const moveTask = (
   taskKey: string,
   body: { column_id: string; after_task_id?: string; before_task_id?: string },

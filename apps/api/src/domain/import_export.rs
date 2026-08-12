@@ -83,9 +83,20 @@ pub struct ImportPlan {
 }
 
 /// Map an external list/column name to one of our four board categories.
+///
+/// Ordering note: "verified"/"accepted" are checked in the done branch and
+/// must come before the review branch — a past-tense "Verified" is work that
+/// PASSED the QA gate, while a present-tense "verify" column is the gate
+/// itself. Getting this wrong marked 500 imported done-tasks as overdue.
 pub fn infer_category(name: &str) -> &'static str {
     let n = name.to_lowercase();
-    if n.contains("done") || n.contains("complete") || n.contains("closed") || n.contains("ship") {
+    if n.contains("done")
+        || n.contains("complete")
+        || n.contains("closed")
+        || n.contains("ship")
+        || n.contains("verified")
+        || n.contains("accepted")
+    {
         "done"
     } else if n.contains("review") || n.contains("qa") || n.contains("test") || n.contains("verify")
     {
@@ -1463,6 +1474,11 @@ mod tests {
         assert_eq!(infer_category("QA"), "review");
         assert_eq!(infer_category("Done"), "done");
         assert_eq!(infer_category("Shipped"), "done");
+        // Past-tense = passed the gate (QA4: these were flagged overdue while
+        // sitting in a "Verified" column); present-tense = the gate itself.
+        assert_eq!(infer_category("Verified"), "done");
+        assert_eq!(infer_category("Accepted"), "done");
+        assert_eq!(infer_category("Verify"), "review");
     }
 
     #[test]

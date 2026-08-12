@@ -70,6 +70,16 @@ pub struct DayBucket {
     pub date: NaiveDate,
     pub total_minutes: i64,
     pub billable_minutes: i64,
+    /// Which tasks those minutes went to — the weekly grid showed a bare
+    /// total per day, and "what did I even do on Tuesday" needed the CSV.
+    pub by_task: Vec<DayTask>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DayTask {
+    pub task_key: String,
+    pub task_title: String,
+    pub minutes: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -507,6 +517,7 @@ async fn compute_view(
 
     let mut day_totals: BTreeMap<NaiveDate, (i64, i64)> = BTreeMap::new();
     let mut task_totals: BTreeMap<(String, String, String), (i64, i64)> = BTreeMap::new();
+    let mut day_task_totals: BTreeMap<(NaiveDate, String, String), i64> = BTreeMap::new();
     let mut totals = ts::Totals::default();
 
     for row in &logs {
@@ -527,6 +538,9 @@ async fn compute_view(
         if row.billable {
             te.1 += mins;
         }
+        *day_task_totals
+            .entry((d, row.task_key.clone(), row.task_title.clone()))
+            .or_insert(0) += mins;
         totals.add(mins, row.billable);
     }
 
@@ -535,10 +549,21 @@ async fn compute_view(
         .map(|i| {
             let d = monday + chrono::Duration::days(i);
             let (t, b) = day_totals.get(&d).copied().unwrap_or((0, 0));
+            let mut by_task: Vec<DayTask> = day_task_totals
+                .range((d, String::new(), String::new())..)
+                .take_while(|((date, _, _), _)| *date == d)
+                .map(|((_, task_key, task_title), mins)| DayTask {
+                    task_key: task_key.clone(),
+                    task_title: task_title.clone(),
+                    minutes: *mins,
+                })
+                .collect();
+            by_task.sort_by(|a, b| b.minutes.cmp(&a.minutes));
             DayBucket {
                 date: d,
                 total_minutes: t,
                 billable_minutes: b,
+                by_task,
             }
         })
         .collect();

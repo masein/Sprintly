@@ -205,10 +205,15 @@ async fn bulk_assign_then_sprint_moves_off_backlog(pool: PgPool) {
     assert_eq!(templates::backlog(&pool, pid).await.unwrap().len(), 3);
 
     let keys = vec!["BK-1".to_string(), "BK-2".to_string(), "BK-3".to_string()];
-    let n = templates::bulk_assign(&pool, pid, &keys, Some(owner))
+    let changed = templates::bulk_assign(&pool, pid, &keys, Some(owner))
         .await
         .unwrap();
-    assert_eq!(n, 3);
+    assert_eq!(changed.len(), 3, "every task actually changed assignee");
+    // Re-running the same assign is a no-op — nobody should get re-notified.
+    let changed_again = templates::bulk_assign(&pool, pid, &keys, Some(owner))
+        .await
+        .unwrap();
+    assert!(changed_again.is_empty(), "idempotent re-run changes nothing");
     let assigned: i64 =
         sqlx::query_scalar("SELECT count(*) FROM tasks WHERE project_id = $1 AND assignee_id = $2")
             .bind(pid)

@@ -41,6 +41,7 @@ pub fn router() -> Router<AppState> {
             "/tasks/:task_key",
             get(get_task).patch(edit_task).delete(delete_task),
         )
+        .route("/tasks/:task_key/restore", post(restore_task))
         .route("/tasks/:task_key/move", post(move_task))
 }
 
@@ -758,6 +759,61 @@ async fn delete_task(
         &state.redis,
         &Event::TaskDeleted {
             project_id,
+            task_id,
+            key: task_key,
+        },
+    )
+    .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Undo for `delete_task`. Deletes are soft (`deleted_at`), which always made
+/// them recoverable in principle — this makes it recoverable in practice, so
+/// the UI can offer a few-second "undo" instead of a scary confirm dialog.
+/// Same permission as deleting; only works on a task that IS deleted.
+async fn restore_task(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(task_key): Path<String>,
+) -> AppResult<impl IntoResponse> {
+    // Can't use resolve_project_from_task_key here: it (rightly) refuses to
+    // see deleted tasks, and a task being restored is by definition deleted.
+    let resolved: Option<(Uuid, String)> = sqlx::query_as(
+        r#"
+        SELECT t.project_id, p.key
+        FROM   tasks t
+        JOIN   projects p ON p.id = t.project_id
+        WHERE  t.key = $1 AND p.deleted_at IS NULL
+        "#,
+    )
+    .bind(&task_key)
+    .fetch_optional(&state.db)
+    .await?;
+    let (project_id, project_key) = resolved.ok_or(AppError::NotFound)?;
+    let ctx = project_ctx::load_by_key(&state.db, &project_key, user.id).await?;
+    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+    let row: Option<(Uuid, Uuid)> = sqlx::query_as(
+        r#"
+        UPDATE tasks
+           SET deleted_at = NULL
+         WHERE key = $1 AND project_id = $2 AND deleted_at IS NOT NULL
+        RETURNING id, board_id
+        "#,
+    )
+    .bind(&task_key)
+    .bind(project_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let (task_id, board_id) = row.ok_or(AppError::NotFound)?;
+
+    // From a client's point of view a restored task simply (re)appears.
+    crate::infra::events::publish(
+        &state.redis,
+        &Event::TaskCreated {
+            project_id,
+            board_id,
             task_id,
             key: task_key,
         },
