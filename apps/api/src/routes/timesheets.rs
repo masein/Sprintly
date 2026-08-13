@@ -558,7 +558,9 @@ async fn compute_view(
                     minutes: *mins,
                 })
                 .collect();
-            by_task.sort_by(|a, b| b.minutes.cmp(&a.minutes));
+            // Biggest first — Reverse rather than a comparator, which the
+            // newer clippy insists on (unnecessary_sort_by).
+            by_task.sort_by_key(|t| std::cmp::Reverse(t.minutes));
             DayBucket {
                 date: d,
                 total_minutes: t,
