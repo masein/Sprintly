@@ -123,11 +123,8 @@ async fn export(
             );
             h.insert(
                 header::CONTENT_DISPOSITION,
-                HeaderValue::from_str(&format!(
-                    "attachment; filename=\"{}-report.docx\"",
-                    ctx.key
-                ))
-                .unwrap(),
+                HeaderValue::from_str(&format!("attachment; filename=\"{}-report.docx\"", ctx.key))
+                    .unwrap(),
             );
             return Ok((StatusCode::OK, h, bytes).into_response());
         }
@@ -135,14 +132,14 @@ async fn export(
             let data = crate::domain::task_report::report_data(&state.db, ctx.id).await?;
             let bytes = crate::domain::task_report::to_pdf(&data);
             let mut h = HeaderMap::new();
-            h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/pdf"));
+            h.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/pdf"),
+            );
             h.insert(
                 header::CONTENT_DISPOSITION,
-                HeaderValue::from_str(&format!(
-                    "attachment; filename=\"{}-report.pdf\"",
-                    ctx.key
-                ))
-                .unwrap(),
+                HeaderValue::from_str(&format!("attachment; filename=\"{}-report.pdf\"", ctx.key))
+                    .unwrap(),
             );
             return Ok((StatusCode::OK, h, bytes).into_response());
         }

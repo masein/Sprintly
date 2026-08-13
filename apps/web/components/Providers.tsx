@@ -25,7 +25,16 @@ export function Providers({ children }: { children: React.ReactNode }) {
     // didn't notice" — no call site needs to remember its own invalidations.
     const qc: QueryClient = new QueryClient({
       mutationCache: new MutationCache({
-        onSuccess: () => qc.invalidateQueries(),
+        // Fire-and-forget, deliberately. A promise returned from here is
+        // awaited before the mutation leaves `pending`, so returning this one
+        // kept every `isPending` true until the whole cache had refetched —
+        // and a form whose submit button is disabled while pending stops
+        // accepting Enter entirely (browsers refuse implicit submission when
+        // the default button is disabled). Filing two tasks in a row, the
+        // second Enter did nothing.
+        onSuccess: () => {
+          void qc.invalidateQueries();
+        },
       }),
       defaultOptions: {
         queries: {

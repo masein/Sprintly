@@ -213,7 +213,10 @@ async fn bulk_assign_then_sprint_moves_off_backlog(pool: PgPool) {
     let changed_again = templates::bulk_assign(&pool, pid, &keys, Some(owner))
         .await
         .unwrap();
-    assert!(changed_again.is_empty(), "idempotent re-run changes nothing");
+    assert!(
+        changed_again.is_empty(),
+        "idempotent re-run changes nothing"
+    );
     let assigned: i64 =
         sqlx::query_scalar("SELECT count(*) FROM tasks WHERE project_id = $1 AND assignee_id = $2")
             .bind(pid)

@@ -260,11 +260,15 @@ function BacklogQuickAdd({
     mutationFn: (t: string) => createTask(projectKey, { title: t }),
     onSuccess: () => {
       onCreated();
-      setTitle("");
       setError(null);
       inputRef.current?.focus();
     },
-    onError: (e) => setError((e as unknown as ApiError).message ?? "couldn't file it"),
+    // The title was cleared on submit, so hand it back rather than making
+    // someone retype it.
+    onError: (e, attempted) => {
+      setTitle(attempted);
+      setError((e as unknown as ApiError).message ?? "couldn't file it");
+    },
   });
 
   function close() {
@@ -291,11 +295,18 @@ function BacklogQuickAdd({
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (!title.trim()) {
+        const filing = title.trim();
+        if (!filing) {
           setTitleError("Needs a title.");
           return;
         }
-        create.mutate(title.trim());
+        // Clear now, not in onSuccess. Filing several tasks in a row means
+        // typing the next one immediately, and a slow round-trip used to land
+        // its setTitle("") *after* those keystrokes — wiping them, so Enter
+        // submitted an empty field. Global cache invalidation made that window
+        // wide enough to hit reliably.
+        setTitle("");
+        create.mutate(filing);
       }}
       className="space-y-1 border-b border-white/10 p-2"
     >

@@ -208,10 +208,7 @@ pub fn to_docx(data: &ReportData) -> AppResult<Vec<u8>> {
 
     body.push_str(&docx_para(
         Some("Title"),
-        &[(
-            &format!("{} — task report", data.project_name),
-            false,
-        )],
+        &[(&format!("{} — task report", data.project_name), false)],
     ));
     body.push_str(&docx_para(
         None,
@@ -390,93 +387,6 @@ fn store_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
     out
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sample() -> ReportData {
-        ReportData {
-            project_key: "TR".into(),
-            project_name: "Test réport".into(),
-            generated_on: chrono::NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
-            groups: vec![
-                (
-                    "To do".into(),
-                    vec![ReportTask {
-                        key: "TR-1".into(),
-                        title: "Ship the (thing)".into(),
-                        description: "Line one.\n\nLine two with <tags> & \"quotes\".".into(),
-                        status: "todo".into(),
-                        task_type: "feature".into(),
-                        priority: "p2".into(),
-                        column_name: Some("To do".into()),
-                        assignee_handle: Some("sam".into()),
-                        due_date: None,
-                        subtasks: vec![ReportTask {
-                            key: "TR-2".into(),
-                            title: "Subtask".into(),
-                            description: String::new(),
-                            status: "done".into(),
-                            task_type: "chore".into(),
-                            priority: "p3".into(),
-                            column_name: None,
-                            assignee_handle: None,
-                            due_date: None,
-                            subtasks: vec![],
-                        }],
-                    }],
-                ),
-                ("Done".into(), vec![]),
-            ],
-            total_tasks: 2,
-        }
-    }
-
-    #[test]
-    fn crc32_reference_vector() {
-        // The canonical IEEE 802.3 check value.
-        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
-        assert_eq!(crc32(b""), 0);
-    }
-
-    #[test]
-    fn docx_is_a_wellformed_zip() {
-        let bytes = to_docx(&sample()).unwrap();
-        // Local header magic…
-        assert_eq!(&bytes[..4], b"PK\x03\x04");
-        // …EOCD magic present in the tail…
-        let eocd = &bytes[bytes.len() - 22..bytes.len() - 18];
-        assert_eq!(eocd, b"PK\x05\x06");
-        // …and the document part (with escaped content) made it in.
-        let hay = String::from_utf8_lossy(&bytes);
-        assert!(hay.contains("word/document.xml"));
-        assert!(hay.contains("&lt;tags&gt; &amp; &quot;quotes&quot;"));
-        assert!(hay.contains("TR-2 Subtask — Done"));
-    }
-
-    #[test]
-    fn pdf_has_shape_and_ascii_only_text() {
-        let bytes = to_pdf(&sample());
-        let s = String::from_utf8_lossy(&bytes);
-        assert!(s.starts_with("%PDF-1.4"));
-        assert!(s.trim_end().ends_with("%%EOF"));
-        // Non-ASCII input is transliterated, never emitted as multi-byte
-        // UTF-8 (which a WinAnsi stream would render as mojibake).
-        assert!(!s.contains('·'));
-        assert!(s.contains("Test r?port"), "é must become ?, not UTF-8 bytes");
-        assert!(s.contains("(TR-1"));
-        // Balanced object graph: every obj has an endobj.
-        assert_eq!(s.matches(" 0 obj").count(), s.matches("endobj").count());
-    }
-
-    #[test]
-    fn escaped_parens_in_pdf_strings() {
-        let bytes = to_pdf(&sample());
-        let s = String::from_utf8_lossy(&bytes);
-        assert!(s.contains("Ship the \\(thing\\)"));
-    }
-}
-
 // ─── pdf ─────────────────────────────────────────────────────────────────────
 
 const PAGE_W: f32 = 595.0; // A4 portrait, points
@@ -501,7 +411,9 @@ fn pdf_sanitize(s: &str) -> String {
 }
 
 fn pdf_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('(', "\\(").replace(')', "\\)")
+    s.replace('\\', "\\\\")
+        .replace('(', "\\(")
+        .replace(')', "\\)")
 }
 
 /// Crude-but-serviceable wrap: Helvetica averages ~0.5em per glyph.
@@ -674,4 +586,94 @@ pub fn to_pdf(data: &ReportData) -> Vec<u8> {
         objects.len() + 1
     ));
     out.into_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> ReportData {
+        ReportData {
+            project_key: "TR".into(),
+            project_name: "Test réport".into(),
+            generated_on: chrono::NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
+            groups: vec![
+                (
+                    "To do".into(),
+                    vec![ReportTask {
+                        key: "TR-1".into(),
+                        title: "Ship the (thing)".into(),
+                        description: "Line one.\n\nLine two with <tags> & \"quotes\".".into(),
+                        status: "todo".into(),
+                        task_type: "feature".into(),
+                        priority: "p2".into(),
+                        column_name: Some("To do".into()),
+                        assignee_handle: Some("sam".into()),
+                        due_date: None,
+                        subtasks: vec![ReportTask {
+                            key: "TR-2".into(),
+                            title: "Subtask".into(),
+                            description: String::new(),
+                            status: "done".into(),
+                            task_type: "chore".into(),
+                            priority: "p3".into(),
+                            column_name: None,
+                            assignee_handle: None,
+                            due_date: None,
+                            subtasks: vec![],
+                        }],
+                    }],
+                ),
+                ("Done".into(), vec![]),
+            ],
+            total_tasks: 2,
+        }
+    }
+
+    #[test]
+    fn crc32_reference_vector() {
+        // The canonical IEEE 802.3 check value.
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+        assert_eq!(crc32(b""), 0);
+    }
+
+    #[test]
+    fn docx_is_a_wellformed_zip() {
+        let bytes = to_docx(&sample()).unwrap();
+        // Local header magic…
+        assert_eq!(&bytes[..4], b"PK\x03\x04");
+        // …EOCD magic present in the tail…
+        let eocd = &bytes[bytes.len() - 22..bytes.len() - 18];
+        assert_eq!(eocd, b"PK\x05\x06");
+        // …and the document part (with escaped content) made it in.
+        let hay = String::from_utf8_lossy(&bytes);
+        assert!(hay.contains("word/document.xml"));
+        assert!(hay.contains("&lt;tags&gt; &amp; &quot;quotes&quot;"));
+        assert!(hay.contains("TR-2 Subtask — Done"));
+    }
+
+    #[test]
+    fn pdf_has_shape_and_ascii_only_text() {
+        let bytes = to_pdf(&sample());
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.starts_with("%PDF-1.4"));
+        assert!(s.trim_end().ends_with("%%EOF"));
+        // Non-ASCII input is transliterated, never emitted as multi-byte
+        // UTF-8 (which a WinAnsi stream would render as mojibake).
+        assert!(!s.contains('·'));
+        assert!(
+            s.contains("Test r?port"),
+            "é must become ?, not UTF-8 bytes"
+        );
+        assert!(s.contains("(TR-1"));
+        // Balanced object graph: every obj has an endobj.
+        assert_eq!(s.matches(" 0 obj").count(), s.matches("endobj").count());
+    }
+
+    #[test]
+    fn escaped_parens_in_pdf_strings() {
+        let bytes = to_pdf(&sample());
+        let s = String::from_utf8_lossy(&bytes);
+        assert!(s.contains("Ship the \\(thing\\)"));
+    }
 }
