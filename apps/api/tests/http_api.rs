@@ -1885,6 +1885,28 @@ async fn a_deleted_task_can_be_restored(pool: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+#[sqlx::test(migrations = "./migrations")]
+async fn the_jql_field_list_needs_a_session_like_its_siblings(pool: PgPool) {
+    let app = app(pool);
+
+    // It shipped unauthenticated by omission — the constant is harmless, but an
+    // authenticated API shouldn't have a public corner nobody meant to open.
+    let (status, _) = send(&app, "GET", "/api/v1/search/jql/fields", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (token, _) = register(&app, "jqlfields").await;
+    let (status, body) = send(&app, "GET", "/api/v1/search/jql/fields", Some(&token), None).await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert!(
+        body["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "assignee"),
+        "{body:?}"
+    );
+}
+
 // ── email preferences + unsubscribe (feat/notification-emails) ────────────
 
 #[sqlx::test(migrations = "./migrations")]
