@@ -74,7 +74,7 @@ dotenvy = "0.15"
 envy = "0.4"
 
 # Validation
-validator = { version = "0.18", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 
 # Email (SMTP). rustls, no OpenSSL — matches the rest of the stack.
 lettre = { version = "0.11", default-features = false, features = [

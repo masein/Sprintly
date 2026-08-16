@@ -1,0 +1,22 @@
+# cargo-audit configuration.
+#
+# `cargo audit` reads Cargo.lock, not the build graph, so it reports crates
+# that are present in the lockfile but never compiled into anything we ship.
+# Ignores here are for exactly that case — an advisory we cannot act on and
+# are not exposed to. Anything genuinely reachable gets fixed, not listed.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071 — Marvin attack (timing sidechannel) in `rsa` 0.9.x.
+    #
+    # No fixed version exists upstream. It reaches the lockfile through
+    # `sqlx-mysql`, which we do not build: sqlx is configured with the postgres
+    # driver only, and `cargo tree -i rsa --target all` finds no path to it.
+    # Nothing in the shipped binary links this crate, so there is no key to
+    # recover through a sidechannel that isn't there.
+    #
+    # Recheck when sqlx cuts a release that drops the dependency, or if we ever
+    # enable the MySQL driver — at which point this becomes real and this entry
+    # must go.
+    "RUSTSEC-2023-0071",
+]
