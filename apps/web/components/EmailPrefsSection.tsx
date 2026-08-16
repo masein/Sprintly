@@ -80,7 +80,7 @@ export function EmailPrefsSection() {
       {!prefs.delivery_configured && (
         <p className="mono rounded border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
           No mail server is configured on this deployment yet, so these emails
-          are written to the server log instead of sent. Your choices are saved
+          are written to the server log instead of sent. Your choices are kept
           either way.
         </p>
       )}
@@ -159,7 +159,7 @@ export function EmailPrefsSection() {
         </p>
       )}
       {savedAt && !error && (
-        <p className="mono text-xs text-chrome-dim">saved {savedAt.toLocaleTimeString()}</p>
+        <p className="mono text-xs text-chrome-dim">email settings saved {savedAt.toLocaleTimeString()}</p>
       )}
     </section>
   );

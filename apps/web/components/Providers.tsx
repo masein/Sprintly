@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  MutationCache,
   QueryClient,
   QueryClientProvider,
 } from "@tanstack/react-query";
@@ -14,20 +15,39 @@ import { me } from "@/lib/auth-bundle";
 import { applyStoredTheme } from "@/lib/theme";
 import { KeyboardHotkeys } from "./KeyboardHotkeys";
 import { AchievementToast } from "./AchievementToast";
+import { Toaster } from "./Toaster";
 
 export function Providers({ children }: { children: React.ReactNode }) {
-  const [client] = useState(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: {
-            staleTime: 30_000,
-            retry: 1,
-            refetchOnWindowFocus: false,
-          },
+  const [client] = useState(() => {
+    // Every successful mutation invalidates everything. Sounds heavy; isn't:
+    // only mounted queries actually refetch, and staleTime keeps the rest
+    // quiet. This is the app-wide answer to "I changed X and the screen
+    // didn't notice" — no call site needs to remember its own invalidations.
+    const qc: QueryClient = new QueryClient({
+      mutationCache: new MutationCache({
+        // Fire-and-forget, deliberately. A promise returned from here is
+        // awaited before the mutation leaves `pending`, so returning this one
+        // kept every `isPending` true until the whole cache had refetched —
+        // and a form whose submit button is disabled while pending stops
+        // accepting Enter entirely (browsers refuse implicit submission when
+        // the default button is disabled). Filing two tasks in a row, the
+        // second Enter did nothing.
+        onSuccess: () => {
+          void qc.invalidateQueries();
         },
       }),
-  );
+      defaultOptions: {
+        queries: {
+          staleTime: 30_000,
+          retry: 1,
+          // Coming back to a dulled tab is exactly when stale data shows.
+          refetchOnWindowFocus: true,
+          refetchOnReconnect: true,
+        },
+      },
+    });
+    return qc;
+  });
 
   // Apply the saved theme as early as the client can — before paint where
   // possible. The flash is brief because Next pre-renders with the default.
@@ -58,6 +78,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       {children}
       <KeyboardHotkeys />
       <AchievementToast />
+      <Toaster />
     </QueryClientProvider>
   );
 }

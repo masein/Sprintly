@@ -285,7 +285,28 @@ async fn bulk(
 
     let affected = match req.op {
         BulkOp::Assign { assignee_id } => {
-            templates::bulk_assign(&state.db, ctx.id, &req.task_keys, assignee_id).await?
+            let changed =
+                templates::bulk_assign(&state.db, ctx.id, &req.task_keys, assignee_id).await?;
+            // Same courtesy the single-task PATCH extends: the new assignee
+            // hears about it. notify() skips self-assignment on its own;
+            // best-effort like every other notification emit.
+            if let Some(new_assignee) = assignee_id {
+                for (task_id, task_key) in &changed {
+                    let _ = crate::domain::notifications::notify(
+                        &state.db,
+                        &state.redis,
+                        new_assignee,
+                        user.id,
+                        "assigned",
+                        &format!("You were assigned {task_key}"),
+                        None,
+                        Some(&format!("/tasks/{task_key}")),
+                        Some(*task_id),
+                    )
+                    .await;
+                }
+            }
+            changed.len() as u64
         }
         BulkOp::Sprint { sprint_id } => {
             if let Some(sid) = sprint_id {

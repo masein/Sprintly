@@ -365,17 +365,23 @@ pub async fn bulk_assign(
     project_id: Uuid,
     keys: &[String],
     assignee_id: Option<Uuid>,
-) -> AppResult<u64> {
-    let r = sqlx::query(
+) -> AppResult<Vec<(Uuid, String)>> {
+    // Returns (task_id, key) of tasks whose assignee actually CHANGED, so the
+    // route can notify the new assignee — a bulk assign used to be the one
+    // assignment path that never told anyone. Already-assigned tasks are
+    // filtered out to keep re-runs quiet.
+    let rows: Vec<(Uuid, String)> = sqlx::query_as(
         r#"UPDATE tasks SET assignee_id = $3, updated_at = now()
-           WHERE project_id = $1 AND key = ANY($2) AND deleted_at IS NULL"#,
+           WHERE project_id = $1 AND key = ANY($2) AND deleted_at IS NULL
+             AND assignee_id IS DISTINCT FROM $3
+           RETURNING id, key"#,
     )
     .bind(project_id)
     .bind(keys)
     .bind(assignee_id)
-    .execute(db)
+    .fetch_all(db)
     .await?;
-    Ok(r.rows_affected())
+    Ok(rows)
 }
 
 pub async fn bulk_sprint(

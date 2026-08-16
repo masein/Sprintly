@@ -148,79 +148,6 @@ pub fn invite(public_url: &str, token: &str, role: &str, to: &str) -> Message {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Mutex;
-
-    /// Test mailer that records what it was asked to send.
-    struct CaptureMailer {
-        sent: Mutex<Vec<Message>>,
-    }
-
-    #[async_trait]
-    impl Mailer for CaptureMailer {
-        async fn send(&self, msg: Message) -> Result<()> {
-            self.sent.lock().unwrap().push(msg);
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn capture_mailer_records_payload() {
-        let m = CaptureMailer {
-            sent: Mutex::new(Vec::new()),
-        };
-        m.send(password_reset("https://x.test", "tok", "u@x.test"))
-            .await
-            .unwrap();
-        let sent = m.sent.lock().unwrap();
-        assert_eq!(sent.len(), 1);
-        assert_eq!(sent[0].to, "u@x.test");
-        assert!(sent[0].body.contains("tok"));
-    }
-
-    #[tokio::test]
-    async fn log_mailer_succeeds() {
-        assert!(LogMailer
-            .send(Message {
-                to: "a@b.test".into(),
-                subject: "s".into(),
-                body: "b".into(),
-            })
-            .await
-            .is_ok());
-    }
-
-    #[test]
-    fn reset_template_has_token_link() {
-        let msg = password_reset("https://sprintly.example/", "tok123", "u@x.test");
-        assert_eq!(msg.to, "u@x.test");
-        assert!(msg
-            .body
-            .contains("https://sprintly.example/reset?token=tok123"));
-        assert!(msg.subject.to_lowercase().contains("reset"));
-    }
-
-    #[test]
-    fn invite_template_has_link_and_role() {
-        let msg = invite("https://sprintly.example", "inv9", "admin", "p@x.test");
-        assert!(msg
-            .body
-            .contains("https://sprintly.example/register?invite=inv9"));
-        assert!(msg.body.contains("admin"));
-    }
-
-    #[test]
-    fn build_without_smtp_is_log_only() {
-        let cfg = EmailConfig {
-            smtp_url: None,
-            mail_from: "Sprintly <noreply@localhost>".into(),
-        };
-        let _ = build(&cfg); // constructs without panicking
-    }
-}
-
 /// Hex-encode the unsubscribe token for a URL. Lowercase, no separators.
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -296,5 +223,78 @@ pub fn digest(
             if n == 1 { "" } else { "s" }
         ),
         body: text,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// Test mailer that records what it was asked to send.
+    struct CaptureMailer {
+        sent: Mutex<Vec<Message>>,
+    }
+
+    #[async_trait]
+    impl Mailer for CaptureMailer {
+        async fn send(&self, msg: Message) -> Result<()> {
+            self.sent.lock().unwrap().push(msg);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn capture_mailer_records_payload() {
+        let m = CaptureMailer {
+            sent: Mutex::new(Vec::new()),
+        };
+        m.send(password_reset("https://x.test", "tok", "u@x.test"))
+            .await
+            .unwrap();
+        let sent = m.sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].to, "u@x.test");
+        assert!(sent[0].body.contains("tok"));
+    }
+
+    #[tokio::test]
+    async fn log_mailer_succeeds() {
+        assert!(LogMailer
+            .send(Message {
+                to: "a@b.test".into(),
+                subject: "s".into(),
+                body: "b".into(),
+            })
+            .await
+            .is_ok());
+    }
+
+    #[test]
+    fn reset_template_has_token_link() {
+        let msg = password_reset("https://sprintly.example/", "tok123", "u@x.test");
+        assert_eq!(msg.to, "u@x.test");
+        assert!(msg
+            .body
+            .contains("https://sprintly.example/reset?token=tok123"));
+        assert!(msg.subject.to_lowercase().contains("reset"));
+    }
+
+    #[test]
+    fn invite_template_has_link_and_role() {
+        let msg = invite("https://sprintly.example", "inv9", "admin", "p@x.test");
+        assert!(msg
+            .body
+            .contains("https://sprintly.example/register?invite=inv9"));
+        assert!(msg.body.contains("admin"));
+    }
+
+    #[test]
+    fn build_without_smtp_is_log_only() {
+        let cfg = EmailConfig {
+            smtp_url: None,
+            mail_from: "Sprintly <noreply@localhost>".into(),
+        };
+        let _ = build(&cfg); // constructs without panicking
     }
 }

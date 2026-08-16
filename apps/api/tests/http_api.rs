@@ -1765,6 +1765,126 @@ async fn a_shared_query_is_readable_by_all_and_editable_by_its_owner_only(pool: 
     );
 }
 
+// ── task restore, the undo behind the delete toast (fix/qa4-feedback-pass) ──
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_deleted_task_can_be_restored(pool: PgPool) {
+    let app = app(pool);
+    // Burn the bootstrap admin so the others are ordinary members.
+    let _ = register(&app, "undoroot").await;
+    let (owner, _) = register(&app, "undoowner").await;
+    make_project(&app, &owner, "UNDO").await;
+    let key = make_task_http(&app, &owner, "UNDO", "delete me by accident").await;
+
+    // Deletes are soft, which is what makes undo possible at all.
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tasks/{key}"),
+        Some(&owner),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{key}"),
+        Some(&owner),
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "a deleted task must not be readable"
+    );
+
+    // Undo.
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{key}/restore"),
+        Some(&owner),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, task) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{key}"),
+        Some(&owner),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{task:?}");
+    assert_eq!(task["title"], "delete me by accident");
+    assert_eq!(task["key"], key);
+
+    // Restoring something that isn't deleted has nothing to undo. A 404 keeps
+    // a double-tapped toast from being reported as success.
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{key}/restore"),
+        Some(&owner),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A key that never existed, and one from a project the caller can't see,
+    // are both refused — restore resolves deleted rows, so it needs the same
+    // gate as every other write.
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/v1/tasks/UNDO-999/restore",
+        Some(&owner),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (outsider, _) = register(&app, "undooutsider").await;
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tasks/{key}"),
+        Some(&owner),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{key}/restore"),
+        Some(&outsider),
+        None,
+    )
+    .await;
+    assert!(
+        status == StatusCode::FORBIDDEN || status == StatusCode::NOT_FOUND,
+        "a non-member restored someone else's task (got {status})"
+    );
+
+    // No session at all, either. This is a 403 rather than a 401 because the
+    // CSRF guard sits in front of auth on writes and answers first — restore
+    // isn't on its exemption list, and shouldn't be.
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{key}/restore"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
 // ── email preferences + unsubscribe (feat/notification-emails) ────────────
 
 #[sqlx::test(migrations = "./migrations")]
