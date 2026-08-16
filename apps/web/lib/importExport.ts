@@ -40,5 +40,5 @@ export const importProject = (
     body,
   });
 
-export const exportUrl = (key: string, format: "json" | "csv") =>
+export const exportUrl = (key: string, format: "json" | "csv" | "docx" | "pdf") =>
   `${API_BASE}/projects/${encodeURIComponent(key)}/export?format=${format}`;

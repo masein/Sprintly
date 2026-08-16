@@ -7,6 +7,7 @@ export type Subtask = {
   title: string;
   status: "todo" | "in_progress" | "review" | "done";
   assignee_id: string | null;
+  estimate_minutes: number | null;
 };
 
 export const listSubtasks = (taskKey: string) =>

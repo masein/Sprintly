@@ -69,7 +69,12 @@ export type TimesheetView = {
   billable_minutes: number;
   total_pay_cents: number;
   currency: string;
-  days: { date: string; total_minutes: number; billable_minutes: number }[];
+  days: {
+    date: string;
+    total_minutes: number;
+    billable_minutes: number;
+    by_task: { task_key: string; task_title: string; minutes: number }[];
+  }[];
   by_task: {
     task_key: string;
     project_key: string;

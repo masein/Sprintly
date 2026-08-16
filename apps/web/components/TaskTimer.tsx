@@ -272,16 +272,20 @@ function LogList({
           key={l.id}
           className="mono flex items-center gap-2 text-xs text-chrome-dim"
         >
-          <Avatar
-            size={14}
-            user={{
-              userId: l.user_id,
-              handle: l.user_handle,
-              avatarUrl: l.user_avatar_url,
-              avatarStyle: l.user_avatar_style,
-              avatarSeed: l.user_avatar_seed,
-            }}
-          />
+          {/* Hovering the avatar answers "whose hours are these?" without
+              needing a note on the log. */}
+          <span title={`@${l.user_handle}`} className="flex shrink-0 items-center">
+            <Avatar
+              size={14}
+              user={{
+                userId: l.user_id,
+                handle: l.user_handle,
+                avatarUrl: l.user_avatar_url,
+                avatarStyle: l.user_avatar_style,
+                avatarSeed: l.user_avatar_seed,
+              }}
+            />
+          </span>
           <span className="text-chrome">
             {l.duration_minutes != null ? fmtMinutes(l.duration_minutes) : "running…"}
           </span>

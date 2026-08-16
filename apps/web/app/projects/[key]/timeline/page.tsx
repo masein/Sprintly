@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Flag, Plus, Trash2 } from "lucide-react";
+import { Flag, Pencil, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
@@ -333,11 +333,20 @@ function EpicRow({
   onDelete: () => void;
 }) {
   const [picking, setPicking] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draftName, setDraftName] = useState(epic.name);
   const save = useMutation({
     mutationFn: (body: Partial<Epic>) => updateEpic(epic.id, body),
     onSuccess: onChange,
   });
   const pct = epic.task_count > 0 ? Math.round((epic.done_count / epic.task_count) * 100) : 0;
+
+  function commitRename() {
+    const name = draftName.trim();
+    setRenaming(false);
+    if (name && name !== epic.name) save.mutate({ name });
+    else setDraftName(epic.name);
+  }
   return (
     <li className="flex flex-wrap items-center gap-2 rounded border border-white/10 px-2 py-1.5">
       {canManage ? (
@@ -371,7 +380,46 @@ function EpicRow({
           ))}
         </span>
       )}
-      <span className="mono truncate text-xs text-chrome">{epic.name}</span>
+      {renaming ? (
+        <input
+          autoFocus
+          value={draftName}
+          onChange={(e) => setDraftName(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitRename();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setDraftName(epic.name);
+              setRenaming(false);
+            }
+          }}
+          maxLength={80}
+          aria-label={`rename ${epic.name}`}
+          className="mono w-48 min-w-0 rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome focus:border-accent focus:outline-none"
+        />
+      ) : (
+        <span className="mono flex min-w-0 items-center gap-1 truncate text-xs text-chrome">
+          <span className="truncate" title={epic.name}>{epic.name}</span>
+          {canManage && (
+            <button
+              type="button"
+              aria-label={`rename ${epic.name}`}
+              title="rename"
+              onClick={() => {
+                setDraftName(epic.name);
+                setRenaming(true);
+              }}
+              className="shrink-0 text-chrome-dim hover:text-chrome"
+            >
+              <Pencil size={11} />
+            </button>
+          )}
+        </span>
+      )}
       <span className="mono text-[10px] text-chrome-dim">
         {epic.done_count}/{epic.task_count}
         {epic.task_count > 0 ? ` · ${pct}%` : ""}
