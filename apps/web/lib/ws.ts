@@ -8,6 +8,8 @@
 
 import type { QueryClient } from "@tanstack/react-query";
 
+import { tryRefresh } from "./api";
+
 export type ServerEvent =
   | { event: "task_created"; data: { project_id: string; board_id: string; task_id: string; key: string } }
   | { event: "task_updated"; data: { project_id: string; task_id: string; key: string } }
@@ -111,7 +113,14 @@ function scheduleReconnect(qc: QueryClient) {
   if (intentionalClose || !enabled) return;
   const delay = backoffMs;
   backoffMs = Math.min(MAX_BACKOFF, Math.floor(backoffMs * 1.7));
-  setTimeout(() => open(qc), delay);
+  setTimeout(() => {
+    // The upgrade authenticates via the access cookie, which is the usual
+    // reason the socket died in the first place (it expired while the tab
+    // idled). Refresh it before redialing, or realtime stays dead until a
+    // full page reload; the wrapper's 401→refresh path never runs for
+    // WebSocket handshakes. Errors don't matter — open() retries anyway.
+    void tryRefresh().then(() => open(qc));
+  }, delay);
 }
 
 // Map server events to query-cache invalidations. The actual UI re-fetches
@@ -131,10 +140,17 @@ function routeToQueryCache(e: ServerEvent, qc: QueryClient) {
       qc.invalidateQueries({ queryKey: ["my-dashboard"] });
       qc.invalidateQueries({ queryKey: ["project-dashboard"] });
       qc.invalidateQueries({ queryKey: ["my-tasks"] });
+      // Sprint and backlog views hold the same tasks under their own keys.
+      qc.invalidateQueries({ queryKey: ["sprints"] });
+      qc.invalidateQueries({ queryKey: ["sprint-tasks"] });
+      qc.invalidateQueries({ queryKey: ["sprint-burndown"] });
+      qc.invalidateQueries({ queryKey: ["backlog"] });
       break;
     case "comment_created":
-      qc.invalidateQueries({ queryKey: ["task", e.data.task_id] });
-      qc.invalidateQueries({ queryKey: ["task-activity", e.data.task_id] });
+      // Comment/activity queries are keyed by task KEY (e.g. "PROJ-12"), but
+      // the event only carries the task's UUID — invalidate the prefixes.
+      qc.invalidateQueries({ queryKey: ["comments"] });
+      qc.invalidateQueries({ queryKey: ["task-activity"] });
       break;
     case "notification_created":
       qc.invalidateQueries({ queryKey: ["notifications"] });
