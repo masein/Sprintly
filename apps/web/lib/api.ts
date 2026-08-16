@@ -61,6 +61,20 @@ export async function api<T = unknown>(
     }
   }
 
+  // An expired CSRF cookie 403s before auth is even consulted. A successful
+  // refresh re-issues it, so treat this exactly like the 401 path: refresh
+  // once, then replay the write with the fresh cookie.
+  if (res.status === 403 && !_retry && WRITE_METHODS.has(method.toUpperCase())) {
+    const isJson403 = res.headers.get("content-type")?.includes("application/json");
+    const payload403 = isJson403 ? await res.clone().json().catch(() => null) : null;
+    if (payload403?.error?.code === "csrf") {
+      const refreshed = await tryRefresh();
+      if (refreshed) {
+        return api<T>(path, { ...opts, _retry: true });
+      }
+    }
+  }
+
   if (res.status === 204) return undefined as T;
 
   const isJson = res.headers
@@ -82,13 +96,31 @@ export async function api<T = unknown>(
   return payload as T;
 }
 
-async function tryRefresh(): Promise<boolean> {
-  try {
-    await api("/auth/refresh", { method: "POST", _retry: true });
-    return true;
-  } catch {
-    return false;
+// Single-flight refresh. Without this, every request that 401s at the same
+// moment (page load fires a dozen) races its own POST /auth/refresh; the
+// server rotates the refresh token on first use and treats the losers as
+// token reuse — and burns the whole session. One shared promise means one
+// refresh per expiry, everyone else awaits it.
+let refreshInFlight: Promise<boolean> | null = null;
+
+export function tryRefresh(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      try {
+        await api("/auth/refresh", { method: "POST", _retry: true });
+        return true;
+      } catch {
+        return false;
+      } finally {
+        // Cleared on the next microtask so late joiners in this tick still
+        // share the result, while the next expiry gets a fresh attempt.
+        setTimeout(() => {
+          refreshInFlight = null;
+        }, 0);
+      }
+    })();
   }
+  return refreshInFlight;
 }
 
 function readCookie(name: string): string | null {
