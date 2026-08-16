@@ -13,31 +13,45 @@
 //! that re-enqueues itself every 5 minutes after each run. There's no UI for
 //! creating jobs in v1 — they're all internal.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
+use chrono::Utc;
 use sqlx::PgPool;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::domain::{achievements, backups};
+use crate::domain::{achievements, backups, email_prefs};
+use crate::infra::email::{self, Mailer};
+
+/// What the worker needs to send mail: a mailer and the public base URL that
+/// goes into every link. Cloned per job — both are cheap.
+#[derive(Clone)]
+pub struct MailCtx {
+    pub mailer: Arc<dyn Mailer>,
+    pub public_url: String,
+}
 
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
 const ACHIEVEMENT_SCAN_EVERY_SECS: i64 = 300;
 /// How often the worker materialises due recurring templates (F9).
 const TEMPLATE_MATERIALIZE_EVERY_SECS: i64 = 300;
+/// How often the digest worker looks for users whose local send-hour arrived.
+/// Five minutes keeps "08:00" honest to within a coffee's width, and the query
+/// is a single indexed scan that finds nothing most of the time.
+const DIGEST_SWEEP_EVERY_SECS: i64 = 300;
 /// How often the worker prunes old backups per the retention policy (F15).
 const BACKUP_RETENTION_EVERY_SECS: i64 = 21_600; // 6h
 
 /// Spawn the worker on the runtime. Returns immediately. The task runs for
 /// the lifetime of the process; on shutdown the runtime cancels it. The vault
 /// master key is needed to decrypt webhook signing secrets at delivery time.
-pub fn spawn(pool: PgPool, vault_master_key: [u8; 32]) {
+pub fn spawn(pool: PgPool, vault_master_key: [u8; 32], mail: MailCtx) {
     tokio::spawn(async move {
         if let Err(e) = ensure_seed_jobs(&pool).await {
             warn!(error = %e, "jobs: seed failed");
         }
         loop {
-            match run_one(&pool, &vault_master_key).await {
+            match run_one(&pool, &vault_master_key, &mail).await {
                 Ok(ran) => {
                     if !ran {
                         // No runnable job — sleep before polling again.
@@ -56,7 +70,11 @@ pub fn spawn(pool: PgPool, vault_master_key: [u8; 32]) {
 async fn ensure_seed_jobs(pool: &PgPool) -> anyhow::Result<()> {
     // One self-re-enqueuing row per periodic kind. Backup scheduling and
     // retention are opt-in via env, so they're only seeded when configured.
-    let mut periodic = vec!["scan_achievements", "materialize_templates"];
+    let mut periodic = vec![
+        "scan_achievements",
+        "materialize_templates",
+        "notification_digest",
+    ];
     if backups::schedule_secs().is_some() {
         periodic.push("scheduled_backup");
     }
@@ -81,7 +99,11 @@ async fn ensure_seed_jobs(pool: &PgPool) -> anyhow::Result<()> {
 }
 
 /// Claim + run one job. Returns true if a job was processed.
-async fn run_one(pool: &PgPool, vault_master_key: &[u8; 32]) -> anyhow::Result<bool> {
+async fn run_one(
+    pool: &PgPool,
+    vault_master_key: &[u8; 32],
+    mail: &MailCtx,
+) -> anyhow::Result<bool> {
     let mut tx = pool.begin().await?;
 
     // Claim a single runnable job. SKIP LOCKED so concurrent workers don't
@@ -119,6 +141,8 @@ async fn run_one(pool: &PgPool, vault_master_key: &[u8; 32]) -> anyhow::Result<b
         "materialize_templates" => run_materialize_templates(pool).await,
         "scheduled_backup" => run_scheduled_backup(pool).await,
         "backup_retention" => run_backup_retention(pool).await,
+        "send_notification_email" => run_send_notification_email(pool, id, mail).await,
+        "notification_digest" => run_notification_digest(pool, mail).await,
         other => Err(anyhow::anyhow!("unknown job kind: {other}")),
     };
 
@@ -661,6 +685,7 @@ async fn finish_ok(pool: &PgPool, id: Uuid, kind: &str) -> anyhow::Result<()> {
         "scan_achievements" => Some(ACHIEVEMENT_SCAN_EVERY_SECS),
         "materialize_templates" => Some(TEMPLATE_MATERIALIZE_EVERY_SECS),
         "backup_retention" => Some(BACKUP_RETENTION_EVERY_SECS),
+        "notification_digest" => Some(DIGEST_SWEEP_EVERY_SECS),
         // Interval is operator-configured; if it was unset since boot, stop.
         "scheduled_backup" => backups::schedule_secs(),
         _ => None,
@@ -721,6 +746,150 @@ async fn finish_err(pool: &PgPool, id: Uuid, msg: &str) -> anyhow::Result<()> {
         .bind(backoff_secs as i32)
         .execute(pool)
         .await?;
+    }
+    Ok(())
+}
+
+/// Send one notification as email, if the recipient still wants it.
+///
+/// Preferences are read *here*, not at enqueue time: between a comment landing
+/// and this job running, someone may have hit unsubscribe. The queue is a
+/// delivery mechanism, not a decision record.
+async fn run_send_notification_email(
+    pool: &PgPool,
+    job_id: Uuid,
+    mail: &MailCtx,
+) -> anyhow::Result<()> {
+    let payload: serde_json::Value = sqlx::query_scalar("SELECT payload FROM jobs WHERE id = $1")
+        .bind(job_id)
+        .fetch_one(pool)
+        .await?;
+    let Some(nid) = payload
+        .get("notification_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<Uuid>().ok())
+    else {
+        // Nothing to send and nothing to retry — a malformed payload won't fix
+        // itself, so treat it as done rather than looping ten times.
+        warn!(%job_id, "send_notification_email: payload has no notification_id");
+        return Ok(());
+    };
+
+    let row = sqlx::query!(
+        r#"
+        SELECT n.kind    AS "kind!: String",
+               n.title   AS "title!: String",
+               n.body,
+               n.link,
+               n.user_id AS "user_id!: Uuid",
+               u.email   AS "email!: String"
+        FROM   notifications n
+        JOIN   users u ON u.id = n.user_id
+        WHERE  n.id = $1 AND u.deleted_at IS NULL
+        "#,
+        nid
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    // The notification (or the account) can be gone by now — deleting a task
+    // cascades its notifications away. Not an error.
+    let Some(row) = row else { return Ok(()) };
+
+    let prefs = email_prefs::load(pool, row.user_id).await?;
+    if !prefs.wants_immediate(&row.kind) {
+        return Ok(());
+    }
+
+    let token = email_prefs::ensure_row(pool, row.user_id).await?;
+    let msg = email::notification(
+        &mail.public_url,
+        &token,
+        &row.title,
+        row.body.as_deref(),
+        row.link.as_deref(),
+        &row.email,
+    );
+    // Awaited, not spawned: a failure here should mark the job failed so the
+    // queue's backoff gets its turn, which is the whole point of the outbox.
+    mail.mailer.send(msg).await?;
+    Ok(())
+}
+
+/// Send daily digests to everyone whose local clock has reached their chosen
+/// hour and who hasn't had one today.
+///
+/// Runs every few minutes and does nothing most of the time. Timing is per
+/// user, in their own timezone, using the same `AT TIME ZONE` trick the
+/// dashboards use — 08:00 should mean 08:00 where they are.
+async fn run_notification_digest(pool: &PgPool, mail: &MailCtx) -> anyhow::Result<()> {
+    let due = sqlx::query!(
+        r#"
+        SELECT p.user_id           AS "user_id!: Uuid",
+               p.unsubscribe_token AS "token!: Vec<u8>",
+               p.kinds             AS "kinds!: serde_json::Value",
+               p.last_digest_at,
+               u.email             AS "email!: String"
+        FROM   email_prefs p
+        JOIN   users u ON u.id = p.user_id
+        WHERE  p.mode = 'digest'
+          AND  u.deleted_at IS NULL
+          -- Their local hour has arrived…
+          AND  EXTRACT(HOUR FROM (now() AT TIME ZONE COALESCE(u.timezone, 'UTC'))) >= p.digest_hour
+          -- …and they haven't had one yet on their local day.
+          AND  (p.last_digest_at IS NULL
+                OR (p.last_digest_at AT TIME ZONE COALESCE(u.timezone, 'UTC'))::date
+                   < (now() AT TIME ZONE COALESCE(u.timezone, 'UTC'))::date)
+        LIMIT  500
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for d in due {
+        let since = d
+            .last_digest_at
+            .unwrap_or_else(|| Utc::now() - chrono::Duration::days(1));
+        let items = sqlx::query!(
+            r#"
+            SELECT kind AS "kind!: String", title AS "title!: String", link
+            FROM   notifications
+            WHERE  user_id = $1 AND created_at > $2
+            ORDER BY created_at
+            LIMIT  50
+            "#,
+            d.user_id,
+            since
+        )
+        .fetch_all(pool)
+        .await?;
+
+        // Only the kinds this person left switched on.
+        let enabled: Vec<(String, Option<String>)> = items
+            .into_iter()
+            .filter(|i| {
+                d.kinds
+                    .get(&i.kind)
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            })
+            .map(|i| (i.title, i.link))
+            .collect();
+
+        // Stamp the send even when there's nothing to say, so a quiet day
+        // doesn't queue up tomorrow's digest to cover two days.
+        if !enabled.is_empty() {
+            let msg = email::digest(&mail.public_url, &d.token, &enabled, &d.email);
+            if let Err(e) = mail.mailer.send(msg).await {
+                // One bad address shouldn't stop everyone else's digest.
+                warn!(error = %e, user_id = %d.user_id, "digest send failed");
+                continue;
+            }
+        }
+        sqlx::query("UPDATE email_prefs SET last_digest_at = now() WHERE user_id = $1")
+            .bind(d.user_id)
+            .execute(pool)
+            .await?;
     }
     Ok(())
 }

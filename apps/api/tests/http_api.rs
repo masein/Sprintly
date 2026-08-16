@@ -1906,3 +1906,212 @@ async fn the_jql_field_list_needs_a_session_like_its_siblings(pool: PgPool) {
         "{body:?}"
     );
 }
+
+// ── email preferences + unsubscribe (feat/notification-emails) ────────────
+
+#[sqlx::test(migrations = "./migrations")]
+async fn email_prefs_default_to_personal_kinds_and_merge_on_update(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "mailprefs").await;
+
+    let (status, p) = send(
+        &app,
+        "GET",
+        "/api/v1/users/me/email-prefs",
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{p:?}");
+    assert_eq!(p["mode"], "immediate");
+    assert_eq!(p["kinds"]["mention"], true);
+    assert_eq!(p["kinds"]["assigned"], true);
+    // Comments are the chatty kind — opt-in, not opt-out.
+    assert_eq!(p["kinds"]["comment"], false);
+    // The UI shouldn't hardcode the kind list.
+    assert!(p["available_kinds"].as_array().unwrap().len() >= 3);
+    // No SMTP in tests, so the UI can say "logged, not sent" honestly.
+    assert_eq!(p["delivery_configured"], false);
+
+    // Toggling one kind must not drop the others.
+    let (status, p) = send(
+        &app,
+        "PATCH",
+        "/api/v1/users/me/email-prefs",
+        Some(&token),
+        Some(json!({ "kinds": { "comment": true } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{p:?}");
+    assert_eq!(p["kinds"]["comment"], true);
+    assert_eq!(p["kinds"]["mention"], true, "merge dropped a key: {p:?}");
+
+    let (status, p) = send(
+        &app,
+        "PATCH",
+        "/api/v1/users/me/email-prefs",
+        Some(&token),
+        Some(json!({ "mode": "digest", "digest_hour": 17 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{p:?}");
+    assert_eq!(p["mode"], "digest");
+    assert_eq!(p["digest_hour"], 17);
+
+    // Junk is refused with a message, not stored.
+    for bad in [
+        json!({ "mode": "sometimes" }),
+        json!({ "digest_hour": 25 }),
+        json!({ "kinds": { "telepathy": true } }),
+        json!({ "kinds": { "mention": "yes" } }),
+    ] {
+        let (status, body) = send(
+            &app,
+            "PATCH",
+            "/api/v1/users/me/email-prefs",
+            Some(&token),
+            Some(bad.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{bad} accepted: {body:?}");
+    }
+
+    let (status, _) = send(&app, "GET", "/api/v1/users/me/email-prefs", None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_notification_enqueues_exactly_one_email_job(pool: PgPool) {
+    let app = app(pool.clone());
+    let (alice, _) = register(&app, "mailalice").await;
+    let (bob, bob_user) = register(&app, "mailbob").await;
+    make_project(&app, &alice, "MAIL").await;
+
+    // Bob needs to be a member before he can be assigned anything.
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/MAIL/members",
+        Some(&alice),
+        Some(json!({ "user_id": bob_user["id"], "role": "contributor" })),
+    )
+    .await;
+    assert!(status.is_success(), "adding bob failed: {status}");
+
+    let key = make_task_http(&app, &alice, "MAIL", "please look at this").await;
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/tasks/{key}"),
+        Some(&alice),
+        Some(json!({ "assignee_id": bob_user["id"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The notification exists…
+    let notes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM notifications WHERE user_id = $1 AND kind = 'assigned'",
+    )
+    .bind(uuid::Uuid::parse_str(bob_user["id"].as_str().unwrap()).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(notes, 1);
+
+    // …and so does exactly one queued email for it. The worker decides whether
+    // to send; enqueueing is what the request path is responsible for.
+    let jobs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM jobs WHERE kind = 'send_notification_email' AND finished_at IS NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(jobs, 1, "expected one queued notification email");
+
+    let _ = bob;
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn unsubscribe_is_one_way_and_needs_no_session(pool: PgPool) {
+    let app = app(pool.clone());
+    let (token, user) = register(&app, "mailunsub").await;
+    let uid = uuid::Uuid::parse_str(user["id"].as_str().unwrap()).unwrap();
+
+    // Rows are created lazily — by the first preference write, or by the worker
+    // before it sends the first email. That way every account-creation path
+    // (register, invite, admin-provisioned, OIDC) is covered without each one
+    // having to remember. Touching prefs here is what mints the token.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        "/api/v1/users/me/email-prefs",
+        Some(&token),
+        Some(json!({ "kinds": { "comment": true } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let raw: Vec<u8> =
+        sqlx::query_scalar("SELECT unsubscribe_token FROM email_prefs WHERE user_id = $1")
+            .bind(uid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let hex: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+
+    // Followed from a mail client: no session, and it answers with a page.
+    let (status, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/email/unsubscribe?token={hex}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let mode: String = sqlx::query_scalar("SELECT mode FROM email_prefs WHERE user_id = $1")
+        .bind(uid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(mode, "off");
+
+    // A token that matches nothing is answered identically — no oracle.
+    let other = "ab".repeat(32);
+    let (status, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/email/unsubscribe?token={other}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Malformed links say so rather than 500ing.
+    for bad in ["", "zz", "abc"] {
+        let (status, _) = send(
+            &app,
+            "GET",
+            &format!("/api/v1/email/unsubscribe?token={bad}"),
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "token `{bad}`");
+    }
+
+    // Turning it back on is a thing only the account holder can do.
+    let (status, p) = send(
+        &app,
+        "PATCH",
+        "/api/v1/users/me/email-prefs",
+        Some(&token),
+        Some(json!({ "mode": "immediate" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{p:?}");
+    assert_eq!(p["mode"], "immediate");
+}

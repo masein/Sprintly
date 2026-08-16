@@ -6,6 +6,7 @@ pub mod api_tokens;
 pub mod backups;
 pub mod board_views;
 pub mod chat_adapters;
+pub mod email_prefs;
 pub mod fields;
 pub mod git_providers;
 pub mod import_export;
