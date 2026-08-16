@@ -95,10 +95,18 @@ test.describe("sprint completion carry-over", () => {
       // Rename + move the dates inline.
       await page.getByRole("button", { name: "edit Sprint 8" }).click();
       await page.getByLabel("Sprint 8 name").fill("Sprint 8 renamed");
-      await page.getByLabel("Sprint 8 end").fill("2026-08-30");
+      // Far enough out that it can't collide with a default. The new-sprint
+      // form ends at today+14, so a nearby hardcoded date eventually *is* that
+      // default — this line asserted "2026-08-30" and duly broke on 2026-08-16,
+      // when two rows started showing it.
+      await page.getByLabel("Sprint 8 end").fill("2031-03-03");
       await page.getByRole("button", { name: "save", exact: true }).click();
       await expect(page.getByText("Sprint 8 renamed")).toBeVisible();
-      await expect(page.getByText("2026-08-30")).toBeVisible();
+      // Scoped to the row as well, so a second sprint sharing a date can't
+      // reintroduce the ambiguity.
+      await expect(
+        page.locator("li", { hasText: "Sprint 8 renamed" }).getByText("2031-03-03"),
+      ).toBeVisible();
 
       // Delete it — the task falls back to the backlog rather than vanishing.
       await page.getByRole("button", { name: "delete Sprint 8 renamed" }).click();
