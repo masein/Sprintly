@@ -85,6 +85,16 @@ export function AssigneePicker({
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter commits the top match — typing a name and hitting
+              // Enter is how everyone drives a search box. Only when the
+              // query actually narrowed things down; Enter on an empty
+              // search has no obvious winner to pick.
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              const first = matches[0];
+              if (q.trim() && first) pick(first.user_id);
+            }}
             placeholder="search people…"
             aria-label="search assignee"
             className="mono mb-1 block w-full rounded border border-white/10 bg-ink-subtle px-2 py-1 text-xs text-chrome focus:border-accent focus:outline-none"

@@ -90,6 +90,11 @@ export default function ProjectPage() {
 
   useEffect(() => {
     reload();
+    // Plain-state page (not TanStack), so the global refetch-on-focus
+    // doesn't cover it — refresh on focus ourselves.
+    const onFocus = () => void reload();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectKey]);
 
