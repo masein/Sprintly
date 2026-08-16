@@ -107,14 +107,23 @@ export function ImportExportModal({
           </h3>
           <p className="text-xs text-chrome-dim">
             A full <span className="mono">JSON</span> bundle (tasks, comments, attachment
-            manifest) or a flat <span className="mono">CSV</span> of tasks.
+            manifest), a flat <span className="mono">CSV</span> of tasks, or a readable
+            task report for people who live outside the tool —{" "}
+            <span className="mono">Word</span> keeps every language intact,{" "}
+            <span className="mono">PDF</span> sticks to Latin text.
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <a href={exportUrl(projectKey, "json")} className="mono rounded border border-white/10 px-3 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome">
               download JSON
             </a>
             <a href={exportUrl(projectKey, "csv")} className="mono rounded border border-white/10 px-3 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome">
               download CSV
+            </a>
+            <a href={exportUrl(projectKey, "docx")} className="mono rounded border border-white/10 px-3 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome">
+              report (.docx)
+            </a>
+            <a href={exportUrl(projectKey, "pdf")} className="mono rounded border border-white/10 px-3 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome">
+              report (.pdf)
             </a>
           </div>
         </section>

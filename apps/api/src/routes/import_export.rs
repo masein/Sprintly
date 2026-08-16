@@ -107,6 +107,45 @@ async fn export(
         return Err(AppError::Forbidden);
     }
 
+    // Document reports (QA: "export tasks with statuses, descriptions and
+    // subtasks into standalone Word or PDF") build from their own snapshot —
+    // the JSON/CSV bundle stays exactly what the importer round-trips.
+    match q.format.as_deref() {
+        Some("docx") => {
+            let data = crate::domain::task_report::report_data(&state.db, ctx.id).await?;
+            let bytes = crate::domain::task_report::to_docx(&data)?;
+            let mut h = HeaderMap::new();
+            h.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static(
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+            );
+            h.insert(
+                header::CONTENT_DISPOSITION,
+                HeaderValue::from_str(&format!("attachment; filename=\"{}-report.docx\"", ctx.key))
+                    .unwrap(),
+            );
+            return Ok((StatusCode::OK, h, bytes).into_response());
+        }
+        Some("pdf") => {
+            let data = crate::domain::task_report::report_data(&state.db, ctx.id).await?;
+            let bytes = crate::domain::task_report::to_pdf(&data);
+            let mut h = HeaderMap::new();
+            h.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/pdf"),
+            );
+            h.insert(
+                header::CONTENT_DISPOSITION,
+                HeaderValue::from_str(&format!("attachment; filename=\"{}-report.pdf\"", ctx.key))
+                    .unwrap(),
+            );
+            return Ok((StatusCode::OK, h, bytes).into_response());
+        }
+        _ => {}
+    }
+
     let bundle = import_export::export_bundle(&state.db, ctx.id).await?;
 
     if q.format.as_deref() == Some("csv") {

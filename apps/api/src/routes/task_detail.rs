@@ -768,12 +768,15 @@ async fn list_links(
     Ok(Json(serde_json::json!({ "items": items })))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct SubtaskDto {
     pub key: String,
     pub title: String,
     pub status: String,
     pub assignee_id: Option<Uuid>,
+    /// Surfaced so the parent's detail panel can roll estimates up — QA's
+    /// "the parent never notices its children's estimates".
+    pub estimate_minutes: Option<i32>,
 }
 
 async fn list_subtasks(
@@ -786,29 +789,17 @@ async fn list_subtasks(
     if !can(&user.as_actor(), Action::ViewBoard, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
-    let rows = sqlx::query!(
+    let items: Vec<SubtaskDto> = sqlx::query_as(
         r#"
-        SELECT key    AS "key!: String",
-               title  AS "title!: String",
-               status AS "status!: String",
-               assignee_id
+        SELECT key, title, status, assignee_id, estimate_minutes
         FROM   tasks
         WHERE  parent_task_id = $1 AND deleted_at IS NULL
         ORDER BY created_at ASC
         "#,
-        task.id
     )
+    .bind(task.id)
     .fetch_all(&state.db)
     .await?;
-    let items: Vec<SubtaskDto> = rows
-        .into_iter()
-        .map(|r| SubtaskDto {
-            key: r.key,
-            title: r.title,
-            status: r.status,
-            assignee_id: r.assignee_id,
-        })
-        .collect();
     Ok(Json(serde_json::json!({ "items": items })))
 }
 
