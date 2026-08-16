@@ -42,7 +42,7 @@ jobs:
       - name: Seed the demo admin
         run: docker compose -f infra/compose/docker-compose.yml --env-file .env exec -T api /usr/local/bin/sprintly-seed
 
-      - uses: pnpm/action-setup@v6.0.9
+      - uses: pnpm/action-setup@v6.0.10
         with: { version: 9.12.0 }
       - uses: actions/setup-node@v7
         with:
