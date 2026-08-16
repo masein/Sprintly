@@ -130,9 +130,74 @@ pub async fn rotate(pool: &PgPool, cfg: &AuthConfig, plaintext: &str) -> AppResu
     };
 
     // ── reuse detection ────────────────────────────────────────────────────
-    // If this token has already been rotated, we're seeing a stale token. We
-    // burn the whole session family and tell the caller to log in again.
+    // If this token has already been rotated, we're seeing a stale token.
+    //
+    // One exception before we reach for the flamethrower: two tabs (or a
+    // request retried by the network layer) can race the same refresh at the
+    // moment the access token expires. The loser arrives here carrying a
+    // token that was rotated *milliseconds* ago — that's a benign replay,
+    // not theft. Within a short grace window we mint the replayer its own
+    // fresh leaf instead of burning the family. A genuinely stolen token
+    // replayed later than the window still gets the full revocation below.
     if row.rotated_to.is_some() {
+        const ROTATION_GRACE_SECS: i32 = 10;
+        let within_grace: bool = sqlx::query_scalar(
+            r#"
+            SELECT rotated_at IS NOT NULL
+               AND rotated_at > now() - make_interval(secs => $2::int)
+            FROM   refresh_tokens
+            WHERE  id = $1
+            "#,
+        )
+        .bind(row.id)
+        .bind(ROTATION_GRACE_SECS)
+        .fetch_optional(&mut *tx)
+        .await?
+        .unwrap_or(false);
+
+        let benign = within_grace
+            && row.revoked_at.is_none()
+            && row.session_revoked_at.is_none()
+            && row.expires_at > Utc::now()
+            && row.status == "active";
+
+        if benign {
+            let new_id = Uuid::now_v7();
+            let new_refresh = tokens::mint_refresh();
+            let new_expires = Utc::now() + Duration::seconds(cfg.refresh_ttl_secs as i64);
+
+            // Extra leaf off the same session; the presented token's
+            // rotated_to keeps pointing at the first winner. Both leaves
+            // rotate independently from here on.
+            sqlx::query(
+                r#"
+                INSERT INTO refresh_tokens (id, session_id, user_id, token_hash, expires_at)
+                VALUES ($1, $2, $3, $4, $5)
+                "#,
+            )
+            .bind(new_id)
+            .bind(row.session_id)
+            .bind(row.user_id)
+            .bind(new_refresh.hash.as_slice())
+            .bind(new_expires)
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query("UPDATE sessions SET last_used_at = now() WHERE id = $1")
+                .bind(row.session_id)
+                .execute(&mut *tx)
+                .await?;
+
+            tx.commit().await?;
+
+            return Ok(RotateOutcome::Rotated {
+                session_id: row.session_id,
+                user_id: row.user_id,
+                role: row.role,
+                refresh: new_refresh,
+            });
+        }
+
         sqlx::query(
             r#"
             UPDATE sessions

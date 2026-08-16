@@ -163,6 +163,18 @@ export default function TimesheetsPage() {
               {view.days.map((d) => (
                 <div
                   key={d.date}
+                  // Hover answers "on what?" without leaving the grid —
+                  // native tooltip, one line per task.
+                  title={
+                    d.by_task && d.by_task.length > 0
+                      ? d.by_task
+                          .map(
+                            (t) =>
+                              `${t.task_key} · ${t.task_title} — ${fmtMinutes(t.minutes)}`,
+                          )
+                          .join("\n")
+                      : undefined
+                  }
                   className="rounded border border-white/10 bg-ink-subtle p-2"
                 >
                   <div className="mono text-[10px] text-chrome-dim">
