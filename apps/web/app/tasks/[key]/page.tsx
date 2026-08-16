@@ -23,8 +23,9 @@ import { GitLinksPanel } from "@/components/GitLinksPanel";
 import { TaskTimer } from "@/components/TaskTimer";
 import { Avatar } from "@/components/Avatar";
 import { AssigneePicker } from "@/components/AssigneePicker";
-import { deleteTask, editTask, getTask, moveTask, type Task } from "@/lib/tasks";
-import { setTaskParent } from "@/lib/relations";
+import { deleteTask, editTask, getTask, moveTask, restoreTask, type Task } from "@/lib/tasks";
+import { showToast } from "@/lib/toast";
+import { listSubtasks, setTaskParent } from "@/lib/relations";
 import { search } from "@/lib/search";
 import { assignTaskEpic, listEpics } from "@/lib/roadmap";
 import { assignTaskToSprint, listSprints, unassignTaskFromSprint } from "@/lib/sprints";
@@ -96,9 +97,23 @@ export default function TaskPage() {
           <button
             type="button"
             onClick={async () => {
-              if (!confirm("Delete this task? Soft delete — recoverable by an admin.")) return;
-              await deleteTask(task.key);
-              router.push(`/projects/${task.project_key}`);
+              const key = task.key;
+              const projectKey = task.project_key;
+              await deleteTask(key);
+              router.push(`/projects/${projectKey}`);
+              // No confirm dialog — the undo IS the safety net, and it
+              // recovers faster than anyone can re-read a warning.
+              showToast(`Deleted ${key}.`, {
+                actionLabel: "undo",
+                onAction: async () => {
+                  try {
+                    await restoreTask(key);
+                    showToast(`${key} is back.`);
+                  } catch {
+                    showToast(`Couldn't restore ${key} — an admin still can.`);
+                  }
+                },
+              });
             }}
             className="mono ml-auto flex items-center gap-1 text-xs text-chrome-dim hover:text-red-300"
           >
@@ -318,6 +333,34 @@ function PlanningFields({ task, canEdit }: { task: Task; canEdit: boolean }) {
     onError: (e) => alert((e as unknown as ApiError).message),
   });
 
+  // Same key the subtasks panel uses, so this is a cache read, not a second
+  // request. The parent's estimate doesn't silently absorb its children's —
+  // that would overwrite a number someone typed — but the roll-up is shown
+  // right under it, which is what "the parent should know" actually needs.
+  const subs = useQuery({
+    queryKey: ["subtasks", task.key],
+    queryFn: () => listSubtasks(task.key),
+    staleTime: 30_000,
+  });
+  const subtaskEstimate = (subs.data ?? []).reduce(
+    (sum, s) => sum + (s.estimate_minutes ?? 0),
+    0,
+  );
+  const rollup =
+    subtaskEstimate > 0 ? (
+      <div className="flex items-center justify-between gap-3">
+        <span
+          className="mono text-[10px] uppercase tracking-widest text-chrome-dim"
+          title="own estimate + subtask estimates"
+        >
+          Σ w/ subtasks
+        </span>
+        <span className="mono text-xs text-chrome">
+          {fmtEstimate((task.estimate_minutes ?? 0) + subtaskEstimate)}
+        </span>
+      </div>
+    ) : null;
+
   if (!canEdit) {
     return (
       <>
@@ -328,6 +371,7 @@ function PlanningFields({ task, canEdit }: { task: Task; canEdit: boolean }) {
         {task.estimate_minutes != null && (
           <Field label="estimate" value={fmtEstimate(task.estimate_minutes)} />
         )}
+        {rollup}
       </>
     );
   }
@@ -383,6 +427,7 @@ function PlanningFields({ task, canEdit }: { task: Task; canEdit: boolean }) {
           className="mono w-20 rounded border border-white/10 bg-ink px-1.5 py-0.5 text-right text-xs text-chrome"
         />
       </div>
+      {rollup}
     </>
   );
 }
@@ -434,7 +479,13 @@ function StatusField({ task, canEdit }: { task: Task; canEdit: boolean }) {
       >
         {columns.map((c) => (
           <option key={c.id} value={c.id}>
-            {c.name}
+            {/* Show the category when the name doesn't already say it —
+                a "Verified" column that secretly counts as todo is exactly
+                the kind of thing that should be visible right here. */}
+            {c.name.toLowerCase().includes(c.category.replace("_", " ")) ||
+            c.name.toLowerCase() === c.category
+              ? c.name
+              : `${c.name} · ${c.category.replace("_", " ")}`}
           </option>
         ))}
       </select>
@@ -798,7 +849,7 @@ function EpicField({ task, canEdit }: { task: Task; canEdit: boolean }) {
         value={task.epic_id ?? ""}
         onChange={(e) => assign.mutate(e.target.value || null)}
         aria-label="epic"
-        className="mono rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
+        className="mono max-w-[60%] truncate rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
       >
         <option value="">none</option>
         {epics.map((e) => (
@@ -829,14 +880,18 @@ function Field({
         <select
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
-          className="mono rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
+          className="mono max-w-[60%] truncate rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
         >
           {options.map((o) => (
             <option key={o} value={o}>{o}</option>
           ))}
         </select>
       ) : (
-        <span className="mono text-xs text-chrome">{value}</span>
+        // Long values (epic names, especially) must clip inside the 280px
+        // sidebar instead of pushing through its border.
+        <span className="mono min-w-0 truncate text-xs text-chrome" title={value}>
+          {value}
+        </span>
       )}
     </div>
   );

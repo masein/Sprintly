@@ -870,11 +870,14 @@ fn set_auth_cookies(cfg: &Config, access: &str, refresh: &str) -> HeaderMap {
         ttl = cfg.auth.refresh_ttl_secs
     );
     // CSRF cookie is intentionally NOT HttpOnly — the browser JS needs to
-    // read it and echo it as a header (double-submit pattern).
+    // read it and echo it as a header (double-submit pattern). Its lifetime
+    // follows the REFRESH ttl, not the access ttl: if it died with the access
+    // token, a write issued after 15 idle minutes would 403 (csrf) even
+    // though the session is perfectly refreshable.
     let csrf_nonce = csrf::fresh_nonce();
     let csrf_cookie = format!(
         "sprintly_csrf={csrf_nonce}; Path=/; SameSite=Lax; Max-Age={ttl}{secure}",
-        ttl = cfg.auth.access_ttl_secs
+        ttl = cfg.auth.refresh_ttl_secs
     );
 
     let mut h = HeaderMap::new();
