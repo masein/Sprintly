@@ -30,6 +30,8 @@ export type Task = {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  /** Live subtasks under this task; drives the badge on every list. */
+  subtask_count: number;
 };
 
 // `sprint` scopes the board: "all" (or undefined) for the whole project,
