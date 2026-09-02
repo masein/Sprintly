@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Completed sprints keep their history** — until now a completed sprint's task list was whatever still pointed at it, so carrying unfinished work into the next sprint quietly rewrote the sprint it came from: the task vanished from it, its counts changed after the fact, and the time logged during that cycle walked off with the task. Completion now freezes the sprint's contents first — every task's state, points, assignee, and the minutes logged *while the sprint ran* — and a completed sprint's page shows that frozen list (marked `as completed <date>`, with per-task time) whether the work was carried forward, left in place, or since deleted. The Jira model QA report 5 asked for. Open sprints are unchanged; sprints completed before this release have no snapshot and keep showing their live list.
+
 - **Every task row says how many subtasks it has** — a small `⋮ 3` badge (accessible name "3 subtasks") on board cards, backlog rows, and the sprint page's task and backlog lists. Nothing shows for zero: a "0" on every card that isn't broken down is noise. The count rides along in the task, sprint-task, and backlog DTOs (`subtask_count`, live children only) so no list pays a second request per row (QA report 5).
 
 - **Undo a task deletion** — deleting a task now shows a toast with `undo` for a few seconds instead of a confirm dialog (the undo is the safety net, and it recovers faster than anyone re-reads a warning). New `POST /tasks/:key/restore` flips the soft-delete back; same permission as deleting. Requested in QA report 4.

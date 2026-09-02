@@ -1255,12 +1255,19 @@ async fn completing_a_sprint_carries_unfinished_work(pool: PgPool) {
     assert_eq!(body["carried_over"], 1);
     assert_eq!(body["carried_to"]["id"], next.as_str());
 
-    // The unfinished one moved; the done one stayed for the record.
+    // The unfinished one moved: the next sprint has it live…
     assert_eq!(
         sprint_task_keys(&app, &token, &next).await,
         vec![open.clone()]
     );
-    assert_eq!(sprint_task_keys(&app, &token, &sprint).await, vec![done]);
+    // …and the completed sprint still lists *both*, as they stood when it
+    // closed. Carrying work forward no longer rewrites the sprint it left
+    // (QA report 5's historical-snapshot model).
+    let mut history = sprint_task_keys(&app, &token, &sprint).await;
+    history.sort();
+    let mut expected = vec![done.clone(), open.clone()];
+    expected.sort();
+    assert_eq!(history, expected, "completed sprint keeps its history");
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -1300,7 +1307,8 @@ async fn carry_over_to_backlog_and_to_a_new_sprint(pool: PgPool) {
     assert_eq!(status, StatusCode::OK, "{body:?}");
     assert_eq!(body["carried_over"], 1);
     assert_eq!(body["carried_to"], Value::Null);
-    assert!(sprint_task_keys(&app, &token, &s1).await.is_empty());
+    // History survives the move: the completed sprint still names the task.
+    assert_eq!(sprint_task_keys(&app, &token, &s1).await.len(), 1);
     let (_, task) = send(
         &app,
         "GET",
@@ -2217,4 +2225,158 @@ async fn every_task_list_carries_a_live_subtask_count(pool: PgPool) {
         .find(|r| r["key"] == parent)
         .expect("parent in backlog");
     assert_eq!(row["subtask_count"], 1, "{row:?}");
+}
+
+// ── completed sprints keep their history (QA5 item 8) ────────────────────────
+
+#[sqlx::test(migrations = "./migrations")]
+async fn a_completed_sprint_remembers_its_tasks_even_after_carry_over(pool: PgPool) {
+    let app = app(pool.clone());
+    let (token, user) = register(&app, "snapper").await;
+    make_project(&app, &token, "SNAP").await;
+    let done_key = make_task_http(&app, &token, "SNAP", "finished in time").await;
+    let open_key = make_task_http(&app, &token, "SNAP", "spilled over").await;
+
+    let sprint = make_sprint(&app, &token, "SNAP", "Sprint 1").await;
+    for k in [&done_key, &open_key] {
+        let (status, _) = send(
+            &app,
+            "POST",
+            &format!("/api/v1/sprints/{sprint}/tasks/{k}"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert!(status.is_success(), "assign {k}: {status}");
+    }
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sprint}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Pretend the sprint has been running for a while, so a log from two
+    // hours ago falls *inside* it. Only time during the sprint counts —
+    // that's the metric QA asked for, not the task's lifetime total.
+    sqlx::query("UPDATE sprints SET started_at = now() - interval '3 hours' WHERE id = $1::uuid")
+        .bind(&sprint)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Mark one done, log 90 minutes on the other while the sprint runs.
+    let cols = columns(&app, &token, "SNAP").await;
+    let done_col = cols
+        .iter()
+        .find(|(_, c)| c == "done")
+        .map(|(id, _)| id.clone())
+        .expect("done column");
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{done_key}/move"),
+        Some(&token),
+        Some(json!({ "column_id": done_col })),
+    )
+    .await;
+    assert!(status.is_success(), "move to done: {status}");
+    let open_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM tasks WHERE key = $1")
+        .bind(&open_key)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let uid = uuid::Uuid::parse_str(user["id"].as_str().unwrap()).unwrap();
+    sqlx::query(
+        "INSERT INTO time_logs (id, task_id, user_id, started_at, ended_at, note, billable)
+         VALUES ($1, $2, $3, now() - interval '2 hours', now() - interval '30 minutes', 'work', false)",
+    )
+    .bind(uuid::Uuid::now_v7()).bind(open_id).bind(uid)
+    .execute(&pool).await.unwrap();
+
+    // Complete, carrying the leftover to the backlog — the move that used to
+    // erase it from this sprint's history.
+    let (status, body) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sprint}/complete"),
+        Some(&token),
+        Some(json!({ "carry_over": { "to": "backlog" } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["carried_over"], 1);
+
+    // The live task really did leave…
+    let live_sprint: Option<uuid::Uuid> =
+        sqlx::query_scalar("SELECT sprint_id FROM tasks WHERE key = $1")
+            .bind(&open_key)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        live_sprint.is_none(),
+        "carry-over should have moved the open task"
+    );
+
+    // …but the sprint still lists both, as they stood, with the sprint's time.
+    let (status, tasks) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint}/tasks"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{tasks:?}");
+    assert_eq!(tasks["snapshot"], true, "{tasks:?}");
+    let items = tasks["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{tasks:?}");
+    let row = |k: &str| items.iter().find(|i| i["key"] == k).cloned().expect(k);
+    assert_eq!(row(&done_key)["status"], "done");
+    assert_eq!(
+        row(&open_key)["status"],
+        "todo",
+        "state at completion, not now"
+    );
+    assert_eq!(row(&open_key)["logged_minutes"], 90);
+    assert_eq!(row(&done_key)["logged_minutes"], 0);
+
+    // Even deleting the task afterwards doesn't rewrite the sprint.
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tasks/{open_key}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert!(status.is_success());
+    let (_, tasks2) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sprint}/tasks"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(
+        tasks2["items"].as_array().unwrap().len(),
+        2,
+        "history is history"
+    );
+
+    // An open sprint is still the live view.
+    let s2 = make_sprint(&app, &token, "SNAP", "Sprint 2").await;
+    let (_, live) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{s2}/tasks"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(live["snapshot"], false);
 }
