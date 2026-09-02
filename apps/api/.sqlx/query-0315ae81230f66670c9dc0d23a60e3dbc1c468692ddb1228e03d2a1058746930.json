@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT key          AS \"key!: String\",\n               title        AS \"title!: String\",\n               status       AS \"status!: String\",\n               priority     AS \"priority!: String\",\n               type         AS \"type!: String\",\n               story_points,\n               assignee_id\n        FROM   tasks\n        WHERE  sprint_id = $1 AND deleted_at IS NULL\n        ORDER  BY status, priority, updated_at DESC\n        ",
+  "query": "\n        SELECT t.key          AS \"key!: String\",\n               t.title        AS \"title!: String\",\n               t.status       AS \"status!: String\",\n               t.priority     AS \"priority!: String\",\n               t.type         AS \"type!: String\",\n               t.story_points,\n               t.assignee_id,\n               (SELECT count(*) FROM tasks c\n                 WHERE c.parent_task_id = t.id AND c.deleted_at IS NULL)\n                              AS \"subtask_count!: i64\"\n        FROM   tasks t\n        WHERE  t.sprint_id = $1 AND t.deleted_at IS NULL\n        ORDER  BY t.status, t.priority, t.updated_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,11 @@
         "ordinal": 6,
         "name": "assignee_id",
         "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "subtask_count!: i64",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
@@ -51,8 +56,9 @@
       false,
       false,
       true,
-      true
+      true,
+      null
     ]
   },
-  "hash": "aa51317bb9bcd7549b72295383e9f6ba6b246d2c627d1f7493d7d64ba68709aa"
+  "hash": "0315ae81230f66670c9dc0d23a60e3dbc1c468692ddb1228e03d2a1058746930"
 }

@@ -126,6 +126,15 @@ export default function TaskPage() {
         <div className="min-w-0 space-y-8">
           <Header task={task} canEdit={canManage} />
           <Description task={task} canEdit={canManage} />
+          {/* Subtasks are work, not metadata — they read better at full width
+              under the description than squeezed into the 280px sidebar, where
+              every title truncated (QA report 5). */}
+          <SubtasksPanel
+            parentTaskKey={task.key}
+            projectKey={task.project_key}
+            projectId={task.project_id}
+            canManage={canManage}
+          />
           <CommentThread taskKey={task.key} projectKey={task.project_key} />
           <ActivityFeed taskKey={task.key} />
         </div>
@@ -133,12 +142,6 @@ export default function TaskPage() {
           <Sidebar task={task} canEdit={canManage} />
           <FieldValuesPanel taskKey={task.key} canEdit={canManage} />
           <TaskTimer taskKey={task.key} />
-          <SubtasksPanel
-            parentTaskKey={task.key}
-            projectKey={task.project_key}
-            projectId={task.project_id}
-            canManage={canManage}
-          />
           <LinksPanel taskKey={task.key} canManage={canManage} />
           <GitLinksPanel taskKey={task.key} />
           <Watchers taskKey={task.key} />
@@ -880,6 +883,9 @@ function Field({
         <select
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
+          // The visible caption is a sibling span, so screen readers (and
+          // Lighthouse) saw an unnamed select. Name it after its row.
+          aria-label={label}
           className="mono max-w-[60%] truncate rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
         >
           {options.map((o) => (
