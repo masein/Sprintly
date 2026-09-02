@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every task row says how many subtasks it has** — a small `⋮ 3` badge (accessible name "3 subtasks") on board cards, backlog rows, and the sprint page's task and backlog lists. Nothing shows for zero: a "0" on every card that isn't broken down is noise. The count rides along in the task, sprint-task, and backlog DTOs (`subtask_count`, live children only) so no list pays a second request per row (QA report 5).
+
 - **Undo a task deletion** — deleting a task now shows a toast with `undo` for a few seconds instead of a confirm dialog (the undo is the safety net, and it recovers faster than anyone re-reads a warning). New `POST /tasks/:key/restore` flips the soft-delete back; same permission as deleting. Requested in QA report 4.
 - **Task report export — Word and PDF** — the import/export modal can now produce a readable snapshot of the project for people who live outside the tool: tasks grouped by status with descriptions and subtasks, as `report.docx` or `report.pdf` (`GET /projects/:key/export?format=docx|pdf`). The Word file keeps every language intact; the PDF sticks to Latin text and says so. Both writers are dependency-free (a `.docx` is five small XML files in a zip; the PDF uses the built-in Helvetica fonts).
 - **Epic titles are renameable** — a pencil next to the epic's name on the timeline page (leads): inline input, Enter saves, Esc cancels. The API accepted `name` on epic updates all along; the UI never offered it.

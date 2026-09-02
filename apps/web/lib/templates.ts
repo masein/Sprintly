@@ -28,6 +28,7 @@ export type BacklogItem = {
   status: "todo" | "in_progress" | "review" | "done";
   assignee_id: string | null;
   labels: string[];
+  subtask_count: number;
 };
 
 export type BulkOp =
