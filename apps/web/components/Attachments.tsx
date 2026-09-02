@@ -102,7 +102,7 @@ export function Attachments({ taskKey, canManage }: { taskKey: string; canManage
               className="mono flex items-center gap-2 rounded border border-white/10 bg-ink-subtle px-2 py-1.5 text-xs"
             >
               <Upload size={12} className="text-chrome-dim" />
-              <span className="truncate">{u.file.name}</span>
+              <span className="truncate" title={u.file.name}>{u.file.name}</span>
               <span className="ml-auto text-chrome-dim">
                 {u.error ? `error: ${u.error}` : `${Math.round(u.progress * 100)}%`}
               </span>
@@ -143,7 +143,7 @@ function Row({
   return (
     <li className="mono flex items-center gap-2 rounded border border-white/10 bg-ink-subtle px-2 py-1.5 text-xs">
       <Paperclip size={12} className="text-chrome-dim" />
-      <span className="truncate flex-1">{a.filename}</span>
+      <span className="truncate flex-1" title={a.filename}>{a.filename}</span>
       <span className="text-chrome-dim">{fmtSize(a.size_bytes)}</span>
       {a.download_url ? (
         <a
