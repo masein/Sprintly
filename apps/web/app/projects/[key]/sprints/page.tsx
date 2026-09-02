@@ -148,6 +148,7 @@ function SprintRow({
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(sprint.name);
+  const [goal, setGoal] = useState(sprint.goal ?? "");
   const [starts, setStarts] = useState(sprint.starts_at.slice(0, 10));
   const [ends, setEnds] = useState(sprint.ends_at.slice(0, 10));
   const [error, setError] = useState<string | null>(null);
@@ -160,6 +161,7 @@ function SprintRow({
     mutationFn: () =>
       editSprint(sprint.id, {
         name,
+        goal: goal.trim(),
         starts_at: new Date(`${starts}T00:00:00Z`).toISOString(),
         ends_at: new Date(`${ends}T00:00:00Z`).toISOString(),
       }),
@@ -196,6 +198,16 @@ function SprintRow({
           aria-label={`${sprint.name} name`}
           className="mono block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
         />
+        {/* The goal was set at creation and then frozen in the UI, though the
+            API happily updated it. QA report 5: "enable editing sprint goals". */}
+        <textarea
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          rows={2}
+          placeholder="goal — what does done look like this sprint?"
+          aria-label={`${sprint.name} goal`}
+          className="mono block w-full resize-y rounded border border-white/10 bg-ink px-2 py-1 text-xs text-chrome placeholder:text-chrome-dim/60 focus:border-accent focus:outline-none"
+        />
         <div className="flex flex-wrap items-center gap-2">
           <input
             type="date"
@@ -218,6 +230,7 @@ function SprintRow({
               onClick={() => {
                 setEditing(false);
                 setName(sprint.name);
+                setGoal(sprint.goal ?? "");
                 setStarts(sprint.starts_at.slice(0, 10));
                 setEnds(sprint.ends_at.slice(0, 10));
                 setError(null);
