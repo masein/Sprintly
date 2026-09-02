@@ -13,7 +13,8 @@ import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { ListSearch, matchesTask } from "@/components/ListSearch";
 import { LoadError } from "@/components/LoadError";
-import { getProject } from "@/lib/projects";
+import { getProject, listMembers } from "@/lib/projects";
+import { Avatar } from "@/components/Avatar";
 import { listSprints } from "@/lib/sprints";
 import { createTask } from "@/lib/tasks";
 import { me } from "@/lib/auth-bundle";
@@ -44,6 +45,18 @@ export default function BacklogPage() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
+  // Who's it for? The reported gap was that the pile showed *whether* a task
+  // was assigned but never to whom.
+  const membersQ = useQuery({
+    queryKey: ["project-members", key],
+    queryFn: () => listMembers(key),
+    staleTime: 60_000,
+    retry: false,
+    enabled: !!key,
+  });
+  const members = membersQ.data ?? [];
+  const memberById = (id: string | null) => (id ? members.find((m) => m.user_id === id) : undefined);
+  const [assigneeFilter, setAssigneeFilter] = useState<string>("anyone");
   const [error, setError] = useState<string | null>(null);
 
   const apply = useMutation({
@@ -87,7 +100,12 @@ export default function BacklogPage() {
   const allItems = backlogQ.data ?? [];
   // Search filters in place; bulk actions then apply to what you can see, which
   // is the point — triage a slice without hand-picking rows.
-  const items = allItems.filter((t) => matchesTask(query, t));
+  const items = allItems.filter(
+    (t) =>
+      matchesTask(query, t) &&
+      (assigneeFilter === "anyone" ||
+        (assigneeFilter === "unassigned" ? t.assignee_id === null : t.assignee_id === assigneeFilter)),
+  );
   const sprints = (sprintsQ.data ?? []).filter((s) => s.state !== "completed");
 
   const allSelected = items.length > 0 && selected.size === items.length;
@@ -163,12 +181,31 @@ export default function BacklogPage() {
 
       <div className="rounded-lg border border-white/10 bg-ink-subtle">
         <div className="border-b border-white/10 p-2">
-          <ListSearch
-            value={query}
-            onChange={setQuery}
-            label="search backlog tasks"
-            placeholder="search the pile by key, title, or label…"
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <ListSearch
+              value={query}
+              onChange={setQuery}
+              label="search backlog tasks"
+              placeholder="search the pile by key, title, or label…"
+            />
+            <label className="mono flex items-center gap-1 text-[11px] text-chrome-dim">
+              assignee
+              <select
+                aria-label="filter by assignee"
+                value={assigneeFilter}
+                onChange={(e) => setAssigneeFilter(e.target.value)}
+                className="mono rounded border border-white/10 bg-ink px-1.5 py-1 text-[11px] text-chrome"
+              >
+                <option value="anyone">anyone</option>
+                <option value="unassigned">unassigned</option>
+                {members.map((m) => (
+                  <option key={m.user_id} value={m.user_id}>
+                    @{m.handle}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           {query.trim() && (
             <div className="mono mt-1 px-1 text-[11px] text-chrome-dim">
               {items.length} of {allItems.length} shown
@@ -217,11 +254,46 @@ export default function BacklogPage() {
                 <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={t.title}>
                   {t.title}
                 </span>
-                {t.assignee_id && (
-                  <span className="mono ml-auto shrink-0 whitespace-nowrap text-[10px] text-chrome-dim">
-                    assigned
+                {t.labels.length > 0 && (
+                  <span className="hidden shrink-0 items-center gap-1 sm:flex">
+                    {t.labels.slice(0, 3).map((l) => (
+                      <span
+                        key={l}
+                        className="mono rounded border border-white/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-chrome-dim"
+                      >
+                        {l}
+                      </span>
+                    ))}
+                    {t.labels.length > 3 && (
+                      <span className="mono text-[9px] text-chrome-dim">+{t.labels.length - 3}</span>
+                    )}
                   </span>
                 )}
+                {(() => {
+                  const m = memberById(t.assignee_id);
+                  if (!t.assignee_id) return null;
+                  return (
+                    <span
+                      className="mono ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap text-[10px] text-chrome-dim"
+                      title={m ? `@${m.handle}` : "assigned"}
+                    >
+                      {m && (
+                        <Avatar
+                          size={16}
+                          user={{
+                            userId: m.user_id,
+                            displayName: m.display_name,
+                            handle: m.handle,
+                            avatarUrl: m.avatar_url,
+                            avatarStyle: m.avatar_style,
+                            avatarSeed: m.avatar_seed,
+                          }}
+                        />
+                      )}
+                      <span className="hidden sm:inline">{m ? `@${m.handle}` : "assigned"}</span>
+                    </span>
+                  );
+                })()}
               </li>
             );
           })}

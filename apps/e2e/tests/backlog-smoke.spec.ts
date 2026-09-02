@@ -57,8 +57,9 @@ test.describe("F9 backlog bulk smoke", () => {
       await page.getByRole("button", { name: /select all/i }).click();
       await expect(page.getByText("2 selected")).toBeVisible();
       await page.getByRole("button", { name: /assign to me/i }).click();
-      // Both rows now show the "assigned" marker.
-      await expect(page.getByText("assigned")).toHaveCount(2);
+      // Both rows now name the assignee (the old bare "assigned" marker gave
+      // way to avatar + handle in QA report 5).
+      await expect(page.getByText(`@${handle}`)).toHaveCount(2);
     });
   });
 });
