@@ -425,6 +425,36 @@ async fn complete(
     .execute(&mut *tx)
     .await?;
 
+    // Freeze the sprint's contents *before* anything moves. This is what the
+    // completed sprint's page shows from now on — the Jira model QA asked
+    // for — so carrying work forward stops rewriting the sprint it came from.
+    // Time is the minutes logged on each task while this sprint ran, not the
+    // task's lifetime total.
+    sqlx::query(
+        r#"
+        INSERT INTO sprint_task_snapshots
+            (sprint_id, task_id, key, title, status, priority, type, story_points,
+             assignee_id, logged_minutes)
+        SELECT t.sprint_id, t.id, t.key, t.title, t.status, t.priority, t.type,
+               t.story_points, t.assignee_id,
+               COALESCE((
+                   SELECT SUM(l.duration_minutes)::int
+                   FROM   time_logs l
+                   WHERE  l.task_id = t.id
+                     AND  l.deleted_at IS NULL
+                     AND  l.ended_at IS NOT NULL
+                     AND  l.started_at >= COALESCE(s.started_at, s.starts_at)
+               ), 0)
+        FROM   tasks t
+        JOIN   sprints s ON s.id = t.sprint_id
+        WHERE  t.sprint_id = $1 AND t.deleted_at IS NULL
+        ON CONFLICT (sprint_id, task_id) DO NOTHING
+        "#,
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+
     // Carry the unfinished work somewhere useful. Velocity was snapshotted
     // above from done tasks only, so moving the rest can't skew it.
     let mut carried_to: Option<SprintRef> = None;
@@ -609,6 +639,58 @@ async fn list_tasks(
     if !can(&user.as_actor(), Action::ViewBoard, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
+    // A completed sprint answers from its snapshot: the tasks as they stood
+    // when it closed, including any since carried elsewhere or deleted. Older
+    // sprints completed before snapshots existed have no rows and fall through
+    // to the live query, which is all they ever had.
+    let snap = sqlx::query!(
+        r#"
+        SELECT n.key            AS "key!: String",
+               n.title          AS "title!: String",
+               n.status         AS "status!: String",
+               n.priority       AS "priority!: String",
+               n.type           AS "type!: String",
+               n.story_points,
+               n.assignee_id,
+               n.logged_minutes AS "logged_minutes!: i32",
+               n.snapped_at     AS "snapped_at!: DateTime<Utc>",
+               (SELECT count(*) FROM tasks c
+                 WHERE c.parent_task_id = n.task_id AND c.deleted_at IS NULL)
+                                AS "subtask_count!: i64"
+        FROM   sprint_task_snapshots n
+        JOIN   sprints s ON s.id = n.sprint_id
+        WHERE  n.sprint_id = $1 AND s.state = 'completed'
+        ORDER  BY n.status, n.priority, n.title
+        "#,
+        id
+    )
+    .fetch_all(&state.db)
+    .await?;
+    if !snap.is_empty() {
+        let snapped_at = snap[0].snapped_at;
+        let items: Vec<_> = snap
+            .into_iter()
+            .map(|r| {
+                serde_json::json!({
+                    "key": r.key,
+                    "title": r.title,
+                    "status": r.status,
+                    "priority": r.priority,
+                    "type": r.r#type,
+                    "story_points": r.story_points,
+                    "assignee_id": r.assignee_id,
+                    "subtask_count": r.subtask_count,
+                    "logged_minutes": r.logged_minutes,
+                })
+            })
+            .collect();
+        return Ok(Json(serde_json::json!({
+            "items": items,
+            "snapshot": true,
+            "snapped_at": snapped_at,
+        })));
+    }
+
     let rows = sqlx::query!(
         r#"
         SELECT t.key          AS "key!: String",
@@ -644,7 +726,9 @@ async fn list_tasks(
             })
         })
         .collect();
-    Ok(Json(serde_json::json!({ "items": items })))
+    Ok(Json(
+        serde_json::json!({ "items": items, "snapshot": false }),
+    ))
 }
 
 async fn burndown(

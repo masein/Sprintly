@@ -31,6 +31,15 @@ export type SprintTask = {
   story_points: number | null;
   assignee_id: string | null;
   subtask_count: number;
+  /** Only on a completed sprint's snapshot: minutes logged while it ran. */
+  logged_minutes?: number;
+};
+
+export type SprintTasks = {
+  items: SprintTask[];
+  /** True when this is the frozen list from completion, not the live query. */
+  snapshot: boolean;
+  snapped_at?: string;
 };
 
 export type BurndownPoint = {
@@ -100,7 +109,9 @@ export const unassignTaskFromSprint = (id: string, taskKey: string) =>
   );
 
 export const listSprintTasks = (id: string) =>
-  api<{ items: SprintTask[] }>(`/sprints/${id}/tasks`).then((r) => r.items);
+  api<SprintTasks>(`/sprints/${id}/tasks`).then((r) => r.items);
+
+export const getSprintTasks = (id: string) => api<SprintTasks>(`/sprints/${id}/tasks`);
 
 export const getBurndown = (id: string) =>
   api<{ items: BurndownPoint[]; total_points: number }>(
