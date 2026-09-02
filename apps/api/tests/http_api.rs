@@ -2115,3 +2115,155 @@ async fn unsubscribe_is_one_way_and_needs_no_session(pool: PgPool) {
     assert_eq!(status, StatusCode::OK, "{p:?}");
     assert_eq!(p["mode"], "immediate");
 }
+
+// ── attachments follow the request origin (fix/attachments-same-origin) ─────
+
+/// Like `app()`, but with `MINIO_PUBLIC_ENDPOINT` in its path form.
+fn app_with_path_s3(pool: PgPool) -> Router {
+    let mut cfg = test_config();
+    cfg.minio.public_endpoint = "/s3".into();
+    cfg.public_url = "http://fallback.test".into();
+    let redis = redis_pool::connect(&cfg).expect("redis pool");
+    let mailer = email::build(&cfg.email);
+    let state = AppState {
+        cfg: Arc::new(cfg),
+        db: pool,
+        redis,
+        mailer,
+    };
+    sprintly_api::app::router(state)
+}
+
+/// `send`, plus arbitrary request headers — what a reverse proxy adds.
+async fn send_with_headers(
+    app: &Router,
+    method: &str,
+    path: &str,
+    token: Option<&str>,
+    body: Option<Value>,
+    extra: &[(&str, &str)],
+) -> (StatusCode, Value) {
+    let mut builder = Request::builder().method(method).uri(path);
+    if let Some(t) = token {
+        builder = builder.header(header::AUTHORIZATION, format!("Bearer {t}"));
+    }
+    for (k, v) in extra {
+        builder = builder.header(*k, *v);
+    }
+    let mut req = match body {
+        Some(j) => builder
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(j.to_string()))
+            .unwrap(),
+        None => builder.body(Body::empty()).unwrap(),
+    };
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            8080,
+        ))));
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let value = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    };
+    (status, value)
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn attachment_urls_are_signed_for_the_host_the_browser_used(pool: PgPool) {
+    let app = app_with_path_s3(pool);
+    let (token, _) = register(&app, "attorigin").await;
+    make_project(&app, &token, "ATT").await;
+    let key = make_task_http(&app, &token, "ATT", "needs a file").await;
+
+    let body =
+        json!({ "filename": "spec.pdf", "mime_type": "application/pdf", "size_bytes": 1234 });
+
+    // Opened by hostname, behind the proxy: the upload URL must live on that
+    // hostname — a URL on some other host is exactly the "pending forever" bug.
+    let (status, a) = send_with_headers(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{key}/attachments"),
+        Some(&token),
+        Some(body.clone()),
+        &[
+            ("x-forwarded-proto", "https"),
+            ("x-forwarded-host", "sprintly.example"),
+        ],
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{a:?}");
+    let url = a["upload_url"].as_str().expect("upload_url");
+    assert!(
+        url.starts_with("https://sprintly.example/s3/"),
+        "expected the request's origin, got {url}"
+    );
+
+    // Same deployment, opened by IP: same config, different origin, still right.
+    let (status, b) = send_with_headers(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{key}/attachments"),
+        Some(&token),
+        Some(body.clone()),
+        &[
+            ("x-forwarded-proto", "http"),
+            ("x-forwarded-host", "212.33.206.34:8083"),
+        ],
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{b:?}");
+    assert!(
+        b["upload_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("http://212.33.206.34:8083/s3/"),
+        "{b:?}"
+    );
+
+    // No proxy headers at all (worker-style / odd client): the public URL
+    // fills in rather than producing a relative or empty host.
+    let (status, c) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{key}/attachments"),
+        Some(&token),
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{c:?}");
+    assert!(
+        c["upload_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("http://fallback.test/s3/"),
+        "{c:?}"
+    );
+
+    // A forged scheme can't smuggle anything into the URL.
+    let (status, d) = send_with_headers(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{key}/attachments"),
+        Some(&token),
+        Some(json!({ "filename": "x.pdf", "mime_type": "application/pdf", "size_bytes": 1 })),
+        &[
+            ("x-forwarded-proto", "javascript"),
+            ("x-forwarded-host", "evil.example/../"),
+        ],
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{d:?}");
+    assert!(
+        d["upload_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("http://fallback.test/s3/"),
+        "junk headers must fall back, got {d:?}"
+    );
+}

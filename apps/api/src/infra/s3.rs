@@ -25,17 +25,36 @@ const SERVICE: &str = "s3";
 
 pub struct Presigner<'a> {
     cfg: &'a MinioConfig,
-    /// The host that users will actually hit (browser-reachable). For local
-    /// dev this is `localhost:9000`; in prod, your S3 hostname. Distinct from
-    /// `cfg.endpoint` which is the API's internal address.
-    public_endpoint: &'a str,
+    /// The base the browser will actually hit, scheme included. Distinct from
+    /// `cfg.endpoint`, which is the API's internal address. See
+    /// [`resolve_public_endpoint`] for how a path-only configuration is turned
+    /// into an absolute base per request.
+    public_endpoint: String,
 }
 
 impl<'a> Presigner<'a> {
+    /// Sign against the configured public endpoint verbatim. Right for the
+    /// worker and CLI, which point `public_endpoint` at the internal address —
+    /// and for deployments that configured an absolute URL.
     pub fn new(cfg: &'a MinioConfig) -> Self {
         Self {
             cfg,
-            public_endpoint: &cfg.public_endpoint,
+            public_endpoint: cfg.public_endpoint.clone(),
+        }
+    }
+
+    /// Sign for a browser that reached us at `request_origin`. When the public
+    /// endpoint is configured as a path (`/s3`), the URL is built on whatever
+    /// origin the request came in on — so the same deployment serves working
+    /// attachment links whether someone opened it by IP or by hostname.
+    pub fn for_request(cfg: &'a MinioConfig, request_origin: Option<&str>, fallback: &str) -> Self {
+        Self {
+            cfg,
+            public_endpoint: resolve_public_endpoint(
+                &cfg.public_endpoint,
+                request_origin,
+                fallback,
+            ),
         }
     }
 
@@ -72,7 +91,7 @@ impl<'a> Presigner<'a> {
         // Host = what the browser's Host header will carry: host:port only —
         // scheme and any proxy path stripped (see host_from). SigV4 includes
         // the port in the host header iff non-default.
-        let host = host_from(self.public_endpoint);
+        let host = host_from(&self.public_endpoint);
 
         // Build query params, ALPHABETICALLY by key. AWS requires sorted order.
         let credential = format!("{}/{scope}", self.cfg.access_key);
@@ -122,6 +141,39 @@ impl<'a> Presigner<'a> {
         let scheme_host = self.public_endpoint.trim_end_matches('/');
         format!("{scheme_host}{canonical_uri}?{canonical_query}&X-Amz-Signature={signature}")
     }
+}
+
+/// Turn the configured `MINIO_PUBLIC_ENDPOINT` into an absolute base.
+///
+/// Two shapes are accepted:
+///
+///   * an absolute URL (`https://files.example/…`, `http://host:8083/s3`) — used
+///     verbatim, the pre-existing behaviour;
+///   * a bare path (`/s3`) — glued onto the origin the request arrived on, taken
+///     from the reverse proxy's `X-Forwarded-*` headers. Falls back to
+///     `SPRINTLY_PUBLIC_URL` when there is no request to read (worker, tests).
+///
+/// The path form exists because a presigned URL bakes in a host: MinIO checks
+/// the signature against the `Host` header the browser sends. A deployment
+/// reachable at both `212.33.206.34:8083` and `sprintly.example` can only sign
+/// for one fixed host — and users opening the other saw uploads sit at
+/// "pending" and downloads fail. Signing for whichever host they actually used
+/// makes both work.
+pub fn resolve_public_endpoint(
+    configured: &str,
+    request_origin: Option<&str>,
+    fallback: &str,
+) -> String {
+    let configured = configured.trim();
+    if !configured.starts_with('/') {
+        return configured.trim_end_matches('/').to_string();
+    }
+    let origin = request_origin
+        .map(str::trim)
+        .filter(|o| !o.is_empty())
+        .unwrap_or(fallback)
+        .trim_end_matches('/');
+    format!("{origin}{}", configured.trim_end_matches('/'))
 }
 
 fn host_from(endpoint: &str) -> String {
@@ -255,6 +307,53 @@ mod tests {
         let url = p.get("tasks/abc/foo.png", Some("My File.png"), 600);
         // The disposition value gets uri-encoded; just check the marker exists.
         assert!(url.contains("response-content-disposition="));
+    }
+
+    #[test]
+    fn path_only_endpoint_follows_the_request_origin() {
+        // The domain case QA hit: app opened at a hostname, endpoint configured
+        // for an IP. With a path-only endpoint the origin comes from the request.
+        assert_eq!(
+            resolve_public_endpoint("/s3", Some("https://sprintly.example"), "http://fallback"),
+            "https://sprintly.example/s3"
+        );
+        // …and the IP case keeps working on the very same configuration.
+        assert_eq!(
+            resolve_public_endpoint("/s3", Some("http://212.33.206.34:8083"), "http://fallback"),
+            "http://212.33.206.34:8083/s3"
+        );
+        // No request to read from (worker, tests): the public URL fills in.
+        assert_eq!(
+            resolve_public_endpoint("/s3/", None, "http://fallback:8080/"),
+            "http://fallback:8080/s3"
+        );
+        assert_eq!(
+            resolve_public_endpoint("/s3", Some("   "), "http://fallback"),
+            "http://fallback/s3"
+        );
+        // An absolute endpoint is untouched — existing deployments don't move.
+        assert_eq!(
+            resolve_public_endpoint("http://localhost:8080/s3", Some("https://elsewhere"), "x"),
+            "http://localhost:8080/s3"
+        );
+    }
+
+    #[test]
+    fn for_request_signs_the_host_the_browser_will_send() {
+        let mut c = cfg();
+        c.public_endpoint = "/s3".into();
+        let p = Presigner::for_request(&c, Some("https://sprintly.example"), "http://fallback");
+        let url = p.get("tasks/abc/foo.png", Some("foo.png"), 600);
+        assert!(
+            url.starts_with("https://sprintly.example/s3/sprintly/tasks/abc/foo.png?"),
+            "{url}"
+        );
+        // Same object, different origin → different signature, because the
+        // signed host differs. That's the whole point.
+        let q = Presigner::for_request(&c, Some("http://212.33.206.34:8083"), "http://fallback");
+        let url2 = q.get("tasks/abc/foo.png", Some("foo.png"), 600);
+        let sig = |u: &str| u.split("X-Amz-Signature=").nth(1).unwrap().to_string();
+        assert_ne!(sig(&url), sig(&url2));
     }
 
     #[test]
