@@ -887,3 +887,95 @@ async fn provisioning_off_keeps_match_only_warning(pool: PgPool) {
     .unwrap();
     assert_eq!(assignee, None);
 }
+
+// ── QA5: "Resolved" (and friends) must import as done, not as overdue todo ───
+
+const RESOLVED_CSV: &str = "Issue key,Issue Type,Summary,Status,Due date\n\
+RES-1,Task,long since resolved,Resolved,2025-01-15\n\
+RES-2,Task,decided against,Won't Do,2025-02-01\n\
+RES-3,Task,still cooking,In Progress,2025-03-01\n";
+
+#[sqlx::test(migrations = "./migrations")]
+async fn resolved_and_wont_do_import_as_done_and_are_not_overdue(pool: PgPool) {
+    let owner = make_user(&pool, "owner@x.test", "Owner").await;
+    let (pid, board) = make_project(&pool, "RES", owner).await;
+
+    let plan = jira::parse_jira_csv(RESOLVED_CSV).unwrap();
+    let report = ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(report.tasks_created, 3);
+
+    let rows: Vec<(String, String, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
+        "SELECT external_ref, status, completed_at FROM tasks WHERE project_id = $1 ORDER BY external_ref",
+    )
+    .bind(pid)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let by = |k: &str| rows.iter().find(|r| r.0 == k).expect(k);
+
+    // Terminal in Jira → done here, with a completion stamp so velocity and
+    // burndown see it.
+    assert_eq!(by("RES-1").1, "done");
+    assert!(by("RES-1").2.is_some(), "Resolved task needs completed_at");
+    assert_eq!(
+        by("RES-2").1,
+        "done",
+        "Won't Do is a decision, not open work"
+    );
+    assert!(by("RES-2").2.is_some());
+    // Genuinely open work stays open and unstamped.
+    assert_eq!(by("RES-3").1, "in_progress");
+    assert!(by("RES-3").2.is_none());
+
+    // The overdue predicate every dashboard uses: only the open one qualifies.
+    let overdue: Vec<String> = sqlx::query_scalar(
+        "SELECT external_ref FROM tasks
+          WHERE project_id = $1 AND deleted_at IS NULL
+            AND status <> 'done' AND due_date IS NOT NULL AND due_date < CURRENT_DATE
+          ORDER BY external_ref",
+    )
+    .bind(pid)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        overdue,
+        vec!["RES-3".to_string()],
+        "only open work can be overdue"
+    );
+
+    // Re-importing with the task reopened in Jira clears the stamp again.
+    let reopened = RESOLVED_CSV.replace("Resolved", "In Progress");
+    let plan2 = jira::parse_jira_csv(&reopened).unwrap();
+    ie::apply_jira_import(
+        &pool,
+        pid,
+        board,
+        &plan2,
+        false,
+        &ie::JiraImportOptions::match_only(),
+    )
+    .await
+    .unwrap();
+    let (status, completed): (String, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+        "SELECT status, completed_at FROM tasks WHERE project_id = $1 AND external_ref = 'RES-1'",
+    )
+    .bind(pid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "in_progress");
+    assert!(
+        completed.is_none(),
+        "a reopened task must not keep a stale completion stamp"
+    );
+}
