@@ -12,7 +12,7 @@
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{delete, get, post},
     Json, Router,
@@ -912,9 +912,44 @@ async fn set_parent(
 
 // ─── handlers: attachments ──────────────────────────────────────────────────
 
+/// The origin the browser reached us on, as the reverse proxy reports it.
+/// Caddy sets `X-Forwarded-Proto` / `X-Forwarded-Host` on every proxied
+/// request; a bare `Host` is the dev-without-proxy fallback. `None` when
+/// neither is usable, and the presigner then falls back to the public URL.
+fn request_origin(headers: &HeaderMap) -> Option<String> {
+    let get = |k: &str| {
+        headers
+            .get(k)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.split(',').next().unwrap_or(v).trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+    let host = get("x-forwarded-host").or_else(|| get("host"))?;
+    // A Host header can't carry a scheme, so it can't carry an injection —
+    // but it can carry junk; keep it to what a hostname looks like.
+    if !host
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+    {
+        return None;
+    }
+    let proto = get("x-forwarded-proto")
+        .filter(|p| p == "http" || p == "https")
+        .unwrap_or_else(|| "http".to_string());
+    Some(format!("{proto}://{host}"))
+}
+
+/// Presigner for a browser-facing URL: signs for the host the caller actually
+/// used when `MINIO_PUBLIC_ENDPOINT` is a path, verbatim otherwise.
+fn presigner_for<'a>(state: &'a AppState, headers: &HeaderMap) -> Presigner<'a> {
+    let origin = request_origin(headers);
+    Presigner::for_request(&state.cfg.minio, origin.as_deref(), &state.cfg.public_url)
+}
+
 async fn create_attachment(
     State(state): State<AppState>,
     user: CurrentUser,
+    headers: HeaderMap,
     Path(task_key): Path<String>,
     Json(req): Json<CreateAttachmentReq>,
 ) -> AppResult<impl IntoResponse> {
@@ -944,7 +979,7 @@ async fn create_attachment(
     .execute(&state.db)
     .await?;
 
-    let signer = Presigner::new(&state.cfg.minio);
+    let signer = presigner_for(&state, &headers);
     let upload_url = signer.put(&storage_key, &req.mime_type, 600);
 
     Ok((
@@ -1014,6 +1049,7 @@ async fn complete_attachment(
 async fn list_attachments(
     State(state): State<AppState>,
     user: CurrentUser,
+    headers: HeaderMap,
     Path(task_key): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let task = resolve_task(&state.db, &task_key).await?;
@@ -1042,7 +1078,7 @@ async fn list_attachments(
     .fetch_all(&state.db)
     .await?;
 
-    let signer = Presigner::new(&state.cfg.minio);
+    let signer = presigner_for(&state, &headers);
     let items: Vec<AttachmentDto> = rows
         .into_iter()
         .map(|r| AttachmentDto {
