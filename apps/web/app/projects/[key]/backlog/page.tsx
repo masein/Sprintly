@@ -9,6 +9,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { CheckSquare, Plus, Square, Trash2, UserPlus, UserMinus } from "lucide-react";
+import { SubtaskBadge } from "@/components/SubtaskBadge";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { ListSearch, matchesTask } from "@/components/ListSearch";
@@ -254,6 +255,7 @@ export default function BacklogPage() {
                 <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={t.title}>
                   {t.title}
                 </span>
+                <SubtaskBadge count={t.subtask_count} />
                 {t.labels.length > 0 && (
                   <span className="hidden shrink-0 items-center gap-1 sm:flex">
                     {t.labels.slice(0, 3).map((l) => (

@@ -339,18 +339,21 @@ pub struct BacklogItem {
     pub status: String,
     pub assignee_id: Option<Uuid>,
     pub labels: Vec<String>,
+    pub subtask_count: i64,
 }
 
 /// Unscheduled work: live tasks with no sprint, not yet done.
 pub async fn backlog(db: &PgPool, project_id: Uuid) -> AppResult<Vec<BacklogItem>> {
     let rows = sqlx::query_as(
-        r#"SELECT id, key, title, priority, status, assignee_id, labels
-           FROM tasks
-           WHERE project_id = $1 AND sprint_id IS NULL AND deleted_at IS NULL
-             AND status <> 'done'
+        r#"SELECT t.id, t.key, t.title, t.priority, t.status, t.assignee_id, t.labels,
+                  (SELECT count(*) FROM tasks c
+                    WHERE c.parent_task_id = t.id AND c.deleted_at IS NULL) AS subtask_count
+           FROM tasks t
+           WHERE t.project_id = $1 AND t.sprint_id IS NULL AND t.deleted_at IS NULL
+             AND t.status <> 'done'
              -- Subtasks belong to their parent, not the top-level backlog.
-             AND parent_task_id IS NULL
-           ORDER BY priority, created_at"#,
+             AND t.parent_task_id IS NULL
+           ORDER BY t.priority, t.created_at"#,
     )
     .bind(project_id)
     .fetch_all(db)

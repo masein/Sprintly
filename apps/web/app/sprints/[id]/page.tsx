@@ -18,6 +18,7 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { Play, CheckCircle2, GripVertical, Plus, Trash2, X } from "lucide-react";
+import { SubtaskBadge } from "@/components/SubtaskBadge";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { BurndownChart } from "@/components/BurndownChart";
@@ -555,7 +556,13 @@ function DragHandle({
   );
 }
 
-function BacklogPanel({ items, loading }: { items: { key: string; title: string }[]; loading: boolean }) {
+function BacklogPanel({
+  items,
+  loading,
+}: {
+  items: { key: string; title: string; subtask_count: number }[];
+  loading: boolean;
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: "backlog-drop" });
   return (
     <section
@@ -578,14 +585,22 @@ function BacklogPanel({ items, loading }: { items: { key: string; title: string 
           </li>
         )}
         {items.map((t) => (
-          <BacklogRow key={t.key} taskKey={t.key} title={t.title} />
+          <BacklogRow key={t.key} taskKey={t.key} title={t.title} subtaskCount={t.subtask_count} />
         ))}
       </ul>
     </section>
   );
 }
 
-function BacklogRow({ taskKey, title }: { taskKey: string; title: string }) {
+function BacklogRow({
+  taskKey,
+  title,
+  subtaskCount,
+}: {
+  taskKey: string;
+  title: string;
+  subtaskCount: number;
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `backlog:${taskKey}`,
   });
@@ -610,6 +625,7 @@ function BacklogRow({ taskKey, title }: { taskKey: string; title: string }) {
       <span className="min-w-0 flex-1 truncate text-xs text-chrome" title={title}>
         {title}
       </span>
+      <SubtaskBadge count={subtaskCount} />
     </li>
   );
 }
@@ -653,6 +669,7 @@ function SprintTaskRow({
       <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={task.title}>
         {task.title}
       </span>
+      <SubtaskBadge count={task.subtask_count} />
       <span className="mono shrink-0 whitespace-nowrap text-xs text-chrome-dim">
         {task.story_points != null ? `${task.story_points} pts` : "—"}
       </span>
