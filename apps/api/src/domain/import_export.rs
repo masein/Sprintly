@@ -90,12 +90,31 @@ pub struct ImportPlan {
 /// itself. Getting this wrong marked 500 imported done-tasks as overdue.
 pub fn infer_category(name: &str) -> &'static str {
     let n = name.to_lowercase();
+    // Terminal states first. Jira's default workflow ends in "Resolved" and
+    // "Closed"; resolution-style statuses (Won't Do, Cancelled, Duplicate,
+    // Rejected, Obsolete, Invalid) also mean nobody is going to work on this
+    // — and a task nobody will work on must not sit "overdue" forever, which
+    // is exactly what happened when these fell through to 'todo' (QA report 5).
     if n.contains("done")
         || n.contains("complete")
         || n.contains("closed")
         || n.contains("ship")
         || n.contains("verified")
         || n.contains("accepted")
+        || n.contains("resolved")
+        || n.contains("released")
+        || n.contains("deployed")
+        || n.contains("live")
+        || n.contains("fixed")
+        || n.contains("finished")
+        || n.contains("archived")
+        || n.contains("won't")
+        || n.contains("wont")
+        || n.contains("cancel")
+        || n.contains("reject")
+        || n.contains("duplicate")
+        || n.contains("obsolete")
+        || n.contains("invalid")
     {
         "done"
     } else if n.contains("review") || n.contains("qa") || n.contains("test") || n.contains("verify")
@@ -972,7 +991,10 @@ pub async fn apply_jira_import(
                 r#"UPDATE tasks SET
                        title = $2, description = $3, status = $4, column_id = $5,
                        priority = $6, type = $7, assignee_id = $8, reporter_id = $9,
-                       due_date = $10, labels = $11, updated_at = now()
+                       due_date = $10, labels = $11, updated_at = now(),
+                       completed_at = CASE WHEN $4 = 'done'
+                                           THEN COALESCE(completed_at, now())
+                                           ELSE NULL END
                      WHERE id = $1"#,
             )
             .bind(id)
@@ -1006,8 +1028,9 @@ pub async fn apply_jira_import(
                 r#"INSERT INTO tasks
                      (id, project_id, board_id, column_id, key, title, description, status,
                       type, priority, assignee_id, reporter_id, due_date, labels,
-                      order_in_column, external_ref)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)"#,
+                      order_in_column, external_ref, completed_at)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+                           CASE WHEN $8 = 'done' THEN now() ELSE NULL END)"#,
             )
             .bind(id)
             .bind(project_id)
@@ -1479,6 +1502,31 @@ mod tests {
         assert_eq!(infer_category("Verified"), "done");
         assert_eq!(infer_category("Accepted"), "done");
         assert_eq!(infer_category("Verify"), "review");
+        // Jira's default workflow and its resolution-style statuses. Every one
+        // of these used to land in 'todo' and show as overdue (QA report 5).
+        for s in [
+            "Resolved",
+            "Released",
+            "Deployed",
+            "Live",
+            "Fixed",
+            "Finished",
+            "Archived",
+            "Won't Do",
+            "Won't Fix",
+            "Wont Do",
+            "Cancelled",
+            "Canceled",
+            "Rejected",
+            "Duplicate",
+            "Obsolete",
+            "Invalid",
+        ] {
+            assert_eq!(infer_category(s), "done", "{s}");
+        }
+        // Still open — "in review" is not "resolved".
+        assert_eq!(infer_category("In Review"), "review");
+        assert_eq!(infer_category("Selected for Development"), "todo");
     }
 
     #[test]
