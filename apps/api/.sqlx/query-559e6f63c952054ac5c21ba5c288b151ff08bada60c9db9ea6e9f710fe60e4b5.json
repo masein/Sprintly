@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id              AS \"id!: Uuid\",\n               t.key             AS \"key!: String\",\n               t.project_id      AS \"project_id!: Uuid\",\n               p.key             AS \"project_key!: String\",\n               t.board_id        AS \"board_id!: Uuid\",\n               t.column_id       AS \"column_id!: Uuid\",\n               t.title           AS \"title!: String\",\n               t.description     AS \"description!: String\",\n               t.type            AS \"type!: String\",\n               t.priority        AS \"priority!: String\",\n               t.status          AS \"status!: String\",\n               t.assignee_id,\n               t.reporter_id,\n               t.parent_task_id,\n               parent.key        AS \"parent_key?: String\",\n               t.epic_id,\n               t.sprint_id,\n               t.estimate_minutes,\n               t.story_points,\n               t.due_date,\n               t.labels          AS \"labels!: Vec<String>\",\n               t.order_in_column AS \"order_in_column!: f64\",\n               t.created_at      AS \"created_at!: DateTime<Utc>\",\n               t.updated_at      AS \"updated_at!: DateTime<Utc>\",\n               t.completed_at\n        FROM   tasks t\n        JOIN   projects p ON p.id = t.project_id\n        LEFT JOIN tasks parent ON parent.id = t.parent_task_id\n        WHERE  t.key = $1 AND t.project_id = $2 AND t.deleted_at IS NULL\n        ",
+  "query": "\n        SELECT t.id              AS \"id!: Uuid\",\n               t.key             AS \"key!: String\",\n               t.project_id      AS \"project_id!: Uuid\",\n               p.key             AS \"project_key!: String\",\n               t.board_id        AS \"board_id!: Uuid\",\n               t.column_id       AS \"column_id!: Uuid\",\n               t.title           AS \"title!: String\",\n               t.description     AS \"description!: String\",\n               t.type            AS \"type!: String\",\n               t.priority        AS \"priority!: String\",\n               t.status          AS \"status!: String\",\n               t.assignee_id,\n               t.reporter_id,\n               t.parent_task_id,\n               parent.key        AS \"parent_key?: String\",\n               t.epic_id,\n               t.sprint_id,\n               t.estimate_minutes,\n               t.story_points,\n               t.due_date,\n               t.labels          AS \"labels!: Vec<String>\",\n               t.order_in_column AS \"order_in_column!: f64\",\n               t.created_at      AS \"created_at!: DateTime<Utc>\",\n               t.updated_at      AS \"updated_at!: DateTime<Utc>\",\n               t.completed_at,\n               -- Live subtasks under this task — the badge every list shows.\n               (SELECT count(*) FROM tasks c\n                 WHERE c.parent_task_id = t.id AND c.deleted_at IS NULL)\n                                 AS \"subtask_count!: i64\"\n        FROM   tasks t\n        JOIN   projects p ON p.id = t.project_id\n        LEFT JOIN tasks parent ON parent.id = t.parent_task_id\n        WHERE  t.key = $1 AND t.project_id = $2 AND t.deleted_at IS NULL\n        ",
   "describe": {
     "columns": [
       {
@@ -127,6 +127,11 @@
         "ordinal": 24,
         "name": "completed_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 25,
+        "name": "subtask_count!: i64",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
@@ -160,8 +165,9 @@
       false,
       false,
       false,
-      true
+      true,
+      null
     ]
   },
-  "hash": "c7de6d5f0ea19cb083bf26ff78be0378184f4d64f153f1477bb1175a660d195d"
+  "hash": "559e6f63c952054ac5c21ba5c288b151ff08bada60c9db9ea6e9f710fe60e4b5"
 }

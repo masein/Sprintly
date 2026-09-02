@@ -77,6 +77,10 @@ pub struct TaskDto {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
+    /// Number of live subtasks. Every surface that lists tasks shows it as a
+    /// badge, so it rides along here rather than costing a second request per
+    /// card (QA report 5).
+    pub subtask_count: i64,
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -488,7 +492,11 @@ async fn list_tasks(
                t.order_in_column AS "order_in_column!: f64",
                t.created_at      AS "created_at!: DateTime<Utc>",
                t.updated_at      AS "updated_at!: DateTime<Utc>",
-               t.completed_at
+               t.completed_at,
+               -- Live subtasks under this task — the badge every list shows.
+               (SELECT count(*) FROM tasks c
+                 WHERE c.parent_task_id = t.id AND c.deleted_at IS NULL)
+                                 AS "subtask_count!: i64"
         FROM   tasks t
         JOIN   projects p ON p.id = t.project_id
         WHERE  t.project_id = $1
@@ -546,6 +554,7 @@ async fn list_tasks(
             created_at: r.created_at,
             updated_at: r.updated_at,
             completed_at: r.completed_at,
+            subtask_count: r.subtask_count,
         })
         .collect();
     Ok(Json(serde_json::json!({ "items": items })))
@@ -994,7 +1003,11 @@ async fn fetch_task(db: &PgPool, task_key: &str, project_id: Uuid) -> AppResult<
                t.order_in_column AS "order_in_column!: f64",
                t.created_at      AS "created_at!: DateTime<Utc>",
                t.updated_at      AS "updated_at!: DateTime<Utc>",
-               t.completed_at
+               t.completed_at,
+               -- Live subtasks under this task — the badge every list shows.
+               (SELECT count(*) FROM tasks c
+                 WHERE c.parent_task_id = t.id AND c.deleted_at IS NULL)
+                                 AS "subtask_count!: i64"
         FROM   tasks t
         JOIN   projects p ON p.id = t.project_id
         LEFT JOIN tasks parent ON parent.id = t.parent_task_id
@@ -1031,6 +1044,7 @@ async fn fetch_task(db: &PgPool, task_key: &str, project_id: Uuid) -> AppResult<
         created_at: r.created_at,
         updated_at: r.updated_at,
         completed_at: r.completed_at,
+        subtask_count: r.subtask_count,
     })
 }
 

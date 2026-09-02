@@ -30,6 +30,7 @@ export type SprintTask = {
   type: string;
   story_points: number | null;
   assignee_id: string | null;
+  subtask_count: number;
 };
 
 export type BurndownPoint = {

@@ -178,7 +178,11 @@ chmod 600 .env
 Then edit the non-secret settings in `.env` by hand:
 
 - `REGISTRY_HOST` — confirm it's `docker.netixsystem.com`.
-- `SPRINTLY_PUBLIC_URL` and `MINIO_PUBLIC_ENDPOINT` — the URL users hit.
+- `SPRINTLY_PUBLIC_URL` — the URL users hit (used in emails and as a fallback).
+- `MINIO_PUBLIC_ENDPOINT=/s3` — the path form. Attachment links are then built
+  on whatever origin each request arrived on, so the same box works by IP and
+  by hostname. An absolute URL is still accepted but pins links to one host;
+  users who opened the app via the other saw uploads sit at "pending".
 - `SPRINTLY_HTTP_PORT` — published HTTP port (default `80`).
 - `SPRINTLY_OPEN_SIGNUP=true` for first boot (see §6), then flip to `false`.
 - If you changed `POSTGRES_USER`/`POSTGRES_DB`, update `DATABASE_URL` to match.

@@ -10,6 +10,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Bug, Sparkles, Wrench, Beaker, Flame } from "lucide-react";
+import { SubtaskBadge } from "./SubtaskBadge";
 import type { Task } from "@/lib/tasks";
 import { labelColorMap, listProjectLabels } from "@/lib/labels";
 import { listMembers } from "@/lib/projects";
@@ -126,6 +127,7 @@ export function TaskCard({
         >
           {task.key}
         </Link>
+        <SubtaskBadge count={task.subtask_count} className="ml-auto" />
       </div>
       <div className="line-clamp-3 text-sm leading-snug text-chrome">
         {task.title}
