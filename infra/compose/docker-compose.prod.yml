@@ -53,7 +53,7 @@ x-app-env: &app-env
   DATABASE_URL: ${DATABASE_URL:?e.g. postgres://sprintly:PASSWORD@postgres:5432/sprintly}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
   MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
-  MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:?public URL for attachment links, e.g. http://sprintly.internal/s3}
+  MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:?attachment link base — use the path /s3 so links follow the request origin, or an absolute URL}
   MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
   MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
   MINIO_BUCKET: ${MINIO_BUCKET:-sprintly}

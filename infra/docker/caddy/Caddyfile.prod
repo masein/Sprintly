@@ -27,8 +27,11 @@
 #
 # MinIO publishes no host port in prod (internal-only, per the "only the web
 # port is published" design) — /s3 is its sole path to a browser.
-# MINIO_PUBLIC_ENDPOINT must be set to this host + "/s3" so presigned URLs the
-# API signs land here. The prefix is stripped before proxying: MinIO's SigV4
+# MINIO_PUBLIC_ENDPOINT should be the bare path "/s3": the API then signs each
+# presigned URL for the origin the request arrived on (X-Forwarded-Host/Proto,
+# which Caddy sets), so links work whether the box was opened by IP or by
+# hostname. An absolute "http://host/s3" still works but pins links to that
+# one host. The prefix is stripped before proxying: MinIO's SigV4
 # check re-derives the canonical URI from the request path, and the API
 # signed it as "/<bucket>/<key>" (no /s3) — forwarding the prefix through
 # would break every signature.
