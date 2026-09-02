@@ -9,7 +9,9 @@
 // free text ("field" expects name=value).
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
+import { listMembers } from "@/lib/projects";
 
 export type Chip = {
   key: "assignee" | "status" | "priority" | "type" | "label" | "field";
@@ -33,15 +35,54 @@ export function toFilterDSL(chips: Chip[]): string {
   return chips.map((c) => `${c.key}:${c.value}`).join("+");
 }
 
+/** Inverse of `toFilterDSL`, for restoring chips from the URL. Unknown keys
+ *  and malformed tokens are dropped, not trusted — the string is editable. */
+export function fromFilterDSL(dsl: string | null | undefined): Chip[] {
+  if (!dsl) return [];
+  const out: Chip[] = [];
+  for (const token of dsl.split("+")) {
+    const i = token.indexOf(":");
+    if (i <= 0) continue;
+    const key = token.slice(0, i) as Chip["key"];
+    const value = token.slice(i + 1);
+    if (!KEYS.includes(key) || !value) continue;
+    if (key === "field" && !FREE_TEXT.field.valid(value)) continue;
+    if (out.some((c) => c.key === key && c.value === value)) continue;
+    out.push({ key, value });
+  }
+  return out;
+}
+
 export function BoardFilters({
+  projectKey,
   chips,
   onChange,
+  onClear,
 }: {
+  projectKey: string;
   chips: Chip[];
   onChange: (next: Chip[]) => void;
+  /** Present when there is anything to clear (chips, a pinned scope, search). */
+  onClear?: () => void;
 }) {
   const [picking, setPicking] = useState<null | { key: Chip["key"] } | "key">(null);
   const [labelText, setLabelText] = useState("");
+
+  // "assignee:me" used to be the only choice, which made the filter useless
+  // for looking at anyone else's plate. Offer every member; the API has
+  // accepted `assignee:<user id>` all along.
+  const membersQ = useQuery({
+    queryKey: ["project-members", projectKey],
+    queryFn: () => listMembers(projectKey),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const members = membersQ.data ?? [];
+  const shown = (c: Chip): string => {
+    if (c.key !== "assignee" || c.value === "me") return c.value;
+    const m = members.find((x) => x.user_id === c.value);
+    return m ? `@${m.handle}` : c.value;
+  };
 
   function add(c: Chip) {
     // Dedupe identical chips.
@@ -65,7 +106,7 @@ export function BoardFilters({
           className="mono inline-flex items-center gap-1 rounded border border-white/10 bg-ink-subtle px-2 py-0.5 text-[11px] text-chrome"
         >
           <span className="text-chrome-dim">{c.key}:</span>
-          {c.value}
+          {shown(c)}
           <button
             type="button"
             onClick={() => remove(i)}
@@ -76,6 +117,16 @@ export function BoardFilters({
           </button>
         </span>
       ))}
+
+      {onClear && (
+        <button
+          type="button"
+          onClick={onClear}
+          className="mono inline-flex items-center gap-1 rounded border border-white/10 px-2 py-0.5 text-[11px] text-chrome-dim hover:border-white/20 hover:text-chrome"
+        >
+          <X size={11} /> clear filters
+        </button>
+      )}
 
       {picking === null && (
         <button
@@ -140,15 +191,19 @@ export function BoardFilters({
               </button>
             </form>
           ) : (
-            VALUES[picking.key].map((v) => (
+            (picking.key === "assignee"
+              ? [
+                  { value: "me", label: "me" },
+                  ...members.map((m) => ({ value: m.user_id, label: `@${m.handle}` })),
+                ]
+              : VALUES[picking.key].map((v) => ({ value: v, label: v }))
+            ).map((v) => (
               <button
-                key={v}
+                key={v.value}
                 type="button"
-                onClick={() => add({ key: picking.key, value: v })}
+                onClick={() => add({ key: picking.key, value: v.value })}
                 className="rounded px-1.5 py-0.5 text-[11px] text-chrome-dim hover:bg-white/5 hover:text-chrome"
-              >
-                {v}
-              </button>
+              >{v.label}</button>
             ))
           )}
           <button

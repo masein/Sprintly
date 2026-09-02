@@ -880,6 +880,9 @@ function Field({
         <select
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
+          // The visible caption is a sibling span, so screen readers (and
+          // Lighthouse) saw an unnamed select. Name it after its row.
+          aria-label={label}
           className="mono max-w-[60%] truncate rounded border border-white/10 bg-ink px-1.5 py-0.5 text-xs text-chrome"
         >
           {options.map((o) => (
