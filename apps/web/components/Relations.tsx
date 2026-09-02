@@ -79,7 +79,9 @@ export function SubtasksPanel({
             >
               {s.key}
             </Link>
-            <span className="truncate text-chrome">{s.title}</span>
+            <span className="truncate text-chrome" title={s.title}>
+              {s.title}
+            </span>
           </li>
         ))}
         {subs.data?.length === 0 && !adding && (
@@ -168,7 +170,9 @@ export function LinksPanel({
             <Link href={`/tasks/${l.other_task_key}`} className="text-accent hover:underline">
               {l.other_task_key}
             </Link>
-            <span className="truncate text-chrome">{l.other_task_title}</span>
+            <span className="truncate text-chrome" title={l.other_task_title}>
+              {l.other_task_title}
+            </span>
             {canManage && l.direction === "outgoing" && (
               <button
                 type="button"

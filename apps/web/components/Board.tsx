@@ -47,7 +47,7 @@ import { useCreateTask, useMoveTask, useTasks, type Task } from "@/lib/tasks";
 import { listSprints, type Sprint } from "@/lib/sprints";
 import { type BoardView, type GroupBy } from "@/lib/boardViews";
 import { TaskCard } from "./TaskCard";
-import { BoardFilters, toFilterDSL, type Chip } from "./BoardFilters";
+import { BoardFilters, fromFilterDSL, toFilterDSL, type Chip } from "./BoardFilters";
 import { BoardViewBar } from "./BoardViewBar";
 import { ListSearch, matchesTask } from "./ListSearch";
 
@@ -184,7 +184,21 @@ export function Board({
   onBoardChange: (next: BoardModel) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const [chips, setChips] = useState<Chip[]>([]);
+  // Filters start from the URL (`?f=assignee:me+status:todo`) and are written
+  // back on every change, so a refresh — or a pasted link — lands on the same
+  // view. QA report 5: applied filters vanished on reload.
+  const [chips, setChips] = useState<Chip[]>(() =>
+    typeof window === "undefined"
+      ? []
+      : fromFilterDSL(new URLSearchParams(window.location.search).get("f")),
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (chips.length > 0) url.searchParams.set("f", toFilterDSL(chips));
+    else url.searchParams.delete("f");
+    window.history.replaceState(null, "", url);
+  }, [chips]);
   const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
 
@@ -287,8 +301,23 @@ export function Board({
         onScopeChange={changeScope}
       />
       <BoardFilters
+        projectKey={projectKey}
         chips={chips}
         onChange={(next) => { setChips(next); setActiveViewId(null); }}
+        onClear={
+          chips.length > 0 || search.trim() || (scope !== null && scope !== (activeSprint ? "active" : "all"))
+            ? () => {
+                // Back to "this sprint, nothing hidden": chips off, search
+                // cleared, scope on the running sprint (or all tasks when
+                // nothing is running). Picking a sprint in the scope menu is
+                // untouched — this only resets, it doesn't navigate.
+                setChips([]);
+                setSearch("");
+                setActiveViewId(null);
+                setScope(activeSprint ? "active" : "all");
+              }
+            : undefined
+        }
       />
       <div className="mb-3 flex items-center gap-2">
         <ListSearch
