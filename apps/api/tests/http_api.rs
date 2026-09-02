@@ -2370,3 +2370,115 @@ async fn every_task_list_carries_a_live_subtask_count(pool: PgPool) {
         .expect("parent in backlog");
     assert_eq!(row["subtask_count"], 1, "{row:?}");
 }
+
+// ── task report export: docx + pdf over HTTP (QA5 coverage gap) ──────────────
+
+/// `send`, but hands back the raw body and headers — the report routes return
+/// binary, not JSON.
+async fn send_raw(
+    app: &Router,
+    path: &str,
+    token: &str,
+) -> (StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let mut req = Request::builder()
+        .method("GET")
+        .uri(path)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            8080,
+        ))));
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = to_bytes(resp.into_body(), 8 << 20).await.unwrap().to_vec();
+    (status, headers, bytes)
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn task_report_exports_as_real_docx_and_pdf(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "reporter").await;
+    make_project(&app, &token, "RPT").await;
+    let parent = make_task_http(
+        &app,
+        &token,
+        "RPT",
+        "Ship the (thing) — with <tags> & \"quotes\"",
+    )
+    .await;
+    let (_, parent_row) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{parent}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let parent_id = parent_row["id"].as_str().unwrap().to_string();
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/RPT/tasks",
+        Some(&token),
+        Some(json!({ "title": "a subtask in the report", "parent_task_id": parent_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Word: a real zip (local-file header magic), served as a .docx download.
+    let (status, h, body) = send_raw(&app, "/api/v1/projects/RPT/export?format=docx", &token).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        h.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()),
+        Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    );
+    let cd = h
+        .get(header::CONTENT_DISPOSITION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(cd.contains("RPT-report.docx"), "{cd}");
+    assert_eq!(&body[..4], b"PK\x03\x04", "docx must be a zip");
+    // The document text lives in word/document.xml inside the zip; stored
+    // (uncompressed) entries let us see it straight in the bytes, and the
+    // writer XML-escapes — angle brackets from the title must not appear raw.
+    let text = String::from_utf8_lossy(&body);
+    assert!(text.contains("word/document.xml"), "missing document part");
+    assert!(
+        text.contains("a subtask in the report"),
+        "subtasks are part of the report"
+    );
+    assert!(
+        !text.contains("<tags>"),
+        "title markup must be escaped inside the XML"
+    );
+
+    // PDF: magic header, served as a .pdf download, mentions the project.
+    let (status, h, body) = send_raw(&app, "/api/v1/projects/RPT/export?format=pdf", &token).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        h.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()),
+        Some("application/pdf")
+    );
+    let cd = h
+        .get(header::CONTENT_DISPOSITION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(cd.contains("RPT-report.pdf"), "{cd}");
+    assert!(body.starts_with(b"%PDF-"), "pdf magic");
+    assert!(
+        body.windows(5).any(|w| w == b"%%EOF"),
+        "pdf must be terminated"
+    );
+
+    // Members only: a stranger gets nothing.
+    let (other, _) = register(&app, "nosy").await;
+    let (status, _, _) = send_raw(&app, "/api/v1/projects/RPT/export?format=pdf", &other).await;
+    assert!(
+        status == StatusCode::FORBIDDEN || status == StatusCode::NOT_FOUND,
+        "expected 403/404 for a non-member, got {status}"
+    );
+}
