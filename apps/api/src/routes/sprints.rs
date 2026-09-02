@@ -611,16 +611,19 @@ async fn list_tasks(
     }
     let rows = sqlx::query!(
         r#"
-        SELECT key          AS "key!: String",
-               title        AS "title!: String",
-               status       AS "status!: String",
-               priority     AS "priority!: String",
-               type         AS "type!: String",
-               story_points,
-               assignee_id
-        FROM   tasks
-        WHERE  sprint_id = $1 AND deleted_at IS NULL
-        ORDER  BY status, priority, updated_at DESC
+        SELECT t.key          AS "key!: String",
+               t.title        AS "title!: String",
+               t.status       AS "status!: String",
+               t.priority     AS "priority!: String",
+               t.type         AS "type!: String",
+               t.story_points,
+               t.assignee_id,
+               (SELECT count(*) FROM tasks c
+                 WHERE c.parent_task_id = t.id AND c.deleted_at IS NULL)
+                              AS "subtask_count!: i64"
+        FROM   tasks t
+        WHERE  t.sprint_id = $1 AND t.deleted_at IS NULL
+        ORDER  BY t.status, t.priority, t.updated_at DESC
         "#,
         id
     )
@@ -637,6 +640,7 @@ async fn list_tasks(
                 "type": r.r#type,
                 "story_points": r.story_points,
                 "assignee_id": r.assignee_id,
+                "subtask_count": r.subtask_count,
             })
         })
         .collect();

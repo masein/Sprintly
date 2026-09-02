@@ -2267,3 +2267,106 @@ async fn attachment_urls_are_signed_for_the_host_the_browser_used(pool: PgPool) 
         "junk headers must fall back, got {d:?}"
     );
 }
+
+// ── subtask counts ride along on every list (QA5 item 3) ─────────────────────
+
+#[sqlx::test(migrations = "./migrations")]
+async fn every_task_list_carries_a_live_subtask_count(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "subcount").await;
+    make_project(&app, &token, "SUB").await;
+    let parent = make_task_http(&app, &token, "SUB", "the parent").await;
+    let lonely = make_task_http(&app, &token, "SUB", "no children").await;
+
+    // Two subtasks, then delete one — the count must be of *live* children.
+    let (_, parent_row) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{parent}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let parent_id = parent_row["id"].as_str().expect("parent id").to_string();
+    let mut kids = vec![];
+    for t in ["kid one", "kid two"] {
+        let (status, k) = send(
+            &app,
+            "POST",
+            "/api/v1/projects/SUB/tasks",
+            Some(&token),
+            Some(json!({ "title": t, "parent_task_id": parent_id })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{k:?}");
+        kids.push(k["key"].as_str().unwrap().to_string());
+    }
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tasks/{}", kids[1]),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert!(status.is_success(), "delete kid: {status}");
+
+    // Single task.
+    let (_, t) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{parent}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(t["subtask_count"], 1, "{t:?}");
+    let (_, l) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{lonely}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(l["subtask_count"], 0);
+
+    // Board / project list.
+    let (_, list) = send(
+        &app,
+        "GET",
+        "/api/v1/projects/SUB/tasks",
+        Some(&token),
+        None,
+    )
+    .await;
+    let items = list["items"]
+        .as_array()
+        .or_else(|| list.as_array())
+        .expect("task list");
+    let by_key = |k: &str| {
+        items
+            .iter()
+            .find(|i| i["key"] == k)
+            .cloned()
+            .expect("task in list")
+    };
+    assert_eq!(by_key(&parent)["subtask_count"], 1);
+    assert_eq!(by_key(&lonely)["subtask_count"], 0);
+
+    // Backlog.
+    let (_, backlog) = send(
+        &app,
+        "GET",
+        "/api/v1/projects/SUB/backlog",
+        Some(&token),
+        None,
+    )
+    .await;
+    let rows = backlog.as_array().expect("backlog array");
+    let row = rows
+        .iter()
+        .find(|r| r["key"] == parent)
+        .expect("parent in backlog");
+    assert_eq!(row["subtask_count"], 1, "{row:?}");
+}
