@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT n.key            AS \"key!: String\",\n               n.title          AS \"title!: String\",\n               n.status         AS \"status!: String\",\n               n.priority       AS \"priority!: String\",\n               n.type           AS \"type!: String\",\n               n.story_points,\n               n.assignee_id,\n               n.logged_minutes AS \"logged_minutes!: i32\",\n               n.snapped_at     AS \"snapped_at!: DateTime<Utc>\",\n               (SELECT count(*) FROM tasks c\n                 WHERE c.parent_task_id = n.task_id AND c.deleted_at IS NULL)\n                                AS \"subtask_count!: i64\"\n        FROM   sprint_task_snapshots n\n        JOIN   sprints s ON s.id = n.sprint_id\n        WHERE  n.sprint_id = $1 AND s.state = 'completed'\n        ORDER  BY n.status, n.priority, n.title\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "title!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "priority!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "type!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "story_points",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "assignee_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "logged_minutes!: i32",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "snapped_at!: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "subtask_count!: i64",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "093c27e9759305c7153b14a985cbe30da9739bedaad4f7c07e7058e6c15024d0"
+}

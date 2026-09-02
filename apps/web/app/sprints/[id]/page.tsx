@@ -30,7 +30,7 @@ import {
   completeSprint,
   getBurndown,
   getSprint,
-  listSprintTasks,
+  getSprintTasks,
   listSprints,
   startSprint,
   unassignTaskFromSprint,
@@ -55,11 +55,16 @@ export default function SprintDetailPage() {
     queryFn: () => getSprint(id),
     enabled: !!id,
   });
-  const tasksQ = useQuery({
+  const tasksFullQ = useQuery({
     queryKey: ["sprint-tasks", id],
-    queryFn: () => listSprintTasks(id),
+    queryFn: () => getSprintTasks(id),
     enabled: !!id,
   });
+  // Everything below reads the array; the envelope's `snapshot` flag is for
+  // the heading. A completed sprint serves the frozen list from completion.
+  const tasksQ = { ...tasksFullQ, data: tasksFullQ.data?.items };
+  const isSnapshot = tasksFullQ.data?.snapshot === true;
+  const snappedAt = tasksFullQ.data?.snapped_at;
   const burnQ = useQuery({
     queryKey: ["sprint-burndown", id],
     queryFn: () => getBurndown(id),
@@ -233,6 +238,15 @@ export default function SprintDetailPage() {
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <h2 className="mono text-xs uppercase tracking-widest text-chrome-dim">
                 tasks ({tasksQ.data?.length ?? 0})
+                {isSnapshot && (
+                  <span
+                    className="ml-2 normal-case tracking-normal text-chrome-dim/80"
+                    title="What this sprint held when it was completed — work carried on since is still shown here as it stood."
+                    data-testid="sprint-snapshot-note"
+                  >
+                    · as completed{snappedAt ? ` ${new Date(snappedAt).toISOString().slice(0, 10)}` : ""}
+                  </span>
+                )}
               </h2>
               <ListSearch
                 value={taskQuery}
@@ -670,6 +684,14 @@ function SprintTaskRow({
         {task.title}
       </span>
       <SubtaskBadge count={task.subtask_count} />
+      {task.logged_minutes != null && task.logged_minutes > 0 && (
+        <span
+          className="mono shrink-0 whitespace-nowrap text-[10px] text-chrome-dim"
+          title="time logged during this sprint"
+        >
+          {Math.round(task.logged_minutes / 6) / 10}h
+        </span>
+      )}
       <span className="mono shrink-0 whitespace-nowrap text-xs text-chrome-dim">
         {task.story_points != null ? `${task.story_points} pts` : "—"}
       </span>
