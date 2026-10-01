@@ -2981,3 +2981,135 @@ async fn subtasks_keep_the_order_they_were_dragged_into(pool: PgPool) {
         "{s}"
     );
 }
+
+/// QA report 6: the team manages a task's watchers — not only "watch me".
+/// Leads and contributors add/remove teammates; read-only members only
+/// themselves; nobody outside the project can be added.
+#[sqlx::test(migrations = "./migrations")]
+async fn the_team_manages_who_watches_a_task(pool: PgPool) {
+    let app = app(pool);
+    let (lead, _) = register(&app, "wlead").await;
+    let (mate, mate_user) = register(&app, "wmate").await;
+    let (reader, reader_user) = register(&app, "wreader").await;
+    let (_, outsider_user) = register(&app, "woutsider").await;
+    make_project(&app, &lead, "WAT").await;
+    for (u, role) in [(&mate_user, "contributor"), (&reader_user, "watcher")] {
+        let (s, b) = send(
+            &app,
+            "POST",
+            "/api/v1/projects/WAT/members",
+            Some(&lead),
+            Some(json!({ "user_id": u["id"], "role": role })),
+        )
+        .await;
+        assert!(s.is_success(), "{b:?}");
+    }
+    let task = make_task_http(&app, &lead, "WAT", "watch this").await;
+    let add = |token: String, user_id: Value| {
+        let app = app.clone();
+        let task = task.clone();
+        async move {
+            send(
+                &app,
+                "POST",
+                &format!("/api/v1/tasks/{task}/watchers"),
+                Some(&token),
+                Some(json!({ "user_id": user_id })),
+            )
+            .await
+            .0
+        }
+    };
+    let watchers = || {
+        let app = app.clone();
+        let task = task.clone();
+        let lead = lead.clone();
+        async move {
+            let (_, b) = send(
+                &app,
+                "GET",
+                &format!("/api/v1/tasks/{task}/watchers"),
+                Some(&lead),
+                None,
+            )
+            .await;
+            let mut h: Vec<String> = b["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|w| w["handle"].as_str().unwrap().to_string())
+                .collect();
+            h.sort();
+            h
+        }
+    };
+
+    // The lead adds a contributor; the contributor adds the read-only member.
+    assert_eq!(
+        add(lead.clone(), mate_user["id"].clone()).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        add(mate.clone(), reader_user["id"].clone()).await,
+        StatusCode::NO_CONTENT
+    );
+    // The lead is on the list already: reporters auto-watch what they file.
+    assert_eq!(watchers().await, vec!["wlead", "wmate", "wreader"]);
+
+    // Someone who isn't on the project can't be made to watch it.
+    assert_eq!(
+        add(lead.clone(), outsider_user["id"].clone()).await,
+        StatusCode::BAD_REQUEST
+    );
+    // Nor can a made-up user id (used to be an FK violation → 500).
+    assert_eq!(
+        add(lead.clone(), json!(uuid::Uuid::now_v7().to_string())).await,
+        StatusCode::BAD_REQUEST
+    );
+
+    // A read-only member watches themselves, but doesn't manage others.
+    let (_, lead_me) = send(&app, "GET", "/api/v1/users/me", Some(&lead), None).await;
+    assert_eq!(
+        add(reader.clone(), lead_me["id"].clone()).await,
+        StatusCode::FORBIDDEN
+    );
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!(
+            "/api/v1/tasks/{task}/watchers/{}",
+            mate_user["id"].as_str().unwrap()
+        ),
+        Some(&reader),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!(
+            "/api/v1/tasks/{task}/watchers/{}",
+            reader_user["id"].as_str().unwrap()
+        ),
+        Some(&reader),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT, "anyone can stop watching");
+
+    // A contributor takes a teammate off.
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!(
+            "/api/v1/tasks/{task}/watchers/{}",
+            mate_user["id"].as_str().unwrap()
+        ),
+        Some(&mate),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    assert_eq!(watchers().await, vec!["wlead"]);
+}

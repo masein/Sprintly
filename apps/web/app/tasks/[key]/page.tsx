@@ -177,7 +177,11 @@ export default function TaskPage() {
           <TaskTimer taskKey={task.key} />
           <LinksPanel taskKey={task.key} canManage={canManage} />
           <GitLinksPanel taskKey={task.key} />
-          <Watchers taskKey={task.key} />
+          <Watchers
+            taskKey={task.key}
+            projectKey={task.project_key}
+            canManage={canManage || meQ.data?.role === "admin"}
+          />
         </aside>
       </div>
     </AppShell>
