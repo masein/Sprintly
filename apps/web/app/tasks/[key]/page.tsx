@@ -24,6 +24,7 @@ import { GitLinksPanel } from "@/components/GitLinksPanel";
 import { TaskTimer } from "@/components/TaskTimer";
 import { Avatar } from "@/components/Avatar";
 import { AssigneePicker } from "@/components/AssigneePicker";
+import { CopyTaskLink } from "@/components/CopyTaskLink";
 import { deleteTask, editTask, getTask, moveTask, restoreTask, type Task } from "@/lib/tasks";
 import { showToast } from "@/lib/toast";
 import { listSubtasks, setTaskParent } from "@/lib/relations";
@@ -94,6 +95,7 @@ export default function TaskPage() {
             { label: task.key },
           ]}
         />
+        <CopyTaskLink taskKey={task.key} size={13} className="-ml-2" />
         {canDelete && (
           <button
             type="button"
