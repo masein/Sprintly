@@ -2644,3 +2644,119 @@ async fn a_completed_sprint_remembers_its_tasks_even_after_carry_over(pool: PgPo
     .await;
     assert_eq!(live["snapshot"], false);
 }
+
+/// QA report 6: an epic opens to show its tasks. The list is exactly what the
+/// bar's "done/total" counts, unfinished work first.
+#[sqlx::test(migrations = "./migrations")]
+async fn an_epic_lists_the_tasks_its_progress_counts(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "epicist").await;
+    make_project(&app, &token, "EPC").await;
+    let cols = columns(&app, &token, "EPC").await;
+    let done_col = cols.iter().find(|(_, c)| c == "done").unwrap().0.clone();
+    let (s, epic) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/EPC/epics",
+        Some(&token),
+        Some(json!({ "name": "Phase 3" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{epic:?}");
+    let epic_id = epic["id"].as_str().unwrap().to_string();
+
+    let mut keys = Vec::new();
+    for (i, t) in ["a", "b", "c", "d"].iter().enumerate() {
+        let k = make_task_http(&app, &token, "EPC", t).await;
+        let (s, _) = send(
+            &app,
+            "PUT",
+            &format!("/api/v1/tasks/{k}/epic"),
+            Some(&token),
+            Some(json!({ "epic_id": epic_id })),
+        )
+        .await;
+        assert!(s.is_success());
+        if i < 3 {
+            let (s, _) = send(
+                &app,
+                "POST",
+                &format!("/api/v1/tasks/{k}/move"),
+                Some(&token),
+                Some(json!({ "column_id": done_col })),
+            )
+            .await;
+            assert_eq!(s, StatusCode::OK);
+        }
+        keys.push(k);
+    }
+    // A task outside the epic, and a deleted one inside it, don't show.
+    make_task_http(&app, &token, "EPC", "elsewhere").await;
+    let ghost = make_task_http(&app, &token, "EPC", "ghost").await;
+    send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{ghost}/epic"),
+        Some(&token),
+        Some(json!({ "epic_id": epic_id })),
+    )
+    .await;
+    send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tasks/{ghost}"),
+        Some(&token),
+        None,
+    )
+    .await;
+
+    let (s, list) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/epics/{epic_id}/tasks"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{list:?}");
+    let items = list["items"].as_array().unwrap();
+    assert_eq!(items.len(), 4);
+    assert_eq!(items[0]["key"], keys[3], "the open one leads");
+    assert_eq!(items[0]["status"], "todo");
+    assert_eq!(items.iter().filter(|i| i["status"] == "done").count(), 3);
+
+    // And the bar's numbers agree.
+    let (_, epics) = send(
+        &app,
+        "GET",
+        "/api/v1/projects/EPC/epics",
+        Some(&token),
+        None,
+    )
+    .await;
+    let e = epics
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == epic_id.as_str())
+        .unwrap();
+    assert_eq!(
+        (e["done_count"].as_i64(), e["task_count"].as_i64()),
+        (Some(3), Some(4))
+    );
+
+    // Outsiders can't peek.
+    let (other, _) = register(&app, "epicoutsider").await;
+    let (s, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/epics/{epic_id}/tasks"),
+        Some(&other),
+        None,
+    )
+    .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s}"
+    );
+}
