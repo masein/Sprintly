@@ -3835,3 +3835,188 @@ async fn sprint_stats_track_progress_and_scope_change(pool: PgPool) {
     assert_eq!(rows[0]["tasks"], 1);
     assert!(v["current"].is_null());
 }
+
+/// KPI request: a clockwork table (members × days, any range) and each
+/// member's sprint KPIs on the project dashboard. Leads see everyone's hours;
+/// a contributor sees their own and blanks — but the KPI table for all.
+#[sqlx::test(migrations = "./migrations")]
+async fn the_team_view_shows_hours_by_day_and_member_kpis(pool: PgPool) {
+    let app = app(pool.clone());
+    let (lead, lead_user) = register(&app, "tlead").await;
+    let (mate, mate_user) = register(&app, "tmate").await;
+    make_project(&app, &lead, "TEM").await;
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/TEM/members",
+        Some(&lead),
+        Some(json!({ "user_id": mate_user["id"], "role": "contributor" })),
+    )
+    .await;
+    assert!(s.is_success());
+    let cols = columns(&app, &lead, "TEM").await;
+    let done_col = cols.iter().find(|(_, c)| c == "done").unwrap().0.clone();
+    let today = chrono::Utc::now().date_naive();
+
+    // An active sprint with: mate — 3 tasks (2 done: one on time, one late;
+    // 2 estimated); lead — 1 task, open, unestimated.
+    let now = chrono::Utc::now();
+    let (_, sprint) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/TEM/sprints",
+        Some(&lead),
+        Some(json!({
+            "name": "Team sprint",
+            "starts_at": (now - chrono::Duration::days(2)).to_rfc3339(),
+            "ends_at": (now + chrono::Duration::days(5)).to_rfc3339(),
+        })),
+    )
+    .await;
+    let sid = sprint["id"].as_str().unwrap().to_string();
+    let mk = |title: &'static str, assignee: Value, extra: Value| {
+        let app = app.clone();
+        let lead = lead.clone();
+        let sid = sid.clone();
+        async move {
+            let mut body = json!({ "title": title, "assignee_id": assignee, "sprint_id": sid });
+            for (k, v) in extra.as_object().unwrap() {
+                body[k] = v.clone();
+            }
+            let (s, t) = send(
+                &app,
+                "POST",
+                "/api/v1/projects/TEM/tasks",
+                Some(&lead),
+                Some(body),
+            )
+            .await;
+            assert_eq!(s, StatusCode::CREATED, "{t:?}");
+            t["key"].as_str().unwrap().to_string()
+        }
+    };
+    let on_time = mk(
+        "on time",
+        mate_user["id"].clone(),
+        json!({ "due_date": (today + chrono::Duration::days(1)).to_string(), "story_points": 3 }),
+    )
+    .await;
+    let late = mk(
+        "late",
+        mate_user["id"].clone(),
+        json!({ "due_date": (today - chrono::Duration::days(1)).to_string(), "estimate_minutes": 60 }),
+    )
+    .await;
+    mk("open", mate_user["id"].clone(), json!({})).await;
+    mk("lead's", lead_user["id"].clone(), json!({})).await;
+    for k in [&on_time, &late] {
+        let (s, _) = send(
+            &app,
+            "POST",
+            &format!("/api/v1/tasks/{k}/move"),
+            Some(&lead),
+            Some(json!({ "column_id": done_col })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+    }
+    let (s, b) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sid}/start"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b:?}");
+
+    // Hours: mate 90' today + 30' yesterday, lead 45' today.
+    let log = |user: &Value, task: &str, day: chrono::NaiveDate, minutes: i64| {
+        let pool = pool.clone();
+        let user = uuid::Uuid::parse_str(user["id"].as_str().unwrap()).unwrap();
+        let task = task.to_string();
+        async move {
+            let start = day.and_hms_opt(9, 0, 0).unwrap().and_utc();
+            sqlx::query(
+                r#"INSERT INTO time_logs (id, task_id, user_id, started_at, ended_at)
+                   SELECT $1, id, $2, $3, $4 FROM tasks WHERE key = $5"#,
+            )
+            .bind(uuid::Uuid::now_v7())
+            .bind(user)
+            .bind(start)
+            .bind(start + chrono::Duration::minutes(minutes))
+            .bind(task)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+    log(&mate_user, &on_time, today, 90).await;
+    log(&mate_user, &late, today - chrono::Duration::days(1), 30).await;
+    log(&lead_user, &on_time, today, 45).await;
+
+    let from = today - chrono::Duration::days(1);
+    let path = format!("/api/v1/projects/TEM/team?from={from}&to={today}");
+
+    // The lead sees everyone's hours.
+    let (s, t) = send(&app, "GET", &path, Some(&lead), None).await;
+    assert_eq!(s, StatusCode::OK, "{t:?}");
+    assert_eq!(t["scope"], "team");
+    assert_eq!(t["days"].as_array().unwrap().len(), 2);
+    assert_eq!(t["sprint"]["name"], "Team sprint");
+    let row = |body: &Value, handle: &str| {
+        body["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["handle"] == handle)
+            .cloned()
+            .unwrap()
+    };
+    let m = row(&t, "tmate");
+    assert_eq!(m["minutes_by_day"], json!([30, 90]));
+    assert_eq!(m["total_minutes"], 120);
+    assert_eq!(
+        m["kpi"],
+        json!({ "assigned": 3, "completed": 2, "completed_with_due": 2, "on_time": 1, "estimated": 2 })
+    );
+    assert_eq!(row(&t, "tlead")["minutes_by_day"], json!([0, 45]));
+    assert_eq!(row(&t, "tlead")["kpi"]["assigned"], 1);
+    assert_eq!(t["totals_by_day"], json!([30, 135]));
+
+    // The contributor sees their own hours, blanks for the lead, all KPIs.
+    let (s, t) = send(&app, "GET", &path, Some(&mate), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(t["scope"], "self");
+    assert_eq!(row(&t, "tmate")["total_minutes"], 120);
+    assert!(row(&t, "tlead")["minutes_by_day"].is_null());
+    assert_eq!(row(&t, "tlead")["kpi"]["assigned"], 1);
+    assert_eq!(
+        t["totals_by_day"],
+        json!([30, 90]),
+        "totals only count what you can see"
+    );
+
+    // Ranges are bounded and ordered.
+    let (s, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/projects/TEM/team?from={today}&to={from}"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = send(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/projects/TEM/team?from={}&to={today}",
+            today - chrono::Duration::days(200)
+        ),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
