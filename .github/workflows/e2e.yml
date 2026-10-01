@@ -21,6 +21,9 @@ jobs:
           # .env.example ships placeholder secrets; substitute valid CI values.
           sed -i 's#^SPRINTLY_JWT_SECRET=.*#SPRINTLY_JWT_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa#' .env
           sed -i 's#^SPRINTLY_VAULT_MASTER_KEY=.*#SPRINTLY_VAULT_MASTER_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=#' .env
+          # MinIO's own images are gone from Docker Hub; boot from the project
+          # registry's mirror of the same pinned release (amd64, like runners).
+          echo 'MINIO_IMAGE=docker.netixsystem.com/minio:RELEASE.2024-10-13T13-34-11Z' >> .env
 
       - name: Boot the stack
         run: docker compose -f infra/compose/docker-compose.yml --env-file .env up -d --build
