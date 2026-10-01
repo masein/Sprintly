@@ -1,8 +1,9 @@
 "use client";
 
 // Task detail page. Two-column layout: main content (title, markdown body,
-// comments, activity) on the left; sidebar (status/priority/type, watchers,
-// attachments) on the right. Inline edit on title and description.
+// attachments, subtasks, comments, activity) on the left; sidebar
+// (status/priority/type, timer, links, watchers) on the right. Inline edit on
+// title and description.
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -126,6 +127,10 @@ export default function TaskPage() {
         <div className="min-w-0 space-y-8">
           <Header task={task} canEdit={canManage} />
           <Description task={task} canEdit={canManage} />
+          {/* Files belong with the description they support — roadmaps,
+              screenshots, specs — not at the bottom of the sidebar under the
+              timer and links, where they were easy to miss (QA report 6). */}
+          <Attachments taskKey={task.key} canManage={canManage} />
           {/* Subtasks are work, not metadata — they read better at full width
               under the description than squeezed into the 280px sidebar, where
               every title truncated (QA report 5). */}
@@ -145,7 +150,6 @@ export default function TaskPage() {
           <LinksPanel taskKey={task.key} canManage={canManage} />
           <GitLinksPanel taskKey={task.key} />
           <Watchers taskKey={task.key} />
-          <Attachments taskKey={task.key} canManage={canManage} />
         </aside>
       </div>
     </AppShell>
