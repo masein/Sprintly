@@ -30,6 +30,9 @@ pub enum Action {
     ViewProject,
     EditProject,
     ArchiveProject,
+    /// Soft-delete a whole project. Same people as archiving — the lead —
+    /// archived or not; the route adds the type-the-key confirmation.
+    DeleteProject,
     AddProjectMember,
     RemoveProjectMember,
     ChangeProjectMemberRole,
@@ -164,10 +167,11 @@ pub fn can(actor: &Actor, action: Action, resource: Resource) -> bool {
             },
         ) => true,
 
-        // Archive / unarchive: lead can flip in either direction.
+        // Archive / unarchive: lead can flip in either direction. Deleting
+        // is the lead's call too, archived or not.
         (
             Member,
-            A::ArchiveProject,
+            A::ArchiveProject | A::DeleteProject,
             R::Project {
                 actor_role: Some(PR::Lead),
                 ..
@@ -248,6 +252,35 @@ mod tests {
             Action::EditProject,
             project(Some(ProjectRole::Watcher), false)
         ));
+    }
+
+    #[test]
+    fn only_the_lead_deletes_a_project_archived_or_not() {
+        for archived in [false, true] {
+            assert!(can(
+                &member(),
+                Action::DeleteProject,
+                project(Some(ProjectRole::Lead), archived)
+            ));
+            for r in [ProjectRole::Contributor, ProjectRole::Watcher] {
+                assert!(!can(
+                    &member(),
+                    Action::DeleteProject,
+                    project(Some(r), archived)
+                ));
+            }
+            assert!(!can(
+                &member(),
+                Action::DeleteProject,
+                project(None, archived)
+            ));
+            assert!(!can(
+                &viewer(),
+                Action::DeleteProject,
+                project(Some(ProjectRole::Lead), archived)
+            ));
+        }
+        assert!(can(&admin(), Action::DeleteProject, project(None, false)));
     }
 
     #[test]

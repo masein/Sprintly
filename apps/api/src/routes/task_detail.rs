@@ -57,6 +57,10 @@ pub fn router() -> Router<AppState> {
             get(list_links).post(add_link).delete(remove_link),
         )
         .route("/tasks/:task_key/subtasks", get(list_subtasks))
+        .route(
+            "/tasks/:task_key/subtasks/order",
+            axum::routing::put(reorder_subtasks),
+        )
         .route("/tasks/:task_key/parent", axum::routing::put(set_parent))
         .route(
             "/tasks/:task_key/attachments",
@@ -64,6 +68,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/attachments/:id", delete(delete_attachment))
         .route("/attachments/:id/complete", post(complete_attachment))
+        .route("/attachments/:id/download", get(download_attachment))
 }
 
 // ─── DTOs ───────────────────────────────────────────────────────────────────
@@ -558,6 +563,18 @@ async fn list_activity(
 
 // ─── handlers: watchers ─────────────────────────────────────────────────────
 
+/// Adding or removing *someone else* as a watcher. The team does this — leads
+/// and contributors — not just leads: telling a teammate "keep an eye on this"
+/// is everyday collaboration, not project administration (QA report 6). Read-
+/// only `watcher`-role members can still watch and unwatch themselves.
+fn may_manage_watchers(user: &CurrentUser, ctx: &project_ctx::ProjectContext) -> bool {
+    use crate::domain::permissions::ProjectRole;
+    can(&user.as_actor(), Action::EditProject, ctx.as_resource())
+        || (!ctx.archived
+            && ctx.actor_role == Some(ProjectRole::Contributor)
+            && user.role != crate::domain::permissions::Role::Viewer)
+}
+
 async fn list_watchers(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -612,10 +629,29 @@ async fn add_watcher(
     // Self-add is always allowed (if you can view, you can watch yourself).
     let actor_can_view = can(&user.as_actor(), Action::ViewBoard, ctx.as_resource());
     let adding_self = req.user_id == user.id;
-    if !actor_can_view
-        || (!adding_self && !can(&user.as_actor(), Action::EditProject, ctx.as_resource()))
-    {
+    if !actor_can_view || (!adding_self && !may_manage_watchers(&user, &ctx)) {
         return Err(AppError::Forbidden);
+    }
+    // Only people on the project can watch it: a watcher who can't open the
+    // task would get notifications about work they're not allowed to see.
+    // (Also turns an unknown user id into a clear 400 instead of an FK 500.)
+    if !adding_self {
+        let member: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM project_members pm
+                   JOIN users u ON u.id = pm.user_id
+                   WHERE pm.project_id = $1 AND pm.user_id = $2 AND u.deleted_at IS NULL
+               )"#,
+        )
+        .bind(task.project_id)
+        .bind(req.user_id)
+        .fetch_one(&state.db)
+        .await?;
+        if !member {
+            return Err(AppError::BadRequest(
+                "only members of this project can watch its tasks".into(),
+            ));
+        }
     }
     sqlx::query(
         r#"
@@ -638,7 +674,7 @@ async fn remove_watcher(
     let task = resolve_task(&state.db, &task_key).await?;
     let ctx = project_ctx::load_by_id(&state.db, task.project_id, user.id).await?;
     let removing_self = target == user.id;
-    if !removing_self && !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !removing_self && !may_manage_watchers(&user, &ctx) {
         return Err(AppError::Forbidden);
     }
     sqlx::query("DELETE FROM task_watchers WHERE task_id = $1 AND user_id = $2")
@@ -794,13 +830,78 @@ async fn list_subtasks(
         SELECT key, title, status, assignee_id, estimate_minutes
         FROM   tasks
         WHERE  parent_task_id = $1 AND deleted_at IS NULL
-        ORDER BY created_at ASC
+        -- Hand-arranged first; never-arranged (new) ones after, oldest first.
+        ORDER BY subtask_position ASC NULLS LAST, created_at ASC, id ASC
         "#,
     )
     .bind(task.id)
     .fetch_all(&state.db)
     .await?;
     Ok(Json(serde_json::json!({ "items": items })))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReorderSubtasksReq {
+    /// Every live subtask's key, in the wanted order.
+    pub keys: Vec<String>,
+}
+
+/// Put a task's subtasks in the given order (QA report 6: drag-and-drop
+/// reordering). The list must name exactly the current live subtasks — not a
+/// subset, no strangers. A list that disagrees means someone added, removed,
+/// or moved a subtask since the client loaded it, and applying a stale order
+/// would silently shuffle work the dragger never saw: 409, reload, try again.
+async fn reorder_subtasks(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(task_key): Path<String>,
+    Json(req): Json<ReorderSubtasksReq>,
+) -> AppResult<impl IntoResponse> {
+    let task = resolve_task(&state.db, &task_key).await?;
+    let ctx = project_ctx::load_by_id(&state.db, task.project_id, user.id).await?;
+    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+    if req.keys.len() > 500 {
+        return Err(AppError::BadRequest(
+            "too many subtasks in one reorder".into(),
+        ));
+    }
+
+    let mut tx = state.db.begin().await?;
+    // Lock the family so two simultaneous drags serialise instead of
+    // interleaving their positions.
+    let mut current: Vec<String> = sqlx::query_scalar(
+        r#"SELECT key FROM tasks
+           WHERE parent_task_id = $1 AND deleted_at IS NULL
+           FOR UPDATE"#,
+    )
+    .bind(task.id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut wanted = req.keys.clone();
+    current.sort();
+    wanted.sort();
+    if current != wanted {
+        return Err(AppError::Conflict(
+            "the subtask list changed since you loaded it — reload and try again".into(),
+        ));
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE tasks t
+        SET    subtask_position = o.n
+        FROM   unnest($2::text[]) WITH ORDINALITY AS o(key, n)
+        WHERE  t.parent_task_id = $1 AND t.key = o.key AND t.deleted_at IS NULL
+        "#,
+    )
+    .bind(task.id)
+    .bind(&req.keys)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug, Deserialize)]
@@ -834,10 +935,12 @@ async fn set_parent(
         None => {
             // Promote to a top-level task. Its column/board were never
             // cleared, so it simply reappears where it last lived.
-            sqlx::query("UPDATE tasks SET parent_task_id = NULL WHERE id = $1")
-                .bind(task.id)
-                .execute(&state.db)
-                .await?;
+            sqlx::query(
+                "UPDATE tasks SET parent_task_id = NULL, subtask_position = NULL WHERE id = $1",
+            )
+            .bind(task.id)
+            .execute(&state.db)
+            .await?;
         }
         Some(parent_key) => {
             let parent = sqlx::query!(
@@ -879,11 +982,22 @@ async fn set_parent(
                     "this task has subtasks of its own — promote or move them first".into(),
                 ));
             }
-            sqlx::query("UPDATE tasks SET parent_task_id = $2, sprint_id = NULL WHERE id = $1")
-                .bind(task.id)
-                .bind(parent.id)
-                .execute(&state.db)
-                .await?;
+            // A new family: take the slot after the new parent's last
+            // subtask, rather than keeping a position from the old family
+            // that would collide with a sibling's.
+            sqlx::query(
+                r#"UPDATE tasks
+                   SET parent_task_id = $2, sprint_id = NULL,
+                       subtask_position = (
+                           SELECT COALESCE(MAX(subtask_position), 0) + 1 FROM tasks
+                           WHERE parent_task_id = $2 AND deleted_at IS NULL AND id <> $1
+                       )
+                   WHERE id = $1"#,
+            )
+            .bind(task.id)
+            .bind(parent.id)
+            .execute(&state.db)
+            .await?;
         }
     }
 
@@ -912,11 +1026,13 @@ async fn set_parent(
 
 // ─── handlers: attachments ──────────────────────────────────────────────────
 
-/// The origin the browser reached us on, as the reverse proxy reports it.
-/// Caddy sets `X-Forwarded-Proto` / `X-Forwarded-Host` on every proxied
-/// request; a bare `Host` is the dev-without-proxy fallback. `None` when
-/// neither is usable, and the presigner then falls back to the public URL.
-fn request_origin(headers: &HeaderMap) -> Option<String> {
+/// The host the browser reached us on, as the reverse proxy reports it —
+/// `X-Forwarded-Host` (Caddy sets it to the incoming `Host`), else `Host`.
+/// That is also the `Host` MinIO will see on the `/s3` request, since both go
+/// through the same proxies. No scheme: presigned links are relative, so the
+/// browser supplies the page's own. `None` when nothing usable is present; the
+/// presigner then falls back to the public URL's host.
+fn request_host(headers: &HeaderMap) -> Option<String> {
     let get = |k: &str| {
         headers
             .get(k)
@@ -933,17 +1049,63 @@ fn request_origin(headers: &HeaderMap) -> Option<String> {
     {
         return None;
     }
-    let proto = get("x-forwarded-proto")
-        .filter(|p| p == "http" || p == "https")
-        .unwrap_or_else(|| "http".to_string());
-    Some(format!("{proto}://{host}"))
+    Some(host)
 }
 
 /// Presigner for a browser-facing URL: signs for the host the caller actually
 /// used when `MINIO_PUBLIC_ENDPOINT` is a path, verbatim otherwise.
 fn presigner_for<'a>(state: &'a AppState, headers: &HeaderMap) -> Presigner<'a> {
-    let origin = request_origin(headers);
-    Presigner::for_request(&state.cfg.minio, origin.as_deref(), &state.cfg.public_url)
+    let host = request_host(headers);
+    Presigner::for_request(&state.cfg.minio, host.as_deref(), &state.cfg.public_url)
+}
+
+/// Where the UI sends people to download a file: a stable, same-origin API
+/// link instead of the presigned URL itself. A presigned URL is a bearer
+/// token with a ten-minute life baked into the page — leave the task open,
+/// click later, and the browser gets an `AccessDenied: Request has expired`
+/// XML page. This link checks access at click time and only then redirects
+/// to a freshly signed (short-lived) one.
+fn download_path(id: Uuid) -> String {
+    format!("/api/v1/attachments/{id}/download")
+}
+
+async fn download_attachment(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> AppResult<impl IntoResponse> {
+    let row = sqlx::query!(
+        r#"
+        SELECT a.filename    AS "filename!: String",
+               a.storage_key AS "storage_key!: String",
+               a.status      AS "status!: String",
+               t.project_id  AS "project_id!: Uuid"
+        FROM   task_attachments a
+        JOIN   tasks t ON t.id = a.task_id
+        WHERE  a.id = $1 AND a.deleted_at IS NULL AND t.deleted_at IS NULL
+        "#,
+        id
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    let ctx = project_ctx::load_by_id(&state.db, row.project_id, user.id).await?;
+    if !can(&user.as_actor(), Action::ViewBoard, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+    if row.status != "ready" {
+        return Err(AppError::Conflict("that upload never finished".into()));
+    }
+    let url = presigner_for(&state, &headers).get(&row.storage_key, Some(&row.filename), 120);
+    Ok((
+        StatusCode::FOUND,
+        [
+            (axum::http::header::LOCATION, url),
+            // The redirect target is a signed bearer URL: keep it out of caches.
+            (axum::http::header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+    ))
 }
 
 async fn create_attachment(
@@ -1049,7 +1211,6 @@ async fn complete_attachment(
 async fn list_attachments(
     State(state): State<AppState>,
     user: CurrentUser,
-    headers: HeaderMap,
     Path(task_key): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let task = resolve_task(&state.db, &task_key).await?;
@@ -1078,7 +1239,6 @@ async fn list_attachments(
     .fetch_all(&state.db)
     .await?;
 
-    let signer = presigner_for(&state, &headers);
     let items: Vec<AttachmentDto> = rows
         .into_iter()
         .map(|r| AttachmentDto {
@@ -1089,7 +1249,7 @@ async fn list_attachments(
             size_bytes: r.size_bytes,
             status: r.status.clone(),
             download_url: if r.status == "ready" {
-                Some(signer.get(&r.storage_key, Some(&r.filename), 600))
+                Some(download_path(r.id))
             } else {
                 None
             },
@@ -1226,4 +1386,49 @@ async fn fetch_one_comment(db: &PgPool, id: Uuid, viewer: Uuid) -> AppResult<Com
 /// strings (e.g. `:+1:`). Reject anything with line breaks or > 16 bytes.
 fn is_emoji_ok(s: &str) -> bool {
     !s.is_empty() && s.len() <= 16 && !s.contains(['\n', '\r', '\t'])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::request_host;
+    use axum::http::HeaderMap;
+
+    fn headers(pairs: &[(&'static str, &'static str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(*k, v.parse().unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn request_host_prefers_the_proxy_header() {
+        assert_eq!(
+            request_host(&headers(&[
+                ("x-forwarded-host", "sprintly.example"),
+                ("host", "caddy:80"),
+            ])),
+            Some("sprintly.example".into())
+        );
+        // First hop of a proxy chain.
+        assert_eq!(
+            request_host(&headers(&[("x-forwarded-host", "a.example, b.internal")])),
+            Some("a.example".into())
+        );
+        // Dev without a proxy: plain Host.
+        assert_eq!(
+            request_host(&headers(&[("host", "localhost:8080")])),
+            Some("localhost:8080".into())
+        );
+    }
+
+    #[test]
+    fn request_host_rejects_junk() {
+        assert_eq!(
+            request_host(&headers(&[("x-forwarded-host", "evil.example/../")])),
+            None
+        );
+        assert_eq!(request_host(&headers(&[("host", "a b")])), None);
+        assert_eq!(request_host(&HeaderMap::new()), None);
+    }
 }
