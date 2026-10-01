@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { CheckSquare, Plus, Square, Trash2, UserPlus, UserMinus } from "lucide-react";
 import { SubtaskBadge } from "@/components/SubtaskBadge";
+import { CopyTaskLink } from "@/components/CopyTaskLink";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { ListSearch, matchesTask } from "@/components/ListSearch";
@@ -252,6 +253,7 @@ export default function BacklogPage() {
                 >
                   {t.key}
                 </Link>
+                <CopyTaskLink taskKey={t.key} size={11} className="-ml-1" />
                 <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={t.title}>
                   {t.title}
                 </span>
