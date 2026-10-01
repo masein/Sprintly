@@ -50,8 +50,13 @@ services:
       - "127.0.0.1:6379:6379"
 
   # ─── Object storage (S3-compatible) ──────────────────────────────────────
+  # MinIO no longer publishes images: Docker Hub and quay.io stopped serving
+  # every minio/minio and minio/mc tag, so a machine without them cached
+  # can't pull this. `MINIO_IMAGE` points the stack at a mirror (CI uses the
+  # project's registry, docker.netixsystem.com — the same pinned release prod
+  # runs); left unset, the original tag is used, so existing setups don't move.
   minio:
-    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2024-10-13T13-34-11Z}
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -69,8 +74,10 @@ services:
       - "127.0.0.1:9001:9001"  # Console
 
   # ─── One-shot: create the bucket if it doesn't exist ─────────────────────
+  # The server image ships `mc` (the very release minio/mc was pinned to), so
+  # the bucket bootstrap reuses it — one image to find, not two.
   minio-init:
-    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
+    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2024-10-13T13-34-11Z}
     depends_on:
       minio:
         condition: service_healthy
