@@ -101,6 +101,18 @@ function ProjectsInner() {
     }
   }
 
+  // Back to the server's order (archived last, newest first). An empty list
+  // is the "no preference" value applyOrder already understands.
+  async function resetOrder() {
+    setOrder([]);
+    try {
+      await patchMe({ settings: { project_order: [] } });
+    } catch {
+      setError("Couldn't reset that order — try again.");
+    }
+    await reload();
+  }
+
   useEffect(() => {
     reload();
     // Plain-state page (not TanStack), so the global refetch-on-focus
@@ -117,6 +129,24 @@ function ProjectsInner() {
         <div>
           <Breadcrumbs items={[{ label: "sprintly", href: "/" }, { label: "projects" }]} />
           <h1 className="text-3xl font-semibold">Your projects.</h1>
+          {projects && projects.length > 1 && (
+            <p className="mono mt-1 text-xs text-chrome-dim" data-project-order-hint>
+              drag a card by its <GripVertical size={11} className="inline align-[-1px]" /> grip
+              to arrange them — the order is yours alone
+              {order.length > 0 && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    onClick={() => void resetOrder()}
+                    className="underline decoration-dotted underline-offset-2 hover:text-chrome"
+                  >
+                    reset order
+                  </button>
+                </>
+              )}
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -173,18 +203,25 @@ function ProjectCard({ project }: { project: Project }) {
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={isDragging ? "z-20 opacity-70" : undefined}
     >
-      <div className="relative">
+      <div className="group relative">
         {/* Drag by the grip only — the card itself stays a plain link, so a
-            click never turns into an accidental rearrangement. */}
+            click never turns into an accidental rearrangement.
+            The grip is always faintly there. It used to be opacity-0 until
+            `group-hover` — but `group` sat on the sibling link, not on an
+            ancestor, so the hover never reached it and the handle was
+            invisible for good (QA report 6: "allow users to customise their
+            project card order" — they could, nobody could see how). Bottom
+            right, so it never sits on the role badge. */}
         <button
           type="button"
           {...attributes}
           {...(listeners as React.DOMAttributes<HTMLButtonElement>)}
           aria-label={`reorder ${project.key}`}
           title="drag to reorder — your own arrangement"
-          className="absolute right-2 top-2 z-10 cursor-grab touch-none rounded p-1 text-chrome-dim opacity-0 transition hover:text-chrome focus-visible:opacity-100 group-hover:opacity-100 active:cursor-grabbing"
+          data-project-grip
+          className="absolute bottom-2 right-2 z-10 cursor-grab touch-none rounded p-1 text-chrome-dim opacity-50 transition hover:bg-white/5 hover:text-chrome focus-visible:opacity-100 group-hover:opacity-100 active:cursor-grabbing"
         >
-          <GripVertical size={13} />
+          <GripVertical size={14} />
         </button>
       <Link
         href={`/projects/${project.key}`}
