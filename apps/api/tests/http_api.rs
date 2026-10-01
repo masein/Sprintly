@@ -2644,3 +2644,188 @@ async fn a_completed_sprint_remembers_its_tasks_even_after_carry_over(pool: PgPo
     .await;
     assert_eq!(live["snapshot"], false);
 }
+
+/// QA report 6: a sprint report in Word and PDF — all statuses, subtasks,
+/// descriptions, commits, attached files — and for a completed sprint, the
+/// tasks it had at completion even after carry-over moved them.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_sprint_exports_as_a_word_and_pdf_report(pool: PgPool) {
+    let app = app(pool.clone());
+    let (token, _) = register(&app, "sprintreporter").await;
+    make_project(&app, &token, "SRP").await;
+    let cols = columns(&app, &token, "SRP").await;
+    let done_col = cols.iter().find(|(_, c)| c == "done").unwrap().0.clone();
+    let (s, sprint) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/SRP/sprints",
+        Some(&token),
+        Some(json!({
+            "name": "Sprint 61",
+            "goal": "Improve system stability",
+            "starts_at": "2026-09-28T00:00:00Z",
+            "ends_at": "2026-10-05T00:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{sprint:?}");
+    let sid = sprint["id"].as_str().unwrap().to_string();
+
+    let (s, t1) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/SRP/tasks",
+        Some(&token),
+        Some(json!({ "title": "mirror-sync is bloating the disk",
+                     "description": "Prune old snapshots nightly.",
+                     "story_points": 5 })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let t1 = t1["key"].as_str().unwrap().to_string();
+    let t2 = make_task_http(&app, &token, "SRP", "deploy on Parsian").await;
+    let sub = make_task_http(&app, &token, "SRP", "write the runbook").await;
+    assert_eq!(
+        set_parent(&app, &token, &sub, Some(&t1)).await,
+        StatusCode::NO_CONTENT
+    );
+    let outside = make_task_http(&app, &token, "SRP", "not in this sprint").await;
+    for k in [&t1, &t2] {
+        let (s, _) = send(
+            &app,
+            "POST",
+            &format!("/api/v1/sprints/{sid}/tasks/{k}"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+    }
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{t2}/move"),
+        Some(&token),
+        Some(json!({ "column_id": done_col })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    // A commit and a file on the parent.
+    sqlx::query(
+        r#"INSERT INTO git_links (id, task_id, provider, kind, external_ref, title, state)
+           SELECT $1, id, 'github', 'commit', 'abc1234def', 'prune snapshots', NULL
+           FROM tasks WHERE key = $2"#,
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(&t1)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (s, a) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{t1}/attachments"),
+        Some(&token),
+        Some(json!({ "filename": "disk-usage.png", "mime_type": "image/png" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{a:?}");
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/attachments/{}/complete", a["id"].as_str().unwrap()),
+        Some(&token),
+        Some(json!({ "size_bytes": 2048 })),
+    )
+    .await;
+    assert!(s.is_success());
+
+    let (status, headers, docx) = send_raw(
+        &app,
+        &format!("/api/v1/sprints/{sid}/report?format=docx"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers[header::CONTENT_DISPOSITION]
+        .to_str()
+        .unwrap()
+        .contains("SRP-sprint-61-report.docx"));
+    assert_eq!(&docx[..4], b"PK\x03\x04");
+    let xml = String::from_utf8_lossy(&docx).to_string();
+    for needle in [
+        "Sprint 61 — sprint report",
+        "Goal: Improve system stability",
+        "2 tasks · 1 to do · 0 in progress · 0 in review · 1 done",
+        "mirror-sync is bloating the disk",
+        "Prune old snapshots nightly.",
+        "write the runbook",
+        "commit abc1234def — prune snapshots",
+        "disk-usage.png (2.0 KB)",
+        "deploy on Parsian",
+    ] {
+        assert!(xml.contains(needle), "docx is missing {needle:?}");
+    }
+    assert!(
+        !xml.contains("not in this sprint"),
+        "{outside} isn't in the sprint"
+    );
+
+    let (status, headers, pdf) = send_raw(
+        &app,
+        &format!("/api/v1/sprints/{sid}/report?format=pdf"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CONTENT_TYPE], "application/pdf");
+    let text = String::from_utf8_lossy(&pdf).to_string();
+    assert!(text.starts_with("%PDF-1.4"));
+    assert!(
+        text.contains("Sprint 61 - sprint report"),
+        "dashes survive as '-'"
+    );
+    assert!(text.contains("disk-usage.png \\(2.0 KB\\)"));
+
+    // Complete the sprint, carrying the open task away: the report keeps it.
+    let (s, b) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sid}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b:?}");
+    let (s, b) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sid}/complete"),
+        Some(&token),
+        Some(json!({ "carry_over": { "to": "backlog" } })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b:?}");
+    let (_, _, docx) = send_raw(&app, &format!("/api/v1/sprints/{sid}/report"), &token).await;
+    let xml = String::from_utf8_lossy(&docx).to_string();
+    assert!(
+        xml.contains("mirror-sync is bloating the disk"),
+        "carried-over work is still history"
+    );
+    assert!(xml.contains("(as completed)"));
+    assert!(
+        xml.contains("write the runbook"),
+        "subtasks come along with the snapshot"
+    );
+
+    let (s, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sid}/report?format=xlsx"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
