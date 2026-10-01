@@ -2689,3 +2689,472 @@ async fn a_completed_sprint_remembers_its_tasks_even_after_carry_over(pool: PgPo
     .await;
     assert_eq!(live["snapshot"], false);
 }
+
+/// QA report 6: label names are editable. Tasks hold labels by name, so a
+/// rename has to follow onto every tagged task — otherwise they keep the old
+/// name, lose its colour, and stop matching `label:<new>`.
+#[sqlx::test(migrations = "./migrations")]
+async fn renaming_a_label_renames_it_on_every_task(pool: PgPool) {
+    let app = app(pool.clone());
+    let (token, _) = register(&app, "relabeler").await;
+    make_project(&app, &token, "RLB").await;
+
+    let (status, label) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/RLB/labels",
+        Some(&token),
+        Some(json!({ "name": "front", "color": "#7c5cff" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{label:?}");
+    let id = label["id"].as_str().unwrap().to_string();
+
+    let tagged = make_task_http(&app, &token, "RLB", "tagged").await;
+    let both = make_task_http(&app, &token, "RLB", "already has the new name").await;
+    let other = make_task_http(&app, &token, "RLB", "someone else's label").await;
+    for (key, labels) in [
+        (&tagged, json!(["urgent", "FRONT"])),
+        (&both, json!(["front", "frontend"])),
+        (&other, json!(["back"])),
+    ] {
+        let (s, b) = send(
+            &app,
+            "PATCH",
+            &format!("/api/v1/tasks/{key}"),
+            Some(&token),
+            Some(json!({ "labels": labels })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b:?}");
+    }
+
+    let (status, renamed) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/labels/{id}"),
+        Some(&token),
+        Some(json!({ "name": "frontend" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed:?}");
+    assert_eq!(renamed["name"], "frontend");
+    assert_eq!(renamed["color"], "#7c5cff", "a rename keeps the colour");
+
+    let labels_of = |key: String| {
+        let app = app.clone();
+        let token = token.clone();
+        async move {
+            let (_, t) = send(
+                &app,
+                "GET",
+                &format!("/api/v1/tasks/{key}"),
+                Some(&token),
+                None,
+            )
+            .await;
+            t["labels"].clone()
+        }
+    };
+    // Case-insensitive match, position kept.
+    assert_eq!(
+        labels_of(tagged.clone()).await,
+        json!(["urgent", "frontend"])
+    );
+    // The rename would have produced a duplicate; one copy survives.
+    assert_eq!(labels_of(both.clone()).await, json!(["frontend"]));
+    // Unrelated labels are untouched.
+    assert_eq!(labels_of(other.clone()).await, json!(["back"]));
+
+    // A colour-only edit renames nothing.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/labels/{id}"),
+        Some(&token),
+        Some(json!({ "color": "#22d3ee" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(labels_of(tagged).await, json!(["urgent", "frontend"]));
+
+    // Renaming onto a name the palette already has is a conflict, not a merge.
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/RLB/labels",
+        Some(&token),
+        Some(json!({ "name": "design", "color": "#10b981" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/labels/{id}"),
+        Some(&token),
+        Some(json!({ "name": "Design" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+/// QA report 6: "my open work in the running sprint", the way Jira people
+/// write it — `sprint is active` used to be a parse error at character 59.
+#[sqlx::test(migrations = "./migrations")]
+async fn jql_finds_my_open_work_in_the_active_sprint(pool: PgPool) {
+    let app = app(pool);
+    let (token, me) = register(&app, "sprinter").await;
+    let my_id = me["id"].as_str().unwrap().to_string();
+    make_project(&app, &token, "SIA").await;
+    let cols = columns(&app, &token, "SIA").await;
+    let done_col = cols.iter().find(|(_, c)| c == "done").unwrap().0.clone();
+
+    let running = make_sprint(&app, &token, "SIA", "Running").await;
+    let later = make_sprint(&app, &token, "SIA", "Later").await;
+
+    let mine_open = make_task_http(&app, &token, "SIA", "mine, open, running sprint").await;
+    let mine_done = make_task_http(&app, &token, "SIA", "mine, done, running sprint").await;
+    let mine_later = make_task_http(&app, &token, "SIA", "mine, open, future sprint").await;
+    let mine_backlog = make_task_http(&app, &token, "SIA", "mine, open, no sprint").await;
+    let nobodys = make_task_http(&app, &token, "SIA", "unassigned, running sprint").await;
+
+    for key in [&mine_open, &mine_done, &mine_later, &mine_backlog] {
+        let (s, b) = send(
+            &app,
+            "PATCH",
+            &format!("/api/v1/tasks/{key}"),
+            Some(&token),
+            Some(json!({ "assignee_id": my_id })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b:?}");
+    }
+    for (sprint, key) in [
+        (&running, &mine_open),
+        (&running, &mine_done),
+        (&running, &nobodys),
+        (&later, &mine_later),
+    ] {
+        let (s, _) = send(
+            &app,
+            "POST",
+            &format!("/api/v1/sprints/{sprint}/tasks/{key}"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+    }
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{mine_done}/move"),
+        Some(&token),
+        Some(json!({ "column_id": done_col })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, b) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{running}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b:?}");
+
+    let (status, body) = jql(
+        &app,
+        &token,
+        "assignee = currentUser() AND status != done AND sprint is active ORDER BY priority ASC",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(keys(&body), vec![mine_open.clone()]);
+
+    // Jira's spelling of the same thing.
+    let (_, body) = jql(
+        &app,
+        &token,
+        "assignee = currentUser() AND sprint in openSprints()",
+    )
+    .await;
+    let mut got = keys(&body);
+    got.sort();
+    let mut want = vec![mine_open.clone(), mine_done.clone(), mine_later.clone()];
+    want.sort();
+    assert_eq!(got, want, "openSprints() is active + not yet started");
+
+    // "Not in the running sprint" includes the backlog.
+    let (_, body) = jql(
+        &app,
+        &token,
+        "assignee = currentUser() AND sprint is not active",
+    )
+    .await;
+    let mut got = keys(&body);
+    got.sort();
+    let mut want = vec![mine_later, mine_backlog];
+    want.sort();
+    assert_eq!(got, want);
+}
+
+/// QA report 6: subtasks are reorderable by drag-and-drop, and the order is
+/// stored. New subtasks land after the arranged ones; a stale list is refused.
+#[sqlx::test(migrations = "./migrations")]
+async fn subtasks_keep_the_order_they_were_dragged_into(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "arranger").await;
+    make_project(&app, &token, "SUB").await;
+    let parent = make_task_http(&app, &token, "SUB", "the parent").await;
+    let mut kids = Vec::new();
+    for t in ["one", "two", "three"] {
+        let child = make_task_http(&app, &token, "SUB", t).await;
+        assert_eq!(
+            set_parent(&app, &token, &child, Some(&parent)).await,
+            StatusCode::NO_CONTENT
+        );
+        kids.push(child);
+    }
+    let order = |app: Router, token: String, parent: String| async move {
+        let (s, body) = send(
+            &app,
+            "GET",
+            &format!("/api/v1/tasks/{parent}/subtasks"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["key"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        kids
+    );
+
+    let wanted = vec![kids[2].clone(), kids[0].clone(), kids[1].clone()];
+    let (s, b) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&token),
+        Some(json!({ "keys": wanted })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT, "{b:?}");
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        wanted
+    );
+
+    // A new subtask goes after the arranged ones.
+    let four = make_task_http(&app, &token, "SUB", "four").await;
+    assert_eq!(
+        set_parent(&app, &token, &four, Some(&parent)).await,
+        StatusCode::NO_CONTENT
+    );
+    let mut with_four = wanted.clone();
+    with_four.push(four.clone());
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        with_four
+    );
+
+    // A list that leaves one out (someone added a subtask meanwhile) is a
+    // conflict, and changes nothing.
+    let (s, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&token),
+        Some(json!({ "keys": [&kids[0], &kids[1], &kids[2]] })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    // So is one naming a stranger, or the same key twice.
+    let (s, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&token),
+        Some(json!({ "keys": [&kids[0], &kids[0], &kids[1], &kids[2], &four] })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        with_four
+    );
+
+    // Moving a subtask to another parent forgets its old position.
+    let other = make_task_http(&app, &token, "SUB", "other parent").await;
+    let only = make_task_http(&app, &token, "SUB", "only child").await;
+    assert_eq!(
+        set_parent(&app, &token, &only, Some(&other)).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set_parent(&app, &token, &kids[2], Some(&other)).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        order(app.clone(), token.clone(), other.clone()).await,
+        vec![only, kids[2].clone()],
+        "a newcomer lands at the end, not at its old slot"
+    );
+
+    // Someone outside the project can't reorder it.
+    let (stranger, _) = register(&app, "outsider").await;
+    let (s, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&stranger),
+        Some(json!({ "keys": with_four })),
+    )
+    .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s}"
+    );
+}
+
+/// QA report 6: the team manages a task's watchers — not only "watch me".
+/// Leads and contributors add/remove teammates; read-only members only
+/// themselves; nobody outside the project can be added.
+#[sqlx::test(migrations = "./migrations")]
+async fn the_team_manages_who_watches_a_task(pool: PgPool) {
+    let app = app(pool);
+    let (lead, _) = register(&app, "wlead").await;
+    let (mate, mate_user) = register(&app, "wmate").await;
+    let (reader, reader_user) = register(&app, "wreader").await;
+    let (_, outsider_user) = register(&app, "woutsider").await;
+    make_project(&app, &lead, "WAT").await;
+    for (u, role) in [(&mate_user, "contributor"), (&reader_user, "watcher")] {
+        let (s, b) = send(
+            &app,
+            "POST",
+            "/api/v1/projects/WAT/members",
+            Some(&lead),
+            Some(json!({ "user_id": u["id"], "role": role })),
+        )
+        .await;
+        assert!(s.is_success(), "{b:?}");
+    }
+    let task = make_task_http(&app, &lead, "WAT", "watch this").await;
+    let add = |token: String, user_id: Value| {
+        let app = app.clone();
+        let task = task.clone();
+        async move {
+            send(
+                &app,
+                "POST",
+                &format!("/api/v1/tasks/{task}/watchers"),
+                Some(&token),
+                Some(json!({ "user_id": user_id })),
+            )
+            .await
+            .0
+        }
+    };
+    let watchers = || {
+        let app = app.clone();
+        let task = task.clone();
+        let lead = lead.clone();
+        async move {
+            let (_, b) = send(
+                &app,
+                "GET",
+                &format!("/api/v1/tasks/{task}/watchers"),
+                Some(&lead),
+                None,
+            )
+            .await;
+            let mut h: Vec<String> = b["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|w| w["handle"].as_str().unwrap().to_string())
+                .collect();
+            h.sort();
+            h
+        }
+    };
+
+    // The lead adds a contributor; the contributor adds the read-only member.
+    assert_eq!(
+        add(lead.clone(), mate_user["id"].clone()).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        add(mate.clone(), reader_user["id"].clone()).await,
+        StatusCode::NO_CONTENT
+    );
+    // The lead is on the list already: reporters auto-watch what they file.
+    assert_eq!(watchers().await, vec!["wlead", "wmate", "wreader"]);
+
+    // Someone who isn't on the project can't be made to watch it.
+    assert_eq!(
+        add(lead.clone(), outsider_user["id"].clone()).await,
+        StatusCode::BAD_REQUEST
+    );
+    // Nor can a made-up user id (used to be an FK violation → 500).
+    assert_eq!(
+        add(lead.clone(), json!(uuid::Uuid::now_v7().to_string())).await,
+        StatusCode::BAD_REQUEST
+    );
+
+    // A read-only member watches themselves, but doesn't manage others.
+    let (_, lead_me) = send(&app, "GET", "/api/v1/users/me", Some(&lead), None).await;
+    assert_eq!(
+        add(reader.clone(), lead_me["id"].clone()).await,
+        StatusCode::FORBIDDEN
+    );
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!(
+            "/api/v1/tasks/{task}/watchers/{}",
+            mate_user["id"].as_str().unwrap()
+        ),
+        Some(&reader),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!(
+            "/api/v1/tasks/{task}/watchers/{}",
+            reader_user["id"].as_str().unwrap()
+        ),
+        Some(&reader),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT, "anyone can stop watching");
+
+    // A contributor takes a teammate off.
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!(
+            "/api/v1/tasks/{task}/watchers/{}",
+            mate_user["id"].as_str().unwrap()
+        ),
+        Some(&mate),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    assert_eq!(watchers().await, vec!["wlead"]);
+}
