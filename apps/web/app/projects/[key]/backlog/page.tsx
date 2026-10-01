@@ -10,7 +10,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { CheckSquare, Plus, Square, Trash2, UserPlus, UserMinus } from "lucide-react";
 import { SubtaskBadge } from "@/components/SubtaskBadge";
+import { CopyTaskLink } from "@/components/CopyTaskLink";
+import { TaskTitleInput } from "@/components/TaskTitleInput";
 import { canEditTasks, canManageProject } from "@/lib/roles";
+import { splitCommitMessage } from "@/lib/commitMessage";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { ListSearch, matchesTask } from "@/components/ListSearch";
@@ -255,6 +258,7 @@ export default function BacklogPage() {
                 >
                   {t.key}
                 </Link>
+                <CopyTaskLink taskKey={t.key} size={11} className="-ml-1" />
                 <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={t.title}>
                   {t.title}
                 </span>
@@ -329,12 +333,16 @@ function BacklogQuickAdd({
   const [title, setTitle] = useState("");
   const [titleError, setTitleError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const create = useMutation({
     // No column_id / sprint_id: the API slots it into the default board's first
-    // column with no sprint, which is exactly a backlog task.
-    mutationFn: (t: string) => createTask(projectKey, { title: t }),
+    // column with no sprint, which is exactly a backlog task. The raw text is
+    // split commit-style — first line title, the rest description.
+    mutationFn: (raw: string) => {
+      const { title: t, description } = splitCommitMessage(raw);
+      return createTask(projectKey, { title: t, ...(description ? { description } : {}) });
+    },
     onSuccess: () => {
       onCreated();
       setError(null);
@@ -368,40 +376,40 @@ function BacklogQuickAdd({
     );
   }
 
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        const filing = title.trim();
-        if (!filing) {
-          setTitleError("Needs a title.");
-          return;
-        }
+  function submit() {
+    const filing = title.trim();
+    if (!splitCommitMessage(filing).title) {
+      setTitleError("Needs a title.");
+      return;
+    }
         // Clear now, not in onSuccess. Filing several tasks in a row means
         // typing the next one immediately, and a slow round-trip used to land
         // its setTitle("") *after* those keystrokes — wiping them, so Enter
         // submitted an empty field. Global cache invalidation made that window
         // wide enough to hit reliably.
-        setTitle("");
-        create.mutate(filing);
+    setTitle("");
+    create.mutate(filing);
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
       }}
       className="space-y-1 border-b border-white/10 p-2"
     >
-      <input
+      <TaskTitleInput
         ref={inputRef}
         autoFocus
         value={title}
-        onChange={(e) => {
-          setTitle(e.target.value);
+        onChange={(v) => {
+          setTitle(v);
           if (titleError) setTitleError(null);
         }}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            close();
-          }
-        }}
-        placeholder="task title"
+        onSubmit={submit}
+        onEscape={close}
+        placeholder="task title — first line; Shift+Enter for a description"
         aria-label="new task title"
         aria-invalid={!!titleError}
         className={`block w-full rounded border bg-ink px-2 py-1 text-sm text-chrome focus:outline-none placeholder:text-chrome-dim/50 placeholder:italic ${

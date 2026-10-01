@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { Archive, ArchiveRestore, ArrowDownUp, FileStack, GitBranch, ListChecks, Pencil, Share2, Tags, Users, Webhook } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDownUp, FileStack, GitBranch, ListChecks, Pencil, Share2, Tags, Trash2, Users, Webhook } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Board } from "@/components/Board";
 import { FieldsManager } from "@/components/FieldsManager";
@@ -15,6 +15,8 @@ import { PublicStatusModal } from "@/components/PublicStatusModal";
 import { TemplatesManager } from "@/components/TemplatesManager";
 import { WebhooksManager } from "@/components/WebhooksManager";
 import { ProjectAppearance } from "@/components/ProjectAppearance";
+import { DeleteProjectModal } from "@/components/DeleteProjectModal";
+import { showToast } from "@/lib/toast";
 import { canEditTasks } from "@/lib/roles";
 import {
   archiveProject,
@@ -46,6 +48,7 @@ export default function ProjectPage() {
   const [showImport, setShowImport] = useState(false);
   const [showPublic, setShowPublic] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
   // Global admins can manage any project's members (the API always allowed
   // it — the UI used to show them the read-only view).
   const [isAdmin, setIsAdmin] = useState(false);
@@ -315,8 +318,32 @@ export default function ProjectPage() {
               )}
             </button>
           )}
+
+          {(canManage || isAdmin) && (
+            <button
+              type="button"
+              onClick={() => setShowDelete(true)}
+              className="mono flex items-center gap-2 rounded border border-red-500/30 px-3 py-2.5 text-xs text-red-300/80 hover:border-red-500/60 hover:text-red-300"
+            >
+              <Trash2 size={14} /> delete
+            </button>
+          )}
         </div>
       </header>
+
+      {showDelete && (
+        <DeleteProjectModal
+          project={project}
+          onClose={() => setShowDelete(false)}
+          onDeleted={() => {
+            setShowDelete(false);
+            showToast(`Deleted ${project.key}. An admin can restore it from admin → projects.`, {
+              ttlMs: 10_000,
+            });
+            router.push("/projects");
+          }}
+        />
+      )}
 
       {showLabels && (
         <LabelsManager projectKey={project.key} onClose={() => setShowLabels(false)} />

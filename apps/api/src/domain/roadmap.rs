@@ -22,6 +22,20 @@ pub struct Epic {
     pub done_count: i64,
 }
 
+/// One task under an epic, as the roadmap's expanded epic lists it.
+#[derive(Debug, Serialize, FromRow)]
+pub struct EpicTask {
+    pub key: String,
+    pub title: String,
+    pub status: String,
+    pub priority: String,
+    pub r#type: String,
+    pub story_points: Option<i32>,
+    pub assignee_handle: Option<String>,
+    /// Set for subtasks, so the list can say whose child it is.
+    pub parent_key: Option<String>,
+}
+
 #[derive(Debug, Serialize, FromRow)]
 pub struct Milestone {
     pub id: Uuid,
@@ -134,6 +148,34 @@ pub async fn epic_delete(db: &PgPool, id: Uuid, project_id: Uuid) -> AppResult<(
         return Err(AppError::NotFound);
     }
     Ok(())
+}
+
+/// Every live task in an epic — exactly the set `task_count`/`done_count`
+/// count, so the list and the "3/4 done" on its bar can never disagree.
+/// Ordered for reading: unfinished work first (in progress, review, to do),
+/// done last; then priority, then key.
+pub async fn epic_tasks(db: &PgPool, epic_id: Uuid) -> AppResult<Vec<EpicTask>> {
+    let rows = sqlx::query_as(
+        r#"
+        SELECT t.key, t.title, t.status, t.priority, t.type, t.story_points,
+               u.handle AS assignee_handle, pt.key AS parent_key
+        FROM   tasks t
+        LEFT JOIN users u  ON u.id  = t.assignee_id
+        LEFT JOIN tasks pt ON pt.id = t.parent_task_id
+        WHERE  t.epic_id = $1 AND t.deleted_at IS NULL
+        ORDER  BY CASE t.status
+                    WHEN 'in_progress' THEN 0
+                    WHEN 'review'      THEN 1
+                    WHEN 'todo'        THEN 2
+                    ELSE 3
+                  END,
+                  t.priority, t.key
+        "#,
+    )
+    .bind(epic_id)
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
 }
 
 pub async fn epic_project_of(db: &PgPool, id: Uuid) -> AppResult<Uuid> {

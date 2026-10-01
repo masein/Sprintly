@@ -5,10 +5,11 @@
 // chart, manage epics + milestones. Drag-to-reschedule is deliberately out of
 // scope (v2) — edit an epic's dates in its row instead.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Flag, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, Flag, Pencil, Plus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
@@ -19,9 +20,11 @@ import {
   deleteEpic,
   deleteMilestone,
   listEpics,
+  listEpicTasks,
   listMilestones,
   updateEpic,
   type Epic,
+  type EpicTask,
   type Milestone,
 } from "@/lib/roadmap";
 import type { ApiError } from "@/lib/api";
@@ -38,6 +41,16 @@ export default function TimelinePage() {
   const key = params?.key ?? "";
   const router = useRouter();
   const qc = useQueryClient();
+  const [selected, setSelected] = useState<string | null>(null);
+  // Toggle; and bring the panel into view, since the bars sit above the fold
+  // and the panel below them.
+  const select = (id: string) => {
+    setSelected((cur) => (cur === id ? null : id));
+    window.setTimeout(
+      () => document.getElementById("epic-focus")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      50,
+    );
+  };
 
   const projectQ = useQuery({ queryKey: ["project", key], queryFn: () => getProject(key) });
   const epicsQ = useQuery({ queryKey: ["epics", key], queryFn: () => listEpics(key), retry: false });
@@ -74,6 +87,7 @@ export default function TimelinePage() {
   const canManage = projectQ.data?.your_role === "lead";
   const epics = epicsQ.data ?? [];
   const milestones = msQ.data ?? [];
+  const focus = epics.find((e) => e.id === selected) ?? null;
 
   return (
     <AppShell currentProjectKey={key}>
@@ -84,7 +98,14 @@ export default function TimelinePage() {
         </div>
       </header>
 
-      <Timeline epics={epics} milestones={milestones} />
+      <Timeline epics={epics} milestones={milestones} selected={selected} onSelect={select} />
+
+      {/* Clicking an epic — its bar, or its row below — opens it here, at the
+          top of the epics section, with its tasks grouped by status (QA report
+          6: "Phase 3 has four tasks, three done; clicking it should show them"). */}
+      {focus && (
+        <EpicFocus key={focus.id} epic={focus} onClose={() => setSelected(null)} />
+      )}
 
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <EpicsManager
@@ -92,6 +113,8 @@ export default function TimelinePage() {
           epics={epics}
           canManage={canManage}
           onChange={invalidate}
+          selected={selected}
+          onSelect={select}
         />
         <MilestonesManager
           projectKey={key}
@@ -106,7 +129,17 @@ export default function TimelinePage() {
 
 // ─── Timeline (Gantt-lite) ───────────────────────────────────────────────────
 
-function Timeline({ epics, milestones }: { epics: Epic[]; milestones: Milestone[] }) {
+function Timeline({
+  epics,
+  milestones,
+  selected,
+  onSelect,
+}: {
+  epics: Epic[];
+  milestones: Milestone[];
+  selected: string | null;
+  onSelect: (id: string) => void;
+}) {
   const scheduled = epics.filter((e) => e.start_date && e.end_date);
 
   const window = useMemo(() => {
@@ -190,11 +223,17 @@ function Timeline({ epics, milestones }: { epics: Epic[]; milestones: Milestone[
             const pct = e.task_count > 0 ? Math.round((e.done_count / e.task_count) * 100) : 0;
             return (
               <div key={e.id} className="relative h-7">
-                <div
+                <button
+                  type="button"
                   data-testid="epic-bar"
-                  className="absolute top-0 flex h-7 items-center overflow-hidden rounded"
+                  onClick={() => onSelect(e.id)}
+                  aria-expanded={selected === e.id}
+                  aria-label={`${e.name} — ${e.done_count} of ${e.task_count} done, show tasks`}
+                  className={`absolute top-0 flex h-7 cursor-pointer items-center overflow-hidden rounded text-left transition hover:brightness-125 ${
+                    selected === e.id ? "ring-2 ring-white/60" : ""
+                  }`}
                   style={{ left: `${left}%`, width: `${width}%`, background: `${e.color}33`, border: `1px solid ${e.color}` }}
-                  title={`${e.name} · ${e.done_count}/${e.task_count} done`}
+                  title={`${e.name} · ${e.done_count}/${e.task_count} done — click for its tasks`}
                 >
                   {/* progress fill */}
                   <div
@@ -208,7 +247,7 @@ function Timeline({ epics, milestones }: { epics: Epic[]; milestones: Milestone[
                       {e.done_count}/{e.task_count}
                     </span>
                   </span>
-                </div>
+                </button>
               </div>
             );
           })}
@@ -224,6 +263,109 @@ function Timeline({ epics, milestones }: { epics: Epic[]; milestones: Milestone[
   );
 }
 
+// ─── Epic focus: an epic's tasks, grouped by status ─────────────────────────
+
+const GROUPS: { status: EpicTask["status"]; label: string; dot: string }[] = [
+  { status: "todo", label: "to do", dot: "#a3a3a3" },
+  { status: "in_progress", label: "in progress", dot: "#22d3ee" },
+  { status: "review", label: "in review", dot: "#f59e0b" },
+  { status: "done", label: "done", dot: "#10b981" },
+];
+
+function EpicFocus({ epic, onClose }: { epic: Epic; onClose: () => void }) {
+  const q = useQuery({
+    queryKey: ["epic-tasks", epic.id],
+    queryFn: () => listEpicTasks(epic.id),
+  });
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+  }, []);
+  const tasks = q.data ?? [];
+  const pct = epic.task_count > 0 ? Math.round((epic.done_count / epic.task_count) * 100) : 0;
+
+  return (
+    <section
+      id="epic-focus"
+      ref={ref}
+      tabIndex={-1}
+      aria-label={`${epic.name} tasks`}
+      className="mt-6 scroll-mt-4 rounded-lg border bg-ink-subtle p-4 outline-none"
+      style={{ borderColor: `${epic.color}80` }}
+    >
+      <header className="mb-3 flex flex-wrap items-center gap-3">
+        <span className="h-3 w-3 rounded-sm" style={{ background: epic.color }} aria-hidden />
+        <h2 className="text-lg font-semibold">{epic.name}</h2>
+        <span className="mono text-xs text-chrome-dim">
+          {epic.done_count}/{epic.task_count} done{epic.task_count > 0 ? ` · ${pct}%` : ""}
+          {epic.start_date && epic.end_date ? ` · ${epic.start_date} → ${epic.end_date}` : ""}
+        </span>
+        <div className="h-1.5 min-w-[6rem] flex-1 overflow-hidden rounded bg-white/10" aria-hidden>
+          <div className="h-full" style={{ width: `${pct}%`, background: epic.color }} />
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="text-chrome-dim hover:text-chrome"
+        >
+          <X size={16} />
+        </button>
+      </header>
+
+      {q.isLoading ? (
+        <div className="mono text-xs text-chrome-dim">git fetch --rebase your-stuff…</div>
+      ) : tasks.length === 0 ? (
+        <div className="mono text-xs text-chrome-dim">
+          No tasks in this epic yet — pick it in a task&apos;s details to add one.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {GROUPS.map((g) => {
+            const items = tasks.filter((t) => t.status === g.status);
+            return (
+              <div key={g.status} data-epic-group={g.status} className="min-w-0 space-y-1.5">
+                <div className="mono flex items-center gap-2 text-[10px] uppercase tracking-widest text-chrome-dim">
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: g.dot }} aria-hidden />
+                  {g.label} ({items.length})
+                </div>
+                <ul className="space-y-1">
+                  {items.map((t) => (
+                    <li
+                      key={t.key}
+                      className="rounded border border-white/10 bg-ink px-2 py-1.5 text-xs"
+                    >
+                      <div className="mono flex items-center gap-2 text-[10px] text-chrome-dim">
+                        <Link href={`/tasks/${t.key}`} className="text-accent hover:underline">
+                          {t.key}
+                        </Link>
+                        {t.parent_key && <span title="a subtask">↳ {t.parent_key}</span>}
+                        <span className="ml-auto">
+                          {t.assignee_handle ? `@${t.assignee_handle}` : "unassigned"}
+                          {t.story_points != null ? ` · ${t.story_points} pts` : ""}
+                        </span>
+                      </div>
+                      <div
+                        className={`mt-0.5 line-clamp-2 ${g.status === "done" ? "text-chrome-dim line-through decoration-white/20" : "text-chrome"}`}
+                        title={t.title}
+                      >
+                        {t.title}
+                      </div>
+                    </li>
+                  ))}
+                  {items.length === 0 && (
+                    <li className="mono text-[10px] text-chrome-dim/60">—</li>
+                  )}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ─── Epics management ────────────────────────────────────────────────────────
 
 function EpicsManager({
@@ -231,11 +373,15 @@ function EpicsManager({
   epics,
   canManage,
   onChange,
+  selected,
+  onSelect,
 }: {
   projectKey: string;
   epics: Epic[];
   canManage: boolean;
   onChange: () => void;
+  selected: string | null;
+  onSelect: (id: string) => void;
 }) {
   const [name, setName] = useState("");
   const [color, setColor] = useState(SWATCHES[0]!);
@@ -267,7 +413,15 @@ function EpicsManager({
       <h2 className="mono text-xs uppercase tracking-widest text-chrome-dim">epics</h2>
       <ul className="space-y-1">
         {epics.map((e) => (
-          <EpicRow key={e.id} epic={e} canManage={canManage} onChange={onChange} onDelete={() => remove.mutate(e.id)} />
+          <EpicRow
+            key={e.id}
+            epic={e}
+            canManage={canManage}
+            onChange={onChange}
+            onDelete={() => remove.mutate(e.id)}
+            open={selected === e.id}
+            onOpen={() => onSelect(e.id)}
+          />
         ))}
         {epics.length === 0 && <li className="mono text-[11px] text-chrome-dim">no epics yet</li>}
       </ul>
@@ -326,11 +480,15 @@ function EpicRow({
   canManage,
   onChange,
   onDelete,
+  open,
+  onOpen,
 }: {
   epic: Epic;
   canManage: boolean;
   onChange: () => void;
   onDelete: () => void;
+  open: boolean;
+  onOpen: () => void;
 }) {
   const [picking, setPicking] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -348,7 +506,21 @@ function EpicRow({
     else setDraftName(epic.name);
   }
   return (
-    <li className="flex flex-wrap items-center gap-2 rounded border border-white/10 px-2 py-1.5">
+    <li
+      className={`flex flex-wrap items-center gap-2 rounded border px-2 py-1.5 ${
+        open ? "border-white/30 bg-white/5" : "border-white/10"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-expanded={open}
+        aria-label={`show tasks in ${epic.name}`}
+        title="show its tasks"
+        className="shrink-0 text-chrome-dim hover:text-chrome"
+      >
+        <ChevronRight size={12} className={`transition ${open ? "rotate-90" : ""}`} />
+      </button>
       {canManage ? (
         <button
           type="button"

@@ -47,6 +47,8 @@ import { useCreateTask, useMoveTask, useTasks, type Task } from "@/lib/tasks";
 import { listSprints, type Sprint } from "@/lib/sprints";
 import { type BoardView, type GroupBy } from "@/lib/boardViews";
 import { TaskCard } from "./TaskCard";
+import { TaskTitleInput } from "./TaskTitleInput";
+import { splitCommitMessage } from "@/lib/commitMessage";
 import { BoardFilters, fromFilterDSL, toFilterDSL, type Chip } from "./BoardFilters";
 import { BoardViewBar } from "./BoardViewBar";
 import { ListSearch, matchesTask } from "./ListSearch";
@@ -745,29 +747,36 @@ function AddCardButton({
       </button>
     );
   }
+  async function submit() {
+    // First line → title, the rest → description, like a commit message.
+    const { title: t, description } = splitCommitMessage(title);
+    if (!t) return;
+    await create.mutateAsync({
+      title: t,
+      ...(description ? { description } : {}),
+      column_id: columnId,
+      ...defaults,
+    });
+    setTitle("");
+  }
   return (
     <form
-      onSubmit={async (e) => {
+      onSubmit={(e) => {
         e.preventDefault();
-        if (!title.trim()) return;
-        await create.mutateAsync({ title, column_id: columnId, ...defaults });
-        setTitle("");
+        void submit();
       }}
       className="space-y-1 border-t border-white/10 p-2"
     >
-      <input
+      <TaskTitleInput
         autoFocus
         value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={(e) => {
-          // Esc dismisses the inline add-card input (QA F9).
-          if (e.key === "Escape") {
-            e.preventDefault();
-            close();
-          }
-        }}
+        onChange={setTitle}
+        onSubmit={() => void submit()}
+        // Esc dismisses the inline add-card input (QA F9).
+        onEscape={close}
         placeholder="card title"
-        className="w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
+        aria-label="card title"
+        className="block w-full rounded border border-white/10 bg-ink px-2 py-1 text-sm text-chrome focus:border-accent focus:outline-none"
       />
       <div className="flex items-center justify-between">
         <button
