@@ -16,6 +16,7 @@ import { LoadError } from "@/components/LoadError";
 import { StatTile } from "@/components/StatTile";
 import { VelocityChart } from "@/components/VelocityChart";
 import { BurndownChart } from "@/components/BurndownChart";
+import { TeamPanel } from "@/components/TeamPanel";
 import { BurnWidget } from "@/components/BurnWidget";
 import { WeekNav, sundayOfISO, thisMondayISO } from "@/components/WeekNav";
 import { getProjectDashboard } from "@/lib/dashboards";
@@ -138,7 +139,10 @@ export default function ProjectDashboardPage() {
       </section>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
-        <div className="space-y-6">
+        {/* min-w-0: a grid item's minimum is its content, so a wide table
+            (a month of clockwork columns) would otherwise widen the column
+            past the page instead of scrolling inside its own box. */}
+        <div className="min-w-0 space-y-6">
           <section>
             <h2 className="mono mb-2 flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
               <TrendingUp size={11} /> velocity history
@@ -154,6 +158,9 @@ export default function ProjectDashboardPage() {
               <BurndownChart points={burnQ.data.items} />
             </section>
           )}
+
+          {/* Everyone's hours by day (clockwork) and per-person sprint KPIs. */}
+          <TeamPanel projectKey={projectKey} />
 
           <section>
             <h2 className="mono mb-2 flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
