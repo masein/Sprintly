@@ -2644,3 +2644,105 @@ async fn a_completed_sprint_remembers_its_tasks_even_after_carry_over(pool: PgPo
     .await;
     assert_eq!(live["snapshot"], false);
 }
+
+/// QA report 6: "my open work in the running sprint", the way Jira people
+/// write it — `sprint is active` used to be a parse error at character 59.
+#[sqlx::test(migrations = "./migrations")]
+async fn jql_finds_my_open_work_in_the_active_sprint(pool: PgPool) {
+    let app = app(pool);
+    let (token, me) = register(&app, "sprinter").await;
+    let my_id = me["id"].as_str().unwrap().to_string();
+    make_project(&app, &token, "SIA").await;
+    let cols = columns(&app, &token, "SIA").await;
+    let done_col = cols.iter().find(|(_, c)| c == "done").unwrap().0.clone();
+
+    let running = make_sprint(&app, &token, "SIA", "Running").await;
+    let later = make_sprint(&app, &token, "SIA", "Later").await;
+
+    let mine_open = make_task_http(&app, &token, "SIA", "mine, open, running sprint").await;
+    let mine_done = make_task_http(&app, &token, "SIA", "mine, done, running sprint").await;
+    let mine_later = make_task_http(&app, &token, "SIA", "mine, open, future sprint").await;
+    let mine_backlog = make_task_http(&app, &token, "SIA", "mine, open, no sprint").await;
+    let nobodys = make_task_http(&app, &token, "SIA", "unassigned, running sprint").await;
+
+    for key in [&mine_open, &mine_done, &mine_later, &mine_backlog] {
+        let (s, b) = send(
+            &app,
+            "PATCH",
+            &format!("/api/v1/tasks/{key}"),
+            Some(&token),
+            Some(json!({ "assignee_id": my_id })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b:?}");
+    }
+    for (sprint, key) in [
+        (&running, &mine_open),
+        (&running, &mine_done),
+        (&running, &nobodys),
+        (&later, &mine_later),
+    ] {
+        let (s, _) = send(
+            &app,
+            "POST",
+            &format!("/api/v1/sprints/{sprint}/tasks/{key}"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+    }
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{mine_done}/move"),
+        Some(&token),
+        Some(json!({ "column_id": done_col })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, b) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{running}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b:?}");
+
+    let (status, body) = jql(
+        &app,
+        &token,
+        "assignee = currentUser() AND status != done AND sprint is active ORDER BY priority ASC",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(keys(&body), vec![mine_open.clone()]);
+
+    // Jira's spelling of the same thing.
+    let (_, body) = jql(
+        &app,
+        &token,
+        "assignee = currentUser() AND sprint in openSprints()",
+    )
+    .await;
+    let mut got = keys(&body);
+    got.sort();
+    let mut want = vec![mine_open.clone(), mine_done.clone(), mine_later.clone()];
+    want.sort();
+    assert_eq!(got, want, "openSprints() is active + not yet started");
+
+    // "Not in the running sprint" includes the backlog.
+    let (_, body) = jql(
+        &app,
+        &token,
+        "assignee = currentUser() AND sprint is not active",
+    )
+    .await;
+    let mut got = keys(&body);
+    got.sort();
+    let mut want = vec![mine_later, mine_backlog];
+    want.sort();
+    assert_eq!(got, want);
+}
