@@ -349,7 +349,23 @@ async fn bulk(
         BulkOp::Label { labels } => {
             templates::bulk_labels(&state.db, ctx.id, &req.task_keys, &labels).await?
         }
-        BulkOp::Delete => templates::bulk_delete(&state.db, ctx.id, &req.task_keys).await?,
+        BulkOp::Delete => {
+            let gone = templates::bulk_delete(&state.db, ctx.id, &req.task_keys).await?;
+            // Same event a single delete sends, so every open board drops the
+            // cards — not just the tab that pressed the button.
+            for (task_id, key) in &gone {
+                crate::infra::events::publish(
+                    &state.redis,
+                    &crate::infra::events::Event::TaskDeleted {
+                        project_id: ctx.id,
+                        task_id: *task_id,
+                        key: key.clone(),
+                    },
+                )
+                .await;
+            }
+            gone.len() as u64
+        }
     };
 
     Ok(Json(serde_json::json!({ "affected": affected })))

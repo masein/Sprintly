@@ -62,7 +62,17 @@ test.describe("attachment upload via /s3 proxy", () => {
       const href = await page
         .getByRole("link", { name: "Download notes.txt" })
         .getAttribute("href");
-      expect(href, "attachment row should link to a presigned URL").toBeTruthy();
+      // QA report 6: a stable same-origin API link, not a presigned URL baked
+      // into the page (those expire after ten minutes, and came out as
+      // http:// on an https page behind a TLS-terminating CDN).
+      expect(href, "attachment row should link to the download endpoint").toMatch(
+        /^\/api\/v1\/attachments\/[0-9a-f-]+\/download$/,
+      );
+      // It redirects to a freshly signed, relative /s3 URL…
+      const hop = await page.request.get(href!, { maxRedirects: 0 });
+      expect(hop.status()).toBe(302);
+      expect(hop.headers()["location"]).toMatch(/^\/s3\/sprintly\/tasks\//);
+      // …which serves the bytes.
       const res = await page.request.get(href!);
       expect(res.status(), "presigned GET must not 403").toBe(200);
       expect(await res.text()).toContain("survive a path proxy");
