@@ -558,6 +558,18 @@ async fn list_activity(
 
 // ─── handlers: watchers ─────────────────────────────────────────────────────
 
+/// Adding or removing *someone else* as a watcher. The team does this — leads
+/// and contributors — not just leads: telling a teammate "keep an eye on this"
+/// is everyday collaboration, not project administration (QA report 6). Read-
+/// only `watcher`-role members can still watch and unwatch themselves.
+fn may_manage_watchers(user: &CurrentUser, ctx: &project_ctx::ProjectContext) -> bool {
+    use crate::domain::permissions::ProjectRole;
+    can(&user.as_actor(), Action::EditProject, ctx.as_resource())
+        || (!ctx.archived
+            && ctx.actor_role == Some(ProjectRole::Contributor)
+            && user.role != crate::domain::permissions::Role::Viewer)
+}
+
 async fn list_watchers(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -612,10 +624,29 @@ async fn add_watcher(
     // Self-add is always allowed (if you can view, you can watch yourself).
     let actor_can_view = can(&user.as_actor(), Action::ViewBoard, ctx.as_resource());
     let adding_self = req.user_id == user.id;
-    if !actor_can_view
-        || (!adding_self && !can(&user.as_actor(), Action::EditProject, ctx.as_resource()))
-    {
+    if !actor_can_view || (!adding_self && !may_manage_watchers(&user, &ctx)) {
         return Err(AppError::Forbidden);
+    }
+    // Only people on the project can watch it: a watcher who can't open the
+    // task would get notifications about work they're not allowed to see.
+    // (Also turns an unknown user id into a clear 400 instead of an FK 500.)
+    if !adding_self {
+        let member: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM project_members pm
+                   JOIN users u ON u.id = pm.user_id
+                   WHERE pm.project_id = $1 AND pm.user_id = $2 AND u.deleted_at IS NULL
+               )"#,
+        )
+        .bind(task.project_id)
+        .bind(req.user_id)
+        .fetch_one(&state.db)
+        .await?;
+        if !member {
+            return Err(AppError::BadRequest(
+                "only members of this project can watch its tasks".into(),
+            ));
+        }
     }
     sqlx::query(
         r#"
@@ -638,7 +669,7 @@ async fn remove_watcher(
     let task = resolve_task(&state.db, &task_key).await?;
     let ctx = project_ctx::load_by_id(&state.db, task.project_id, user.id).await?;
     let removing_self = target == user.id;
-    if !removing_self && !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !removing_self && !may_manage_watchers(&user, &ctx) {
         return Err(AppError::Forbidden);
     }
     sqlx::query("DELETE FROM task_watchers WHERE task_id = $1 AND user_id = $2")
