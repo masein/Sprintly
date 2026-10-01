@@ -3158,3 +3158,185 @@ async fn the_team_manages_who_watches_a_task(pool: PgPool) {
     assert_eq!(s, StatusCode::NO_CONTENT);
     assert_eq!(watchers().await, vec!["wlead"]);
 }
+
+/// QA report 6: a safe way to delete a project. Lead only, the key must be
+/// typed out, everything in it disappears at once — and an admin can bring
+/// it back exactly as it was (without resurrecting tasks deleted earlier).
+#[sqlx::test(migrations = "./migrations")]
+async fn deleting_a_project_is_confirmed_hidden_and_restorable(pool: PgPool) {
+    let app = app(pool);
+    // First account is the bootstrap admin.
+    let (admin, _) = register(&app, "padmin").await;
+    let (lead, _) = register(&app, "plead").await;
+    let (mate, mate_user) = register(&app, "pmate").await;
+    make_project(&app, &lead, "DEL").await;
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/DEL/members",
+        Some(&lead),
+        Some(json!({ "user_id": mate_user["id"], "role": "contributor" })),
+    )
+    .await;
+    assert!(s.is_success());
+    let keep = make_task_http(&app, &lead, "DEL", "comes back").await;
+    let gone = make_task_http(&app, &lead, "DEL", "was already deleted").await;
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tasks/{gone}"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert!(s.is_success());
+
+    let del = |token: String, confirm: &'static str| {
+        let app = app.clone();
+        async move {
+            send(
+                &app,
+                "DELETE",
+                "/api/v1/projects/DEL",
+                Some(&token),
+                Some(json!({ "confirm": confirm })),
+            )
+            .await
+        }
+    };
+
+    // A contributor can't, whatever they type.
+    assert_eq!(del(mate.clone(), "DEL").await.0, StatusCode::FORBIDDEN);
+    // The lead has to type the key exactly.
+    let (s, b) = del(lead.clone(), "del").await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(
+        b["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("DEL"),
+        "{b:?}"
+    );
+    assert_eq!(del(lead.clone(), "").await.0, StatusCode::BAD_REQUEST);
+    // And then it's gone — the project, its tasks, from every angle.
+    assert_eq!(del(lead.clone(), "DEL").await.0, StatusCode::NO_CONTENT);
+    let (s, _) = send(&app, "GET", "/api/v1/projects/DEL", Some(&lead), None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (_, list) = send(&app, "GET", "/api/v1/projects", Some(&lead), None).await;
+    assert!(list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|p| p["key"] != "DEL"));
+    let (s, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{keep}"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    // Deleting twice is a 404, not a second audit row.
+    assert_eq!(del(lead.clone(), "DEL").await.0, StatusCode::NOT_FOUND);
+
+    // Only admins see the list, and it says what would come back.
+    let (s, _) = send(
+        &app,
+        "GET",
+        "/api/v1/admin/deleted-projects",
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, deleted) = send(
+        &app,
+        "GET",
+        "/api/v1/admin/deleted-projects",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{deleted:?}");
+    let row = deleted["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["key"] == "DEL")
+        .cloned()
+        .expect("listed");
+    assert_eq!(
+        row["task_count"], 1,
+        "the earlier-deleted task isn't counted"
+    );
+    assert_eq!(row["key_taken"], false);
+    let id = row["id"].as_str().unwrap().to_string();
+
+    // The key is free for a new project meanwhile; restoring then conflicts.
+    make_project(&app, &lead, "DEL").await;
+    let (s, _) = send(
+        &app,
+        "GET",
+        "/api/v1/admin/deleted-projects",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/deleted-projects/{id}/restore"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    // Free the key again (delete the newcomer), then restore the original.
+    assert_eq!(del(lead.clone(), "DEL").await.0, StatusCode::NO_CONTENT);
+    let (s, b) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/deleted-projects/{id}/restore"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b:?}");
+    assert_eq!(b["tasks"], 1);
+    let (s, t) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{keep}"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{t:?}");
+    assert_eq!(t["title"], "comes back");
+    let (s, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{gone}"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::NOT_FOUND,
+        "deleted before the project, stays deleted"
+    );
+
+    // Both ends are in the audit log.
+    let (_, audit) = send(&app, "GET", "/api/v1/admin/audit", Some(&admin), None).await;
+    let actions: Vec<&str> = audit["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|a| a["action"].as_str())
+        .collect();
+    assert!(actions.contains(&"project.deleted"), "{actions:?}");
+    assert!(actions.contains(&"project.restored"), "{actions:?}");
+}
