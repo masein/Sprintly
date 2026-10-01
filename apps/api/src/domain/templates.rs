@@ -423,16 +423,24 @@ pub async fn bulk_labels(
     Ok(r.rows_affected())
 }
 
-pub async fn bulk_delete(db: &PgPool, project_id: Uuid, keys: &[String]) -> AppResult<u64> {
-    let r = sqlx::query(
+/// Soft-delete the selected tasks. Returns `(id, key)` for each one actually
+/// deleted, so the caller can tell open boards — a bulk delete that only the
+/// deleting tab noticed left every other screen showing ghosts.
+pub async fn bulk_delete(
+    db: &PgPool,
+    project_id: Uuid,
+    keys: &[String],
+) -> AppResult<Vec<(Uuid, String)>> {
+    let rows: Vec<(Uuid, String)> = sqlx::query_as(
         r#"UPDATE tasks SET deleted_at = now()
-           WHERE project_id = $1 AND key = ANY($2) AND deleted_at IS NULL"#,
+           WHERE project_id = $1 AND key = ANY($2) AND deleted_at IS NULL
+           RETURNING id, key"#,
     )
     .bind(project_id)
     .bind(keys)
-    .execute(db)
+    .fetch_all(db)
     .await?;
-    Ok(r.rows_affected())
+    Ok(rows)
 }
 
 /// Move selected tasks to a column (the route resolves `board_id` + `category`

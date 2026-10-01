@@ -19,6 +19,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Play, CheckCircle2, GripVertical, Plus, Trash2, X } from "lucide-react";
 import { SubtaskBadge } from "@/components/SubtaskBadge";
+import { CopyTaskLink } from "@/components/CopyTaskLink";
 import { TaskTitleInput } from "@/components/TaskTitleInput";
 import { splitCommitMessage } from "@/lib/commitMessage";
 import { AppShell } from "@/components/AppShell";
@@ -682,6 +683,7 @@ function SprintTaskRow({
       >
         {task.key}
       </Link>
+      <CopyTaskLink taskKey={task.key} size={11} className="-ml-2" />
       <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={task.title}>
         {task.title}
       </span>
