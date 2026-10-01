@@ -33,6 +33,7 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::api_tokens::router())
         .merge(routes::admin::router())
         .merge(routes::projects::router())
+        .merge(routes::project_documents::router())
         .merge(routes::public_status::router())
         .merge(routes::boards::router())
         .merge(routes::board_views::router())

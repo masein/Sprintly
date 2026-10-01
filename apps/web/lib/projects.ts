@@ -83,6 +83,66 @@ export const unarchiveProject = (key: string) =>
     method: "POST",
   });
 
+// ── project documents ───────────────────────────────────────────────────────
+
+export type ProjectDocument = {
+  id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number | null;
+  status: "pending" | "ready" | "failed";
+  uploader_handle: string | null;
+  created_at: string;
+  /** Stable same-origin link; re-signs at click time. null until uploaded. */
+  download_url: string | null;
+};
+
+export const listProjectDocuments = (key: string) =>
+  api<{ items: ProjectDocument[] }>(`/projects/${encodeURIComponent(key)}/documents`).then(
+    (r) => r.items,
+  );
+
+export const deleteProjectDocument = (id: string) =>
+  api<void>(`/project-documents/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+/** Same two-phase presigned upload as task attachments. */
+export async function uploadProjectDocument(
+  key: string,
+  file: File,
+  onProgress?: (fraction: number) => void,
+): Promise<void> {
+  const init = await api<{ id: string; upload_url: string }>(
+    `/projects/${encodeURIComponent(key)}/documents`,
+    {
+      method: "POST",
+      body: { filename: file.name, mime_type: file.type || "application/octet-stream" },
+    },
+  );
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", init.upload_url);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+      };
+      xhr.onload = () =>
+        xhr.status >= 200 && xhr.status < 300
+          ? resolve()
+          : reject(new Error(`storage refused the upload (${xhr.status})`));
+      xhr.onerror = () => reject(new Error("the upload didn't reach storage"));
+      if (file.type) xhr.setRequestHeader("Content-Type", file.type);
+      xhr.send(file);
+    });
+  } catch (e) {
+    await deleteProjectDocument(init.id).catch(() => {});
+    throw e;
+  }
+  await api<void>(`/project-documents/${encodeURIComponent(init.id)}/complete`, {
+    method: "POST",
+    body: { size_bytes: file.size },
+  });
+}
+
 /** Soft-delete. `confirm` must be the project key, typed by a human. */
 export const deleteProject = (key: string, confirm: string) =>
   api<void>(`/projects/${encodeURIComponent(key)}`, {

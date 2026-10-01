@@ -1054,7 +1054,7 @@ fn request_host(headers: &HeaderMap) -> Option<String> {
 
 /// Presigner for a browser-facing URL: signs for the host the caller actually
 /// used when `MINIO_PUBLIC_ENDPOINT` is a path, verbatim otherwise.
-fn presigner_for<'a>(state: &'a AppState, headers: &HeaderMap) -> Presigner<'a> {
+pub(crate) fn presigner_for<'a>(state: &'a AppState, headers: &HeaderMap) -> Presigner<'a> {
     let host = request_host(headers);
     Presigner::for_request(&state.cfg.minio, host.as_deref(), &state.cfg.public_url)
 }
