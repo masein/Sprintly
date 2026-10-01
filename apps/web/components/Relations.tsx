@@ -7,10 +7,28 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { Plus, Trash2, ListTree, Link as LinkIcon, X } from "lucide-react";
+import { GripVertical, Plus, Trash2, ListTree, Link as LinkIcon, X } from "lucide-react";
 import {
-  addLink, listLinks, listSubtasks, removeLink, type LinkKind,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  addLink, listLinks, listSubtasks, removeLink, reorderSubtasks, type LinkKind, type Subtask,
 } from "@/lib/relations";
+import { showToast } from "@/lib/toast";
 import { createTask, getTask } from "@/lib/tasks";
 import { search } from "@/lib/search";
 
@@ -64,30 +82,60 @@ export function SubtasksPanel({
     },
   });
 
+  // Drag-to-reorder (QA report 6), same grip as the sprint page's task list.
+  // The new order shows at once; the server stores it, and a failed save
+  // puts the old order back rather than leaving a lie on screen.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const reorder = useMutation({
+    mutationFn: (keys: string[]) => reorderSubtasks(parentTaskKey, keys),
+    onMutate: (keys) => {
+      const before = qc.getQueryData<Subtask[]>(["subtasks", parentTaskKey]);
+      if (before) {
+        const byKey = new Map(before.map((s) => [s.key, s]));
+        qc.setQueryData(
+          ["subtasks", parentTaskKey],
+          keys.map((k) => byKey.get(k)!).filter(Boolean),
+        );
+      }
+      return { before };
+    },
+    onError: (_e, _keys, ctx) => {
+      if (ctx?.before) qc.setQueryData(["subtasks", parentTaskKey], ctx.before);
+      showToast("Couldn't save that order — the list changed. It's been refreshed.");
+    },
+  });
+  function onDragEnd(e: DragEndEvent) {
+    const list = subs.data ?? [];
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const from = list.findIndex((s) => s.key === active.id);
+    const to = list.findIndex((s) => s.key === over.id);
+    if (from < 0 || to < 0) return;
+    reorder.mutate(arrayMove(list, from, to).map((s) => s.key));
+  }
+  const list = subs.data ?? [];
+  const sortable = canManage && list.length > 1;
+
   return (
     <section className="space-y-2">
       <h2 className="mono flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
         <ListTree size={11} /> subtasks ({subs.data?.length ?? 0})
       </h2>
-      <ul className="space-y-1">
-        {(subs.data ?? []).map((s) => (
-          <li key={s.key} className="mono flex items-center gap-2 text-xs">
-            <span className="text-chrome-dim">{statusGlyph(s.status)}</span>
-            <Link
-              href={`/tasks/${s.key}`}
-              className="text-accent hover:underline"
-            >
-              {s.key}
-            </Link>
-            <span className="truncate text-chrome" title={s.title}>
-              {s.title}
-            </span>
-          </li>
-        ))}
-        {subs.data?.length === 0 && !adding && (
-          <li className="mono text-[11px] text-chrome-dim">no subtasks</li>
-        )}
-      </ul>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={list.map((s) => s.key)} strategy={verticalListSortingStrategy}>
+          <ul className="space-y-1" data-subtask-list>
+            {list.map((s) => (
+              <SubtaskRow key={s.key} sub={s} sortable={sortable} />
+            ))}
+            {subs.data?.length === 0 && !adding && (
+              <li className="mono text-[11px] text-chrome-dim">no subtasks</li>
+            )}
+          </ul>
+        </SortableContext>
+      </DndContext>
       {canManage && (adding ? (
         <form
           onSubmit={(e) => {
@@ -129,6 +177,48 @@ export function SubtasksPanel({
         </button>
       ))}
     </section>
+  );
+}
+
+function SubtaskRow({ sub: s, sortable }: { sub: Subtask; sortable: boolean }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: s.key,
+    disabled: !sortable,
+  });
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      data-subtask-row={s.key}
+      className={`mono flex items-center gap-2 rounded border border-white/10 bg-ink-subtle px-2 py-1.5 text-xs ${
+        isDragging ? "relative z-10 opacity-70" : ""
+      }`}
+    >
+      {sortable && (
+        <button
+          type="button"
+          {...attributes}
+          {...(listeners as React.DOMAttributes<HTMLButtonElement>)}
+          aria-label={`reorder ${s.key}`}
+          title="drag to reorder"
+          className="-ml-0.5 cursor-grab touch-none text-chrome-dim hover:text-chrome active:cursor-grabbing"
+        >
+          <GripVertical size={12} />
+        </button>
+      )}
+      <span className="w-3 text-center text-chrome-dim" title={s.status}>
+        {statusGlyph(s.status)}
+      </span>
+      <span className="w-[5.5rem] shrink-0 truncate text-[10px] uppercase tracking-widest text-chrome-dim">
+        {s.status.replace("_", " ")}
+      </span>
+      <Link href={`/tasks/${s.key}`} className="shrink-0 text-accent hover:underline">
+        {s.key}
+      </Link>
+      <span className="truncate text-chrome" title={s.title}>
+        {s.title}
+      </span>
+    </li>
   );
 }
 

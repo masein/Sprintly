@@ -2,16 +2,17 @@
 
 import { copyText } from "@/lib/clipboard";
 
-// /admin — one page with five tabs. Mainly bookkeeping: users, audit, health,
-// backups, webhooks-scaffolding.
+// /admin — one page of tabs. Mainly bookkeeping: users, invites, deleted
+// projects, audit, health, backups, webhooks-scaffolding.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Activity, AlertTriangle, Ban, Check, Cog, Copy, Database, Download, Mail,
+  Activity, AlertTriangle, Ban, Check, Cog, Copy, Database, Download, FolderX, Mail,
   Pencil, RotateCcw, Server, Shield, Users, Webhook,
 } from "lucide-react";
+import { listDeletedProjects, restoreProject } from "@/lib/projects";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { StatTile } from "@/components/StatTile";
@@ -35,7 +36,7 @@ import {
 } from "@/lib/admin";
 import type { ApiError } from "@/lib/api";
 
-type Tab = "users" | "invites" | "audit" | "health" | "backups" | "webhooks";
+type Tab = "users" | "invites" | "projects" | "audit" | "health" | "backups" | "webhooks";
 
 export default function AdminPage() {
   const router = useRouter();
@@ -54,6 +55,7 @@ export default function AdminPage() {
       <nav className="mb-6 flex gap-1 border-b border-white/10">
         <TabButton current={tab} self="users"    onClick={() => setTab("users")}    icon={Users}>users</TabButton>
         <TabButton current={tab} self="invites"  onClick={() => setTab("invites")}  icon={Mail}>invites</TabButton>
+        <TabButton current={tab} self="projects" onClick={() => setTab("projects")} icon={FolderX}>projects</TabButton>
         <TabButton current={tab} self="audit"    onClick={() => setTab("audit")}    icon={Shield}>audit</TabButton>
         <TabButton current={tab} self="health"   onClick={() => setTab("health")}   icon={Activity}>health</TabButton>
         <TabButton current={tab} self="backups"  onClick={() => setTab("backups")}  icon={Database}>backups</TabButton>
@@ -62,6 +64,7 @@ export default function AdminPage() {
 
       {tab === "users" && <UsersTab onAuthExpired={() => router.push("/login")} />}
       {tab === "invites" && <InvitesTab />}
+      {tab === "projects" && <DeletedProjectsTab />}
       {tab === "audit" && <AuditTab />}
       {tab === "health" && <HealthTab />}
       {tab === "backups" && <BackupsTab />}
@@ -624,6 +627,69 @@ function HealthCard({
 }
 
 // ─── Backups ────────────────────────────────────────────────────────────────
+
+// Deleted projects, newest first, with a way back. Deletion is soft and
+// stamps the project and its tasks with one timestamp, so restore brings back
+// exactly what went — not tasks someone had deleted before.
+function DeletedProjectsTab() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["admin-deleted-projects"], queryFn: listDeletedProjects });
+  const [note, setNote] = useState<string | null>(null);
+  const restore = useMutation({
+    mutationFn: (id: string) => restoreProject(id),
+    onSuccess: (r) => {
+      setNote(`Restored ${r.key} with ${r.tasks} ${r.tasks === 1 ? "task" : "tasks"}.`);
+      void qc.invalidateQueries({ queryKey: ["admin-deleted-projects"] });
+    },
+    onError: (e) => setNote((e as unknown as ApiError).message ?? "couldn't restore it"),
+  });
+  const items = q.data ?? [];
+  return (
+    <section className="space-y-3" aria-label="deleted projects">
+      <p className="mono text-xs text-chrome-dim">
+        Projects a lead deleted. Restoring brings back the project, its members and every task
+        that went with it.
+      </p>
+      {note && <div className="mono text-xs text-chrome">{note}</div>}
+      {q.isLoading ? (
+        <div className="mono text-xs text-chrome-dim">git fetch --rebase your-stuff…</div>
+      ) : items.length === 0 ? (
+        <div className="mono rounded border border-dashed border-white/10 p-6 text-center text-xs text-chrome-dim">
+          Nothing deleted. Everyone&apos;s being careful.
+        </div>
+      ) : (
+        <ul className="divide-y divide-white/5 rounded border border-white/10">
+          {items.map((p) => (
+            <li key={p.id} className="mono flex flex-wrap items-center gap-3 px-3 py-2 text-xs">
+              <span className="text-chrome">{p.key}</span>
+              <span className="text-chrome-dim">{p.name}</span>
+              <span className="text-chrome-dim">
+                · {p.task_count} {p.task_count === 1 ? "task" : "tasks"} · deleted{" "}
+                {new Date(p.deleted_at).toLocaleString()}
+              </span>
+              <span className="ml-auto flex items-center gap-2">
+                {p.key_taken && (
+                  <span className="text-amber-300" title="a live project uses this key now">
+                    key in use
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => restore.mutate(p.id)}
+                  disabled={restore.isPending || p.key_taken}
+                  aria-label={`restore ${p.key}`}
+                  className="flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-chrome-dim hover:border-white/20 hover:text-chrome disabled:opacity-40"
+                >
+                  <RotateCcw size={11} /> restore
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 function BackupsTab() {
   const qc = useQueryClient();

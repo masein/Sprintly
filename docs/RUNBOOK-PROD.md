@@ -179,10 +179,14 @@ Then edit the non-secret settings in `.env` by hand:
 
 - `REGISTRY_HOST` — confirm it's `docker.netixsystem.com`.
 - `SPRINTLY_PUBLIC_URL` — the URL users hit (used in emails and as a fallback).
-- `MINIO_PUBLIC_ENDPOINT=/s3` — the path form. Attachment links are then built
-  on whatever origin each request arrived on, so the same box works by IP and
-  by hostname. An absolute URL is still accepted but pins links to one host;
-  users who opened the app via the other saw uploads sit at "pending".
+- `MINIO_PUBLIC_ENDPOINT=/s3` — the path form. Upload links are then
+  *relative* (`/s3/…`) and signed for the host each request arrived with, so
+  they inherit the page's own scheme and host: the same box works by IP, by
+  hostname, and behind a TLS-terminating CDN or proxy (where an absolute
+  `http://` link on an `https://` page is blocked as mixed content). Downloads
+  go through `/api/v1/attachments/:id/download`, which checks access and
+  redirects to a fresh short-lived signature. An absolute URL is still
+  accepted but pins links to one host and one scheme — avoid it.
 - `SPRINTLY_HTTP_PORT` — published HTTP port (default `80`).
 - `SPRINTLY_OPEN_SIGNUP=true` for first boot (see §6), then flip to `false`.
 - If you changed `POSTGRES_USER`/`POSTGRES_DB`, update `DATABASE_URL` to match.
