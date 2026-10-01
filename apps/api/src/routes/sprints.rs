@@ -17,6 +17,7 @@
 //!   DELETE /sprints/:id/tasks/:task_key      — unassign
 //!   GET    /sprints/:id/tasks                — list tasks in sprint
 //!   GET    /sprints/:id/burndown             — series for the chart
+//!   GET    /sprints/:id/report?format=docx|pdf — the sprint as a document
 
 use axum::{
     extract::{Path, State},
@@ -56,6 +57,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/sprints/:id/tasks", get(list_tasks))
         .route("/sprints/:id/burndown", get(burndown))
+        .route("/sprints/:id/report", get(report))
 }
 
 // ─── DTOs ───────────────────────────────────────────────────────────────────
@@ -729,6 +731,78 @@ async fn list_tasks(
     Ok(Json(
         serde_json::json!({ "items": items, "snapshot": false }),
     ))
+}
+
+#[derive(Debug, Deserialize)]
+struct ReportQuery {
+    format: Option<String>,
+}
+
+/// The sprint as a Word or PDF document: every task across every status, with
+/// subtasks, descriptions, linked commits and attached files (QA report 6).
+/// Same writers as the project report; a completed sprint reports its
+/// snapshot.
+async fn report(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+    axum::extract::Query(q): axum::extract::Query<ReportQuery>,
+) -> AppResult<impl IntoResponse> {
+    use crate::domain::task_report;
+    use axum::http::{header, HeaderMap, HeaderValue};
+
+    let project_id = project_of_sprint(&state.db, id).await?;
+    let ctx = project_ctx::load_by_id(&state.db, project_id, user.id).await?;
+    if !can(&user.as_actor(), Action::ViewProject, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+    let data = task_report::sprint_report_data(&state.db, id).await?;
+    // "Sprint 61 — sprint report" → "CCTV-sprint-61-report"
+    let slug: String = data
+        .title
+        .split(" — ")
+        .next()
+        .unwrap_or("sprint")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let base = format!(
+        "{}-{}-report",
+        ctx.key,
+        if slug.is_empty() { "sprint" } else { &slug }
+    );
+
+    let (bytes, mime, ext) = match q.format.as_deref() {
+        Some("pdf") => (task_report::to_pdf(&data), "application/pdf", "pdf"),
+        Some("docx") | None => (
+            task_report::to_docx(&data)?,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "docx",
+        ),
+        Some(other) => {
+            return Err(AppError::BadRequest(format!(
+                "format must be docx or pdf, not `{other}`"
+            )))
+        }
+    };
+    let mut h = HeaderMap::new();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
+    h.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!("attachment; filename=\"{base}.{ext}\""))
+            .map_err(|_| AppError::BadRequest("unprintable sprint name".into()))?,
+    );
+    Ok((StatusCode::OK, h, bytes))
 }
 
 async fn burndown(

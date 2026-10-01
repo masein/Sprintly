@@ -17,7 +17,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { Play, CheckCircle2, GripVertical, Plus, Trash2, X } from "lucide-react";
+import { Play, CheckCircle2, FileDown, GripVertical, Plus, Trash2, X } from "lucide-react";
 import { SubtaskBadge } from "@/components/SubtaskBadge";
 import { CopyTaskLink } from "@/components/CopyTaskLink";
 import { TaskTitleInput } from "@/components/TaskTitleInput";
@@ -223,6 +223,26 @@ export default function SprintDetailPage() {
             <CheckCircle2 size={14} /> complete + open retro
           </button>
         )}
+        {/* The sprint as a document for people outside the tool: every task
+            across every status, with subtasks, descriptions, commits and
+            attached files (QA report 6). Plain links — the cookie session
+            authorises the download. */}
+        <span className="ml-auto flex items-center gap-1" data-sprint-report>
+          <span className="mono mr-1 flex items-center gap-1 text-[10px] uppercase tracking-widest text-chrome-dim">
+            <FileDown size={11} /> report
+          </span>
+          {(["docx", "pdf"] as const).map((fmt) => (
+            <a
+              key={fmt}
+              href={`/api/v1/sprints/${sprint.id}/report?format=${fmt}`}
+              download
+              aria-label={`download the sprint report as .${fmt}`}
+              className="mono rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              .{fmt}
+            </a>
+          ))}
+        </span>
       </div>
 
       {completing && (
