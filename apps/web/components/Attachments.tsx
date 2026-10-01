@@ -117,7 +117,9 @@ export function Attachments({ taskKey, canManage }: { taskKey: string; canManage
         </div>
       )}
 
-      <ul className="space-y-1.5">
+      {/* Two columns once there's room: the panel lives in the main column
+          now, and a full-width row per file wastes most of it. */}
+      <ul className="grid grid-cols-1 gap-1.5 md:grid-cols-2">
         {(q.data ?? []).map((a) => (
           <Row
             key={a.id}
@@ -146,6 +148,9 @@ function Row({
       <span className="truncate flex-1" title={a.filename}>{a.filename}</span>
       <span className="text-chrome-dim">{fmtSize(a.size_bytes)}</span>
       {a.download_url ? (
+        // A stable same-origin API link: access is checked when clicked, and
+        // it redirects to a freshly signed URL — so it works however long the
+        // page has been open, and on whatever address the app is served.
         <a
           href={a.download_url}
           target="_blank"
@@ -155,8 +160,12 @@ function Row({
         >
           <Download size={12} />
         </a>
+      ) : stale(a) ? (
+        <span className="text-amber-300" title="the upload never completed — remove it and try again">
+          didn&apos;t finish
+        </span>
       ) : (
-        <span className="text-chrome-dim">pending…</span>
+        <span className="text-chrome-dim">uploading…</span>
       )}
       {canDelete && (
         <button
@@ -170,6 +179,11 @@ function Row({
       )}
     </li>
   );
+}
+
+/** A pending row older than its upload URL's ten-minute life won't complete. */
+function stale(a: Attachment): boolean {
+  return a.status !== "ready" && Date.now() - Date.parse(a.created_at) > 11 * 60_000;
 }
 
 function fmtSize(b: number | null): string {
