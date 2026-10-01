@@ -2644,3 +2644,197 @@ async fn a_completed_sprint_remembers_its_tasks_even_after_carry_over(pool: PgPo
     .await;
     assert_eq!(live["snapshot"], false);
 }
+
+/// KPI request + QA report 6: sprint progress, scope change (work added after
+/// the start ÷ the scope it started with), and a burn series that isn't empty
+/// — fed by the scope history the `sprint_scope_events` trigger keeps.
+#[sqlx::test(migrations = "./migrations")]
+async fn sprint_stats_track_progress_and_scope_change(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "kpi").await;
+    make_project(&app, &token, "KPI").await;
+    let cols = columns(&app, &token, "KPI").await;
+    let done_col = cols.iter().find(|(_, c)| c == "done").unwrap().0.clone();
+    let now = chrono::Utc::now();
+    let (s, sprint) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/KPI/sprints",
+        Some(&token),
+        Some(json!({
+            "name": "KPI sprint",
+            "starts_at": (now - chrono::Duration::days(1)).to_rfc3339(),
+            "ends_at": (now + chrono::Duration::days(5)).to_rfc3339(),
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{sprint:?}");
+    let sid = sprint["id"].as_str().unwrap().to_string();
+    let task_with = |title: &'static str, points: i32| {
+        let app = app.clone();
+        let token = token.clone();
+        async move {
+            let (s, t) = send(
+                &app,
+                "POST",
+                "/api/v1/projects/KPI/tasks",
+                Some(&token),
+                Some(json!({ "title": title, "story_points": points })),
+            )
+            .await;
+            assert_eq!(s, StatusCode::CREATED);
+            t["key"].as_str().unwrap().to_string()
+        }
+    };
+    let assign = |key: String| {
+        let app = app.clone();
+        let token = token.clone();
+        let sid = sid.clone();
+        async move {
+            let (s, _) = send(
+                &app,
+                "POST",
+                &format!("/api/v1/sprints/{sid}/tasks/{key}"),
+                Some(&token),
+                None,
+            )
+            .await;
+            assert_eq!(s, StatusCode::NO_CONTENT);
+        }
+    };
+
+    let a = task_with("a", 5).await;
+    let b = task_with("b", 3).await;
+    let c = task_with("c", 2).await;
+    for k in [&a, &b, &c] {
+        assign(k.clone()).await;
+    }
+
+    // Before the start: no scope story yet, no chart.
+    let (s, before) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sid}/stats"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{before:?}");
+    assert!(before["scope"].is_null());
+    assert_eq!(before["series"].as_array().unwrap().len(), 0);
+    assert_eq!(before["progress"]["points_total"], 10);
+
+    let (s, b2) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sid}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b2:?}");
+
+    // Mid-sprint: one task added, one dropped, one finished.
+    let late = task_with("late", 4).await;
+    assign(late.clone()).await;
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/sprints/{sid}/tasks/{c}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{a}/move"),
+        Some(&token),
+        Some(json!({ "column_id": done_col })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    let (s, st) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sid}/stats"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{st:?}");
+    assert_eq!(st["unit"], "points");
+    assert_eq!(st["sprint"]["name"], "KPI sprint");
+    let scope = &st["scope"];
+    assert_eq!(scope["original_tasks"], 3, "{st:?}");
+    assert_eq!(scope["added_tasks"], 1);
+    assert_eq!(scope["removed_tasks"], 1);
+    assert_eq!(scope["original_points"], 10);
+    assert_eq!(scope["added_points"], 4);
+    assert_eq!(scope["change_percent"], 40.0, "4 added ÷ 10 original");
+    assert_eq!(
+        scope["approximate"], false,
+        "observed by the trigger, not backfilled"
+    );
+    assert_eq!(
+        st["progress"],
+        json!({ "tasks_total": 3, "tasks_done": 1, "points_total": 12, "points_done": 5 })
+    );
+    assert_eq!(st["days"]["total"], 7);
+    // Today is measured: 12 in scope, 5 done → 7 remaining; the future isn't.
+    let series = st["series"].as_array().unwrap();
+    let today = series
+        .iter()
+        .rfind(|d| !d["remaining"].is_null())
+        .expect("a measured day");
+    assert_eq!(today["remaining"], 7);
+    assert_eq!(today["scope"], 12);
+    assert_eq!(today["done"], 5);
+    assert!(
+        series.last().unwrap()["remaining"].is_null(),
+        "no fake future"
+    );
+    assert_eq!(series.last().unwrap()["ideal"], 0.0);
+
+    // Complete it, carrying b and late away: velocity counts what was done.
+    let (s, b3) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sid}/complete"),
+        Some(&token),
+        Some(json!({ "carry_over": { "to": "backlog" } })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b3:?}");
+    let (s, done_stats) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sid}/stats"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        done_stats["scope"]["removed_tasks"], 1,
+        "carry-over at completion isn't removal"
+    );
+    assert_eq!(done_stats["progress"]["tasks_total"], 3);
+
+    let (s, v) = send(
+        &app,
+        "GET",
+        "/api/v1/projects/KPI/velocity",
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v:?}");
+    let rows = v["sprints"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["points"], 5);
+    assert_eq!(rows[0]["tasks"], 1);
+    assert!(v["current"].is_null());
+}

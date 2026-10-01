@@ -17,6 +17,8 @@
 //!   DELETE /sprints/:id/tasks/:task_key      — unassign
 //!   GET    /sprints/:id/tasks                — list tasks in sprint
 //!   GET    /sprints/:id/burndown             — series for the chart
+//!   GET    /sprints/:id/stats                — KPIs + burndown/burnup series
+//!   GET    /projects/:key/velocity           — completed sprints, by unit
 
 use axum::{
     extract::{Path, State},
@@ -56,6 +58,8 @@ pub fn router() -> Router<AppState> {
         )
         .route("/sprints/:id/tasks", get(list_tasks))
         .route("/sprints/:id/burndown", get(burndown))
+        .route("/sprints/:id/stats", get(stats))
+        .route("/projects/:key/velocity", get(velocity))
 }
 
 // ─── DTOs ───────────────────────────────────────────────────────────────────
@@ -728,6 +732,260 @@ async fn list_tasks(
         .collect();
     Ok(Json(
         serde_json::json!({ "items": items, "snapshot": false }),
+    ))
+}
+
+/// Everything the sprint charts card shows: progress, scope change, days,
+/// health, and one day-by-day series that draws both burndown and burnup.
+/// The arithmetic lives in `domain::sprint_stats`; this gathers its inputs.
+async fn stats(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<impl IntoResponse> {
+    use crate::domain::sprint_stats::{self, ScopeEvent, SprintWindow, StatTask};
+
+    let project_id = project_of_sprint(&state.db, id).await?;
+    let ctx = project_ctx::load_by_id(&state.db, project_id, user.id).await?;
+    if !can(&user.as_actor(), Action::ViewProject, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+
+    #[derive(sqlx::FromRow)]
+    struct W {
+        name: String,
+        goal: Option<String>,
+        state: String,
+        starts_at: DateTime<Utc>,
+        ends_at: DateTime<Utc>,
+        started_at: Option<DateTime<Utc>>,
+        completed_at: Option<DateTime<Utc>>,
+    }
+    let w: W = sqlx::query_as(
+        r#"SELECT name, goal, state, starts_at, ends_at, started_at, completed_at
+           FROM sprints WHERE id = $1"#,
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await?;
+
+    #[derive(sqlx::FromRow)]
+    struct T {
+        id: Uuid,
+        story_points: Option<i32>,
+        status: String,
+        completed_at: Option<DateTime<Utc>>,
+        due_date: Option<NaiveDate>,
+        currently_in: bool,
+        blocked: bool,
+    }
+    // Every top-level task that is, or ever was, in the sprint. Subtasks roll
+    // up under their parent everywhere else (velocity, the dashboard), so they
+    // don't count separately here either.
+    let tasks: Vec<T> = sqlx::query_as(
+        r#"
+        SELECT t.id, t.story_points, t.status, t.completed_at, t.due_date,
+               COALESCE(t.sprint_id = $1, false) AS currently_in,
+               EXISTS (
+                   SELECT 1 FROM task_links l
+                   JOIN tasks b ON b.id = l.from_task_id
+                   WHERE l.to_task_id = t.id AND l.kind = 'blocks'
+                     AND b.status <> 'done' AND b.deleted_at IS NULL
+               ) AS blocked
+        FROM   tasks t
+        WHERE  t.deleted_at IS NULL
+          AND  t.parent_task_id IS NULL
+          AND (t.sprint_id = $1
+               OR t.id IN (SELECT task_id FROM sprint_scope_events WHERE sprint_id = $1))
+        "#,
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let events: Vec<(Uuid, bool, DateTime<Utc>, bool)> = sqlx::query_as(
+        r#"SELECT task_id, change = 'added', at, backfilled
+           FROM sprint_scope_events WHERE sprint_id = $1
+           ORDER BY at, id"#,
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+
+    let snapshot: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT task_id, status FROM sprint_task_snapshots WHERE sprint_id = $1")
+            .bind(id)
+            .fetch_all(&state.db)
+            .await?;
+    let snapshot: Option<std::collections::HashMap<Uuid, String>> =
+        (w.state == "completed" && !snapshot.is_empty()).then(|| snapshot.into_iter().collect());
+
+    let stat_tasks: Vec<StatTask> = tasks
+        .into_iter()
+        .map(|t| StatTask {
+            id: t.id,
+            points: t.story_points,
+            status: t.status,
+            completed_at: t.completed_at,
+            due_date: t.due_date,
+            blocked: t.blocked,
+            currently_in: t.currently_in,
+        })
+        .collect();
+    let scope_events: Vec<ScopeEvent> = events
+        .into_iter()
+        .map(|(task_id, added, at, backfilled)| ScopeEvent {
+            task_id,
+            added,
+            at,
+            backfilled,
+        })
+        .collect();
+    let window = SprintWindow {
+        state: w.state.clone(),
+        starts_at: w.starts_at,
+        ends_at: w.ends_at,
+        started_at: w.started_at,
+        completed_at: w.completed_at,
+    };
+    let computed = sprint_stats::compute(
+        &window,
+        &stat_tasks,
+        &scope_events,
+        snapshot.as_ref(),
+        Utc::now(),
+    );
+
+    let mut body = serde_json::to_value(&computed)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("serialize stats: {e}")))?;
+    body["sprint"] = serde_json::json!({
+        "id": id,
+        "name": w.name,
+        "goal": w.goal,
+        "state": w.state,
+        "starts_at": w.starts_at,
+        "ends_at": w.ends_at,
+        "started_at": w.started_at,
+        "completed_at": w.completed_at,
+    });
+    Ok(Json(body))
+}
+
+#[derive(Debug, Deserialize)]
+struct VelocityQuery {
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+struct VelocityRow {
+    id: Uuid,
+    name: String,
+    completed_at: Option<DateTime<Utc>>,
+    /// Story points of the work completed in the sprint.
+    points: i64,
+    /// Tasks completed.
+    tasks: i64,
+    /// Estimated minutes of the work completed — "estimated hours".
+    estimate_minutes: i64,
+    /// Minutes logged while the sprint ran.
+    logged_minutes: i64,
+}
+
+/// Velocity per completed sprint, in every unit the chart offers — points,
+/// tasks, estimated hours, logged hours — oldest first, plus the running
+/// sprint's tally so far. A completed sprint reads from its snapshot when it
+/// has one (what was done *then*), else from the tasks still pointing at it.
+async fn velocity(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(key): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<VelocityQuery>,
+) -> AppResult<impl IntoResponse> {
+    let ctx = project_ctx::load_by_key(&state.db, &key, user.id).await?;
+    if !can(&user.as_actor(), Action::ViewProject, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+    let limit = q.limit.unwrap_or(10).clamp(1, 50);
+
+    let mut done: Vec<VelocityRow> = sqlx::query_as(
+        r#"
+        WITH s AS (
+            SELECT s.*, EXISTS (SELECT 1 FROM sprint_task_snapshots x WHERE x.sprint_id = s.id) AS snap
+            FROM   sprints s
+            WHERE  s.project_id = $1 AND s.state = 'completed' AND s.deleted_at IS NULL
+            ORDER  BY s.completed_at DESC NULLS LAST
+            LIMIT  $2
+        )
+        SELECT s.id, s.name, s.completed_at,
+               CASE WHEN s.snap THEN
+                   (SELECT COALESCE(SUM(x.story_points), 0) FROM sprint_task_snapshots x
+                     WHERE x.sprint_id = s.id AND x.status = 'done')
+               ELSE COALESCE(s.velocity_points, 0) END::int8 AS points,
+               CASE WHEN s.snap THEN
+                   (SELECT count(*) FROM sprint_task_snapshots x
+                     WHERE x.sprint_id = s.id AND x.status = 'done')
+               ELSE
+                   (SELECT count(*) FROM tasks t
+                     WHERE t.sprint_id = s.id AND t.status = 'done'
+                       AND t.deleted_at IS NULL AND t.parent_task_id IS NULL)
+               END::int8 AS tasks,
+               CASE WHEN s.snap THEN
+                   (SELECT COALESCE(SUM(t.estimate_minutes), 0) FROM sprint_task_snapshots x
+                      JOIN tasks t ON t.id = x.task_id
+                     WHERE x.sprint_id = s.id AND x.status = 'done')
+               ELSE
+                   (SELECT COALESCE(SUM(t.estimate_minutes), 0) FROM tasks t
+                     WHERE t.sprint_id = s.id AND t.status = 'done'
+                       AND t.deleted_at IS NULL AND t.parent_task_id IS NULL)
+               END::int8 AS estimate_minutes,
+               CASE WHEN s.snap THEN
+                   (SELECT COALESCE(SUM(x.logged_minutes), 0) FROM sprint_task_snapshots x
+                     WHERE x.sprint_id = s.id)
+               ELSE
+                   (SELECT COALESCE(SUM(tl.duration_minutes), 0) FROM time_logs tl
+                      JOIN tasks t ON t.id = tl.task_id
+                     WHERE t.sprint_id = s.id AND tl.deleted_at IS NULL
+                       AND tl.started_at >= COALESCE(s.started_at, s.starts_at)
+                       AND tl.started_at <  COALESCE(s.completed_at, now()))
+               END::int8 AS logged_minutes
+        FROM   s
+        ORDER  BY s.completed_at ASC NULLS FIRST
+        "#,
+    )
+    .bind(ctx.id)
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await?;
+    done.sort_by_key(|r| r.completed_at);
+
+    let current: Option<VelocityRow> = sqlx::query_as(
+        r#"
+        SELECT s.id, s.name, s.completed_at,
+               (SELECT COALESCE(SUM(t.story_points), 0) FROM tasks t
+                 WHERE t.sprint_id = s.id AND t.status = 'done'
+                   AND t.deleted_at IS NULL AND t.parent_task_id IS NULL)::int8 AS points,
+               (SELECT count(*) FROM tasks t
+                 WHERE t.sprint_id = s.id AND t.status = 'done'
+                   AND t.deleted_at IS NULL AND t.parent_task_id IS NULL)::int8 AS tasks,
+               (SELECT COALESCE(SUM(t.estimate_minutes), 0) FROM tasks t
+                 WHERE t.sprint_id = s.id AND t.status = 'done'
+                   AND t.deleted_at IS NULL AND t.parent_task_id IS NULL)::int8 AS estimate_minutes,
+               (SELECT COALESCE(SUM(tl.duration_minutes), 0) FROM time_logs tl
+                  JOIN tasks t ON t.id = tl.task_id
+                 WHERE t.sprint_id = s.id AND tl.deleted_at IS NULL
+                   AND tl.started_at >= COALESCE(s.started_at, s.starts_at))::int8 AS logged_minutes
+        FROM   sprints s
+        WHERE  s.project_id = $1 AND s.state = 'active' AND s.deleted_at IS NULL
+        ORDER  BY s.started_at DESC NULLS LAST
+        LIMIT  1
+        "#,
+    )
+    .bind(ctx.id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    Ok(Json(
+        serde_json::json!({ "sprints": done, "current": current }),
     ))
 }
 

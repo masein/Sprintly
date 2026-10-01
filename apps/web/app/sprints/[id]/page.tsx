@@ -21,14 +21,13 @@ import { Play, CheckCircle2, GripVertical, Plus, Trash2, X } from "lucide-react"
 import { SubtaskBadge } from "@/components/SubtaskBadge";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
-import { BurndownChart } from "@/components/BurndownChart";
+import { SprintCharts } from "@/components/SprintCharts";
 import { ListSearch, matchesTask } from "@/components/ListSearch";
 import { LoadError } from "@/components/LoadError";
 import { Markdown } from "@/components/Markdown";
 import {
   assignTaskToSprint,
   completeSprint,
-  getBurndown,
   getSprint,
   getSprintTasks,
   listSprints,
@@ -65,11 +64,6 @@ export default function SprintDetailPage() {
   const tasksQ = { ...tasksFullQ, data: tasksFullQ.data?.items };
   const isSnapshot = tasksFullQ.data?.snapshot === true;
   const snappedAt = tasksFullQ.data?.snapped_at;
-  const burnQ = useQuery({
-    queryKey: ["sprint-burndown", id],
-    queryFn: () => getBurndown(id),
-    enabled: !!id,
-  });
   const projectKey = sprintQ.data?.project_key;
   const sprintOpen = sprintQ.data != null && sprintQ.data.state !== "completed";
   const backlogQ = useQuery({
@@ -86,7 +80,7 @@ export default function SprintDetailPage() {
   const invalidateLists = () => {
     qc.invalidateQueries({ queryKey: ["sprint-tasks", id] });
     qc.invalidateQueries({ queryKey: ["sprint", id] });
-    qc.invalidateQueries({ queryKey: ["sprint-burndown", id] });
+    qc.invalidateQueries({ queryKey: ["sprint-stats", id] });
     qc.invalidateQueries({ queryKey: ["backlog", projectKey] });
   };
   const pullIn = useMutation({
@@ -273,7 +267,6 @@ export default function SprintDetailPage() {
                 loading={backlogQ.isLoading}
               />
             )}
-            {burnQ.data && <BurndownChart points={burnQ.data.items} />}
             {sprint.summary_md && (
               <section className="mt-4 rounded-lg border border-white/10 bg-ink-subtle p-4">
                 <div className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
@@ -285,6 +278,14 @@ export default function SprintDetailPage() {
           </aside>
         </div>
       </DndContext>
+
+      {/* Below the lists, full width: the chart reads better wide, with its
+          KPIs beside it, than squeezed into the 360px column under the
+          backlog — and above the lists it pushed the work itself (and every
+          drop target) below the fold. */}
+      <div className="mt-6">
+        <SprintCharts projectKey={sprint.project_key} sprintId={sprint.id} />
+      </div>
     </AppShell>
   );
 }
@@ -726,7 +727,7 @@ function TaskList({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sprint-tasks", sprintId] });
       qc.invalidateQueries({ queryKey: ["sprint", sprintId] });
-      qc.invalidateQueries({ queryKey: ["sprint-burndown", sprintId] });
+      qc.invalidateQueries({ queryKey: ["sprint-stats", sprintId] });
       qc.invalidateQueries({ queryKey: ["backlog"] });
     },
   });
