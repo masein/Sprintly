@@ -4207,3 +4207,77 @@ async fn a_project_keeps_a_description_and_documents(pool: PgPool) {
     .await;
     assert!(list["items"].as_array().unwrap().is_empty());
 }
+
+/// Saving a custom field value used to 500 for everyone: it logs a
+/// `field_set` / `field_cleared` activity row the feed's kind CHECK didn't
+/// allow. Set, read back, clear — and the activity feed records both.
+#[sqlx::test(migrations = "./migrations")]
+async fn custom_field_values_save_and_clear(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "fieldsetter").await;
+    make_project(&app, &token, "FLD").await;
+    let key = make_task_http(&app, &token, "FLD", "has a site").await;
+    let (s, field) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/FLD/fields",
+        Some(&token),
+        Some(json!({ "name": "Site", "type": "text" })),
+    )
+    .await;
+    assert!(s.is_success(), "{field:?}");
+    let fid = field["id"].as_str().unwrap().to_string();
+
+    let (s, b) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{key}/fields/{fid}"),
+        Some(&token),
+        Some(json!({ "value": "Parsian" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b:?}");
+    assert_eq!(b["value"], "Parsian");
+    let (_, fields) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{key}/fields"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert!(fields.to_string().contains("Parsian"), "{fields:?}");
+
+    let (s, b) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tasks/{key}/fields/{fid}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert!(s.is_success(), "{s} {b:?}");
+    let (_, fields) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{key}/fields"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert!(!fields.to_string().contains("Parsian"), "{fields:?}");
+
+    let (_, activity) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{key}/activity"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let kinds = activity.to_string();
+    assert!(
+        kinds.contains("field_set") && kinds.contains("field_cleared"),
+        "{activity:?}"
+    );
+}
