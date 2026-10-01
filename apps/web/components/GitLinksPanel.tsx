@@ -79,21 +79,27 @@ export function GitLinksPanel({ taskKey }: { taskKey: string }) {
           return (
             <li key={l.id} className="mono flex items-start gap-2 text-xs">
               <Icon size={12} />
-              <span className="min-w-0 flex-1">
+              {/* A flex row, so the title can actually truncate: `truncate`
+                  on an inline span only stops wrapping, and a long commit
+                  title then ran out of the 280px sidebar and gave the whole
+                  task page a horizontal scrollbar. */}
+              <span className="flex min-w-0 flex-1 items-baseline">
                 {l.url ? (
                   <a
                     href={l.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-accent hover:underline"
+                    className="shrink-0 text-accent hover:underline"
                   >
                     {l.external_ref}
                   </a>
                 ) : (
-                  <span className="text-chrome">{l.external_ref}</span>
+                  <span className="shrink-0 text-chrome">{l.external_ref}</span>
                 )}
                 {l.title && (
-                  <span className="ml-1 truncate text-chrome-dim">{l.title}</span>
+                  <span className="ml-1 min-w-0 truncate text-chrome-dim" title={l.title}>
+                    {l.title}
+                  </span>
                 )}
               </span>
               {l.check_state && <CheckChip state={l.check_state} />}
