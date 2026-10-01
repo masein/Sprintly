@@ -206,12 +206,14 @@ async fn create_task(
         .map_err(|e| AppError::Validation(e.to_string()))?;
 
     let ctx = project_ctx::load_by_key(&state.db, &project_key, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource())
-        && !can(&user.as_actor(), Action::ViewProject, ctx.as_resource())
-    {
-        // Anyone who can view + isn't a watcher can still create — that's a
-        // reasonable default for a PM tool. The viewer global role can't:
-        // EditProject is the gate.
+    // Leads and contributors file tasks. This used to OR in `ViewProject`,
+    // which let watcher-role members and global viewers create tasks too —
+    // the comment here claimed the opposite.
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
+        // An archived project is read-only; say so rather than "forbidden".
+        if ctx.archived && can(&user.as_actor(), Action::ViewProject, ctx.as_resource()) {
+            return Err(AppError::Conflict("project is archived".into()));
+        }
         return Err(AppError::Forbidden);
     }
     if ctx.archived {
@@ -311,12 +313,17 @@ async fn create_task(
             id, project_id, board_id, column_id, key, title, description,
             type, priority, status, assignee_id, reporter_id, parent_task_id,
             estimate_minutes, story_points, due_date, labels, order_in_column,
-            sprint_id
+            sprint_id, subtask_position
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7,
             $8, $9, $10, $11, $12, $13,
             $14, $15, $16, $17, $18,
-            $19
+            $19,
+            -- A new subtask goes to the end of its parent's arranged order.
+            CASE WHEN $13::uuid IS NULL THEN NULL ELSE (
+                SELECT COALESCE(MAX(subtask_position), 0) + 1 FROM tasks
+                WHERE parent_task_id = $13 AND deleted_at IS NULL
+            ) END
         )
         "#,
     )
@@ -584,7 +591,7 @@ async fn edit_task(
         .map_err(|e| AppError::Validation(e.to_string()))?;
     let (project_id, project_key) = resolve_project_from_task_key(&state.db, &task_key).await?;
     let ctx = project_ctx::load_by_key(&state.db, &project_key, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
     if let Some(t) = req.r#type.as_deref() {
@@ -844,7 +851,7 @@ async fn move_task(
     }
     let (project_id, project_key) = resolve_project_from_task_key(&state.db, &task_key).await?;
     let ctx = project_ctx::load_by_key(&state.db, &project_key, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
 

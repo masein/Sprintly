@@ -8,15 +8,20 @@
 //!   PATCH  /projects/:key                     — edit (lead only).
 //!   POST   /projects/:key/archive             — archive (lead only).
 //!   POST   /projects/:key/unarchive           — restore (lead only).
+//!   DELETE /projects/:key  { confirm: "<KEY>" } — soft-delete (lead only).
+//!   GET    /admin/deleted-projects             — what's been deleted (admins).
+//!   POST   /admin/deleted-projects/:id/restore — bring one back (admins).
 //!
 //!   GET    /projects/:key/members             — list members.
 //!   POST   /projects/:key/members             — add (lead only).
 //!   DELETE /projects/:key/members/:user_id    — remove (lead only; can't remove the last lead).
 //!   PATCH  /projects/:key/members/:user_id    — change role (lead only).
 
+use std::net::SocketAddr;
+
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
+    extract::{ConnectInfo, Path, State},
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{delete, get, post},
     Json, Router,
@@ -40,7 +45,12 @@ use crate::{
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/projects", post(create).get(list))
-        .route("/projects/:key", get(detail).patch(edit))
+        .route(
+            "/projects/:key",
+            get(detail).patch(edit).delete(delete_project),
+        )
+        .route("/admin/deleted-projects", get(list_deleted))
+        .route("/admin/deleted-projects/:id/restore", post(restore_project))
         .route("/projects/:key/archive", post(archive))
         .route("/projects/:key/unarchive", post(unarchive))
         .route("/projects/:key/members", get(list_members).post(add_member))
@@ -442,6 +452,175 @@ async fn unarchive(
         .execute(&state.db)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteProjectReq {
+    /// Must be the project's key, typed out. The API checks it too, so a
+    /// stray script or a mis-aimed curl can't delete a project by accident.
+    pub confirm: String,
+}
+
+/// Delete a project (QA report 6: "a safe project deletion workflow").
+///
+/// Soft, and reversible by an admin: the project row and every live task get
+/// the *same* `deleted_at`, in one transaction. Matching timestamps are what
+/// make an exact restore possible — tasks someone had deleted before keep
+/// their own, earlier timestamp and stay deleted. Every task query already
+/// filters `deleted_at`, so the project's work disappears from boards, My Day,
+/// search and dashboards at once; logged time stays on people's timesheets
+/// (hours worked are history, not project content). The key is freed for
+/// reuse — the unique index only covers live projects. Audited.
+async fn delete_project(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    headers: HeaderMap,
+    addr: ConnectInfo<SocketAddr>,
+    Path(key): Path<String>,
+    Json(req): Json<DeleteProjectReq>,
+) -> AppResult<impl IntoResponse> {
+    let ctx = project_ctx::load_by_key(&state.db, &key, user.id).await?;
+    if !can(&user.as_actor(), Action::DeleteProject, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+    if req.confirm.trim() != ctx.key {
+        return Err(AppError::BadRequest(format!(
+            "type the project key, {}, to confirm",
+            ctx.key
+        )));
+    }
+
+    let mut tx = state.db.begin().await?;
+    let deleted_at: DateTime<Utc> = sqlx::query_scalar(
+        r#"UPDATE projects SET deleted_at = now()
+           WHERE id = $1 AND deleted_at IS NULL
+           RETURNING deleted_at"#,
+    )
+    .bind(ctx.id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    let tasks = sqlx::query(
+        "UPDATE tasks SET deleted_at = $2 WHERE project_id = $1 AND deleted_at IS NULL",
+    )
+    .bind(ctx.id)
+    .bind(deleted_at)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    crate::routes::admin_panel::write_admin_audit(
+        &mut tx,
+        user.id,
+        "project.deleted",
+        None,
+        &serde_json::json!({ "project_id": ctx.id, "key": ctx.key, "tasks": tasks }),
+        &headers,
+        addr,
+    )
+    .await?;
+    tx.commit().await?;
+
+    // Everyone with the project open finds out (their next fetch 404s).
+    events::publish(
+        &state.redis,
+        &Event::MemberChanged {
+            project_id: ctx.id,
+            user_id: user.id,
+        },
+    )
+    .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct DeletedProjectRow {
+    pub id: Uuid,
+    pub key: String,
+    pub name: String,
+    pub deleted_at: DateTime<Utc>,
+    /// Tasks that went down with it (and would come back).
+    pub task_count: i64,
+    /// A live project has taken the key since — restoring needs a rename first.
+    pub key_taken: bool,
+}
+
+async fn list_deleted(
+    State(state): State<AppState>,
+    user: CurrentUser,
+) -> AppResult<impl IntoResponse> {
+    if user.role != GlobalRole::Admin {
+        return Err(AppError::Forbidden);
+    }
+    let rows: Vec<DeletedProjectRow> = sqlx::query_as(
+        r#"
+        SELECT p.id, p.key, p.name, p.deleted_at,
+               (SELECT count(*) FROM tasks t
+                 WHERE t.project_id = p.id AND t.deleted_at = p.deleted_at) AS task_count,
+               EXISTS (SELECT 1 FROM projects q
+                        WHERE q.key = p.key AND q.deleted_at IS NULL) AS key_taken
+        FROM   projects p
+        WHERE  p.deleted_at IS NOT NULL
+        ORDER  BY p.deleted_at DESC
+        LIMIT  200
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(serde_json::json!({ "items": rows })))
+}
+
+async fn restore_project(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    headers: HeaderMap,
+    addr: ConnectInfo<SocketAddr>,
+    Path(id): Path<Uuid>,
+) -> AppResult<impl IntoResponse> {
+    if user.role != GlobalRole::Admin {
+        return Err(AppError::Forbidden);
+    }
+    let mut tx = state.db.begin().await?;
+    let row: Option<(String, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT key, deleted_at FROM projects WHERE id = $1 AND deleted_at IS NOT NULL FOR UPDATE",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let (key, deleted_at) = row.ok_or(AppError::NotFound)?;
+    let taken: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM projects WHERE key = $1 AND deleted_at IS NULL)",
+    )
+    .bind(&key)
+    .fetch_one(&mut *tx)
+    .await?;
+    if taken {
+        return Err(AppError::Conflict(format!(
+            "another project uses the key {key} now — rename that one first"
+        )));
+    }
+    let tasks =
+        sqlx::query("UPDATE tasks SET deleted_at = NULL WHERE project_id = $1 AND deleted_at = $2")
+            .bind(id)
+            .bind(deleted_at)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+    sqlx::query("UPDATE projects SET deleted_at = NULL WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    crate::routes::admin_panel::write_admin_audit(
+        &mut tx,
+        user.id,
+        "project.restored",
+        None,
+        &serde_json::json!({ "project_id": id, "key": key, "tasks": tasks }),
+        &headers,
+        addr,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(serde_json::json!({ "key": key, "tasks": tasks })))
 }
 
 async fn list_members(

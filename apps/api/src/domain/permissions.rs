@@ -30,9 +30,19 @@ pub enum Action {
     ViewProject,
     EditProject,
     ArchiveProject,
+    /// Soft-delete a whole project. Same people as archiving — the lead —
+    /// archived or not; the route adds the type-the-key confirmation.
+    DeleteProject,
     AddProjectMember,
     RemoveProjectMember,
     ChangeProjectMemberRole,
+
+    // tasks
+    /// Day-to-day work on tasks: create, edit, move, comment, link, attach,
+    /// subtask, put in a sprint or an epic. The team does this — leads *and*
+    /// contributors — not just whoever administers the project. Deleting a
+    /// task stays with `EditProject` (leads): it's the one destructive act.
+    EditTask,
 
     // boards & columns
     ViewBoard,
@@ -147,6 +157,18 @@ pub fn can(actor: &Actor, action: Action, resource: Resource) -> bool {
             },
         ) => true,
 
+        // Working on tasks: leads and contributors, never on an archived
+        // project. Watcher-role members and global viewers read only.
+        (
+            Member,
+            A::EditTask,
+            R::Project {
+                actor_role: Some(PR::Lead | PR::Contributor),
+                archived: false,
+                ..
+            },
+        ) => true,
+
         // Project edit / archive / member management: project leads only,
         // and never on an archived project (un-archive first).
         (
@@ -164,10 +186,11 @@ pub fn can(actor: &Actor, action: Action, resource: Resource) -> bool {
             },
         ) => true,
 
-        // Archive / unarchive: lead can flip in either direction.
+        // Archive / unarchive: lead can flip in either direction. Deleting
+        // is the lead's call too, archived or not.
         (
             Member,
-            A::ArchiveProject,
+            A::ArchiveProject | A::DeleteProject,
             R::Project {
                 actor_role: Some(PR::Lead),
                 ..
@@ -247,6 +270,69 @@ mod tests {
             &member(),
             Action::EditProject,
             project(Some(ProjectRole::Watcher), false)
+        ));
+    }
+
+    #[test]
+    fn only_the_lead_deletes_a_project_archived_or_not() {
+        for archived in [false, true] {
+            assert!(can(
+                &member(),
+                Action::DeleteProject,
+                project(Some(ProjectRole::Lead), archived)
+            ));
+            for r in [ProjectRole::Contributor, ProjectRole::Watcher] {
+                assert!(!can(
+                    &member(),
+                    Action::DeleteProject,
+                    project(Some(r), archived)
+                ));
+            }
+            assert!(!can(
+                &member(),
+                Action::DeleteProject,
+                project(None, archived)
+            ));
+            assert!(!can(
+                &viewer(),
+                Action::DeleteProject,
+                project(Some(ProjectRole::Lead), archived)
+            ));
+        }
+        assert!(can(&admin(), Action::DeleteProject, project(None, false)));
+    }
+
+    #[test]
+    fn leads_and_contributors_work_on_tasks_watchers_dont() {
+        for r in [ProjectRole::Lead, ProjectRole::Contributor] {
+            assert!(
+                can(&member(), Action::EditTask, project(Some(r), false)),
+                "{r:?}"
+            );
+            // Archived is read-only for everyone on the team.
+            assert!(
+                !can(&member(), Action::EditTask, project(Some(r), true)),
+                "{r:?}"
+            );
+        }
+        assert!(!can(
+            &member(),
+            Action::EditTask,
+            project(Some(ProjectRole::Watcher), false)
+        ));
+        assert!(!can(&member(), Action::EditTask, project(None, false)));
+        // A global viewer stays read-only even as a contributor.
+        assert!(!can(
+            &viewer(),
+            Action::EditTask,
+            project(Some(ProjectRole::Contributor), false)
+        ));
+        assert!(can(&admin(), Action::EditTask, project(None, false)));
+        // …and editing tasks doesn't make a contributor a project editor.
+        assert!(!can(
+            &member(),
+            Action::EditProject,
+            project(Some(ProjectRole::Contributor), false)
         ));
     }
 

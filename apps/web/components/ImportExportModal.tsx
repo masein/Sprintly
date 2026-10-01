@@ -110,7 +110,9 @@ export function ImportExportModal({
             manifest), a flat <span className="mono">CSV</span> of tasks, or a readable
             task report for people who live outside the tool —{" "}
             <span className="mono">Word</span> keeps every language intact,{" "}
-            <span className="mono">PDF</span> sticks to Latin text.
+            <span className="mono">PDF</span> sticks to Latin text. Reports carry each
+            task&apos;s subtasks, commits and attached files; one sprint&apos;s report is
+            on its sprint page.
           </p>
           <div className="flex flex-wrap gap-2">
             <a href={exportUrl(projectKey, "json")} className="mono rounded border border-white/10 px-3 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome">

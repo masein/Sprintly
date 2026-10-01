@@ -17,18 +17,20 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { Play, CheckCircle2, GripVertical, Plus, Trash2, X } from "lucide-react";
+import { Play, CheckCircle2, FileDown, GripVertical, Plus, Trash2, X } from "lucide-react";
 import { SubtaskBadge } from "@/components/SubtaskBadge";
+import { CopyTaskLink } from "@/components/CopyTaskLink";
+import { TaskTitleInput } from "@/components/TaskTitleInput";
+import { splitCommitMessage } from "@/lib/commitMessage";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
-import { BurndownChart } from "@/components/BurndownChart";
+import { SprintCharts } from "@/components/SprintCharts";
 import { ListSearch, matchesTask } from "@/components/ListSearch";
 import { LoadError } from "@/components/LoadError";
 import { Markdown } from "@/components/Markdown";
 import {
   assignTaskToSprint,
   completeSprint,
-  getBurndown,
   getSprint,
   getSprintTasks,
   listSprints,
@@ -41,6 +43,9 @@ import {
 import { listBacklog } from "@/lib/templates";
 import { search } from "@/lib/search";
 import { createTask } from "@/lib/tasks";
+import { getProject } from "@/lib/projects";
+import { me } from "@/lib/auth-bundle";
+import { canEditTasks, canManageProject } from "@/lib/roles";
 import { pluralize } from "@/lib/format";
 import type { ApiError } from "@/lib/api";
 
@@ -65,12 +70,19 @@ export default function SprintDetailPage() {
   const tasksQ = { ...tasksFullQ, data: tasksFullQ.data?.items };
   const isSnapshot = tasksFullQ.data?.snapshot === true;
   const snappedAt = tasksFullQ.data?.snapped_at;
-  const burnQ = useQuery({
-    queryKey: ["sprint-burndown", id],
-    queryFn: () => getBurndown(id),
-    enabled: !!id,
-  });
   const projectKey = sprintQ.data?.project_key;
+  // Who may do what here, matching the API: moving work in and out of the
+  // sprint is task work (leads + contributors); starting and completing it is
+  // the lead's. This page used to check the sprint's state only, so read-only
+  // members saw every control and met a 403 behind each.
+  const projectQ = useQuery({
+    queryKey: ["project", projectKey],
+    queryFn: () => getProject(projectKey!),
+    enabled: !!projectKey,
+  });
+  const meQ = useQuery({ queryKey: ["me"], queryFn: () => me() });
+  const canWork = canEditTasks(projectQ.data, meQ.data?.role);
+  const canRun = canManageProject(projectQ.data, meQ.data?.role);
   const sprintOpen = sprintQ.data != null && sprintQ.data.state !== "completed";
   const backlogQ = useQuery({
     queryKey: ["backlog", projectKey],
@@ -86,7 +98,7 @@ export default function SprintDetailPage() {
   const invalidateLists = () => {
     qc.invalidateQueries({ queryKey: ["sprint-tasks", id] });
     qc.invalidateQueries({ queryKey: ["sprint", id] });
-    qc.invalidateQueries({ queryKey: ["sprint-burndown", id] });
+    qc.invalidateQueries({ queryKey: ["sprint-stats", id] });
     qc.invalidateQueries({ queryKey: ["backlog", projectKey] });
   };
   const pullIn = useMutation({
@@ -200,7 +212,7 @@ export default function SprintDetailPage() {
       </header>
 
       <div className="mb-4 flex items-center gap-2">
-        {sprint.state === "planned" && (
+        {sprint.state === "planned" && canRun && (
           <button
             type="button"
             onClick={() => start.mutate()}
@@ -210,7 +222,7 @@ export default function SprintDetailPage() {
             <Play size={14} /> start sprint
           </button>
         )}
-        {sprint.state === "active" && (
+        {sprint.state === "active" && canRun && (
           <button
             type="button"
             onClick={() => setCompleting(true)}
@@ -220,6 +232,26 @@ export default function SprintDetailPage() {
             <CheckCircle2 size={14} /> complete + open retro
           </button>
         )}
+        {/* The sprint as a document for people outside the tool: every task
+            across every status, with subtasks, descriptions, commits and
+            attached files (QA report 6). Plain links — the cookie session
+            authorises the download. */}
+        <span className="ml-auto flex items-center gap-1" data-sprint-report>
+          <span className="mono mr-1 flex items-center gap-1 text-[10px] uppercase tracking-widest text-chrome-dim">
+            <FileDown size={11} /> report
+          </span>
+          {(["docx", "pdf"] as const).map((fmt) => (
+            <a
+              key={fmt}
+              href={`/api/v1/sprints/${sprint.id}/report?format=${fmt}`}
+              download
+              aria-label={`download the sprint report as .${fmt}`}
+              className="mono rounded border border-white/10 px-2 py-1 text-xs text-chrome-dim hover:border-white/20 hover:text-chrome"
+            >
+              .{fmt}
+            </a>
+          ))}
+        </span>
       </div>
 
       {completing && (
@@ -259,10 +291,10 @@ export default function SprintDetailPage() {
             <TaskList
               tasks={(tasksQ.data ?? []).filter((t) => matchesTask(taskQuery, t))}
               sprintId={id}
-              canManage={sprint.state !== "completed"}
-              draggable={sprintOpen}
+              canManage={sprint.state !== "completed" && canWork}
+              draggable={sprintOpen && canWork}
             />
-            {sprint.state !== "completed" && (
+            {sprint.state !== "completed" && canWork && (
               <AddTaskRow sprintId={id} projectKey={sprint.project_key} onAdded={invalidateLists} />
             )}
           </SprintDropZone>
@@ -271,9 +303,9 @@ export default function SprintDetailPage() {
               <BacklogPanel
                 items={(backlogQ.data ?? []).filter((t) => matchesTask(taskQuery, t))}
                 loading={backlogQ.isLoading}
+                draggable={canWork}
               />
             )}
-            {burnQ.data && <BurndownChart points={burnQ.data.items} />}
             {sprint.summary_md && (
               <section className="mt-4 rounded-lg border border-white/10 bg-ink-subtle p-4">
                 <div className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
@@ -285,6 +317,14 @@ export default function SprintDetailPage() {
           </aside>
         </div>
       </DndContext>
+
+      {/* Below the lists, full width: the chart reads better wide, with its
+          KPIs beside it, than squeezed into the 360px column under the
+          backlog — and above the lists it pushed the work itself (and every
+          drop target) below the fold. */}
+      <div className="mt-6">
+        <SprintCharts projectKey={sprint.project_key} sprintId={sprint.id} />
+      </div>
     </AppShell>
   );
 }
@@ -573,9 +613,11 @@ function DragHandle({
 function BacklogPanel({
   items,
   loading,
+  draggable,
 }: {
   items: { key: string; title: string; subtask_count: number }[];
   loading: boolean;
+  draggable: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: "backlog-drop" });
   return (
@@ -587,7 +629,7 @@ function BacklogPanel({
       }`}
     >
       <h2 className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
-        backlog ({items.length}) · drag across
+        backlog ({items.length}){draggable ? " · drag across" : ""}
       </h2>
       <ul className="max-h-72 space-y-1 overflow-y-auto">
         {loading && (
@@ -599,7 +641,13 @@ function BacklogPanel({
           </li>
         )}
         {items.map((t) => (
-          <BacklogRow key={t.key} taskKey={t.key} title={t.title} subtaskCount={t.subtask_count} />
+          <BacklogRow
+            key={t.key}
+            taskKey={t.key}
+            title={t.title}
+            subtaskCount={t.subtask_count}
+            draggable={draggable}
+          />
         ))}
       </ul>
     </section>
@@ -610,13 +658,16 @@ function BacklogRow({
   taskKey,
   title,
   subtaskCount,
+  draggable,
 }: {
   taskKey: string;
   title: string;
   subtaskCount: number;
+  draggable: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `backlog:${taskKey}`,
+    disabled: !draggable,
   });
   return (
     <li
@@ -629,7 +680,7 @@ function BacklogRow({
       }}
       className="flex items-center gap-2 rounded border border-white/10 bg-ink px-2 py-1.5"
     >
-      <DragHandle attributes={attributes} listeners={listeners} />
+      {draggable && <DragHandle attributes={attributes} listeners={listeners} />}
       <Link
         href={`/tasks/${taskKey}`}
         className="mono shrink-0 text-xs text-accent hover:underline"
@@ -680,6 +731,7 @@ function SprintTaskRow({
       >
         {task.key}
       </Link>
+      <CopyTaskLink taskKey={task.key} size={11} className="-ml-2" />
       <span className="min-w-0 flex-1 truncate text-sm text-chrome" title={task.title}>
         {task.title}
       </span>
@@ -726,7 +778,7 @@ function TaskList({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sprint-tasks", sprintId] });
       qc.invalidateQueries({ queryKey: ["sprint", sprintId] });
-      qc.invalidateQueries({ queryKey: ["sprint-burndown", sprintId] });
+      qc.invalidateQueries({ queryKey: ["sprint-stats", sprintId] });
       qc.invalidateQueries({ queryKey: ["backlog"] });
     },
   });
@@ -769,17 +821,20 @@ function AddTaskRow({
   const [q, setQ] = useState("");
   const [highlight, setHighlight] = useState(0);
   const [cue, setCue] = useState<{ msg: string; ok: boolean } | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Commit-message style: only the first line is the title (and the search
+  // term); anything under it becomes the new task's description.
+  const split = splitCommitMessage(q);
+  const trimmed = split.title;
   const hitsQ = useQuery({
-    queryKey: ["sprint-task-search", q],
-    queryFn: () => search(q, 6),
-    enabled: q.trim().length >= 2,
+    queryKey: ["sprint-task-search", trimmed],
+    queryFn: () => search(trimmed, 6),
+    enabled: trimmed.length >= 2,
     staleTime: 5_000,
   });
   const hits = hitsQ.data?.tasks ?? [];
-  const trimmed = q.trim();
-  const searched = q.trim().length >= 2 && !hitsQ.isFetching;
+  const searched = trimmed.length >= 2 && !hitsQ.isFetching;
   // Offer "create" unless the query is an exact title match of an existing task.
   const exact = hits.some((t) => t.title.trim().toLowerCase() === trimmed.toLowerCase());
   const showCreate = trimmed.length > 0 && !exact;
@@ -804,7 +859,14 @@ function AddTaskRow({
     onError: (e) => flash((e as unknown as ApiError).message ?? "couldn't add it", false),
   });
   const createAndAdd = useMutation({
-    mutationFn: (title: string) => createTask(projectKey, { title, sprint_id: sprintId }),
+    mutationFn: (raw: string) => {
+      const { title, description } = splitCommitMessage(raw);
+      return createTask(projectKey, {
+        title,
+        ...(description ? { description } : {}),
+        sprint_id: sprintId,
+      });
+    },
     onSuccess: (task) => afterAdd(`created ${task.key}`),
     onError: (e) => flash((e as unknown as ApiError).message ?? "couldn't create it", false),
   });
@@ -813,28 +875,23 @@ function AddTaskRow({
   function commit(index: number) {
     if (busy) return;
     if (showCreate && index === 0) {
-      if (trimmed) createAndAdd.mutate(trimmed);
+      if (trimmed) createAndAdd.mutate(q);
       return;
     }
     const hit = hits[index - (showCreate ? 1 : 0)];
     if (hit) addExisting.mutate(hit.key);
   }
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+  // Arrows walk the suggestions — but only while the text is one line;
+  // in a multi-line message they move the caret like they should.
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (q.includes("\n")) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setHighlight((h) => Math.min(h + 1, Math.max(rowCount - 1, 0)));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setHighlight((h) => Math.max(h - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (rowCount === 0) return; // empty query — nothing to add or create
-      commit(highlight < rowCount ? highlight : 0);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      setOpen(false);
-      setQ("");
     }
   }
 
@@ -854,19 +911,29 @@ function AddTaskRow({
   return (
     <div className="mt-2 space-y-1 rounded border border-white/10 bg-ink-subtle p-2">
       <div className="flex items-center gap-2">
-        <input
-          ref={inputRef}
-          autoFocus
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setHighlight(0);
-          }}
-          onKeyDown={onKeyDown}
-          placeholder="find a task, or type a new one…"
-          aria-label="add a task to this sprint"
-          className="mono flex-1 rounded border border-white/10 bg-ink px-2 py-1 text-xs text-chrome focus:border-accent focus:outline-none"
-        />
+        <div className="min-w-0 flex-1 space-y-1">
+          <TaskTitleInput
+            ref={inputRef}
+            autoFocus
+            value={q}
+            onChange={(v) => {
+              setQ(v);
+              setHighlight(0);
+            }}
+            onKeyDown={onKeyDown}
+            onSubmit={() => {
+              if (rowCount === 0) return; // empty query — nothing to add or create
+              commit(highlight < rowCount ? highlight : 0);
+            }}
+            onEscape={() => {
+              setOpen(false);
+              setQ("");
+            }}
+            placeholder="find a task, or type a new one…"
+            aria-label="add a task to this sprint"
+            className="mono block w-full rounded border border-white/10 bg-ink px-2 py-1 text-xs text-chrome focus:border-accent focus:outline-none"
+          />
+        </div>
         <button
           type="button"
           onClick={() => {

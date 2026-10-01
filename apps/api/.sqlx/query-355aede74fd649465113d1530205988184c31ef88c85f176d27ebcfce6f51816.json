@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT a.filename    AS \"filename!: String\",\n               a.storage_key AS \"storage_key!: String\",\n               a.status      AS \"status!: String\",\n               t.project_id  AS \"project_id!: Uuid\"\n        FROM   task_attachments a\n        JOIN   tasks t ON t.id = a.task_id\n        WHERE  a.id = $1 AND a.deleted_at IS NULL AND t.deleted_at IS NULL\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "filename!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "storage_key!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "project_id!: Uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "355aede74fd649465113d1530205988184c31ef88c85f176d27ebcfce6f51816"
+}

@@ -67,7 +67,17 @@ pub async fn update(
     name: Option<&str>,
     color: Option<&str>,
 ) -> AppResult<Label> {
-    let row: Option<Label> = sqlx::query_as(
+    let mut tx = db.begin().await?;
+    let old_name: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM project_labels WHERE id = $1 AND project_id = $2 FOR UPDATE",
+    )
+    .bind(id)
+    .bind(project_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let old_name = old_name.ok_or(AppError::NotFound)?;
+
+    let label: Label = sqlx::query_as(
         r#"UPDATE project_labels SET name = COALESCE($3, name), color = COALESCE($4, color)
            WHERE id = $1 AND project_id = $2
            RETURNING id, project_id, name, color, created_at"#,
@@ -76,7 +86,7 @@ pub async fn update(
     .bind(project_id)
     .bind(name)
     .bind(color)
-    .fetch_optional(db)
+    .fetch_one(&mut *tx)
     .await
     .map_err(|e| {
         if is_unique_violation(&e) {
@@ -85,7 +95,53 @@ pub async fn update(
             e.into()
         }
     })?;
-    row.ok_or(AppError::NotFound)
+
+    // Tasks carry labels as names, not ids, so renaming only the registry row
+    // would strand every tagged task on the old name — still showing it, now
+    // uncoloured, and no longer matched by `label:new`. Carry the rename into
+    // the tasks in the same transaction. Matching is case-insensitive like the
+    // board's colour lookup; a task that somehow had both names keeps one.
+    if label.name != old_name {
+        rename_on_tasks(&mut tx, project_id, &old_name, &label.name).await?;
+    }
+    tx.commit().await?;
+    Ok(label)
+}
+
+/// Replace `old` with `new` in every task's label list in the project,
+/// keeping each list's order and dropping a duplicate the rename would create.
+/// `updated_at` is left alone on purpose: a palette edit isn't work on the
+/// task, and bumping it would reshuffle every "recently updated" list.
+async fn rename_on_tasks(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    project_id: Uuid,
+    old: &str,
+    new: &str,
+) -> AppResult<u64> {
+    let r = sqlx::query(
+        r#"
+        UPDATE tasks t
+        SET    labels = ARRAY(
+                   SELECT v FROM (
+                       SELECT DISTINCT ON (lower(v)) v, i
+                       FROM (
+                           SELECT CASE WHEN lower(l) = lower($2) THEN $3 ELSE l END AS v, i
+                           FROM   unnest(t.labels) WITH ORDINALITY AS u(l, i)
+                       ) renamed
+                       ORDER BY lower(v), i
+                   ) deduped
+                   ORDER BY i
+               )
+        WHERE  t.project_id = $1
+          AND  EXISTS (SELECT 1 FROM unnest(t.labels) l WHERE lower(l) = lower($2))
+        "#,
+    )
+    .bind(project_id)
+    .bind(old)
+    .bind(new)
+    .execute(&mut **tx)
+    .await?;
+    Ok(r.rows_affected())
 }
 
 pub async fn delete(db: &PgPool, id: Uuid, project_id: Uuid) -> AppResult<()> {

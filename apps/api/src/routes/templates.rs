@@ -246,7 +246,7 @@ async fn instantiate(
 ) -> AppResult<impl IntoResponse> {
     let t = templates::get(&state.db, id).await?;
     let ctx = project_ctx::load_by_id(&state.db, t.project_id, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
     let (_, key) = templates::instantiate(&state.db, &t, Some(user.id), req.column_id).await?;
@@ -275,7 +275,16 @@ async fn bulk(
     Path(project_key): Path<String>,
     Json(req): Json<BulkReq>,
 ) -> AppResult<impl IntoResponse> {
-    let ctx = editor_ctx(&state, &user, &project_key).await?;
+    // Triage is task work — contributors may bulk-assign, move and label.
+    // Bulk *delete* stays with leads, like deleting a single task.
+    let ctx = project_ctx::load_by_key(&state.db, &project_key, user.id).await?;
+    let needed = match req.op {
+        BulkOp::Delete => Action::EditProject,
+        _ => Action::EditTask,
+    };
+    if !can(&user.as_actor(), needed, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
     if req.task_keys.is_empty() {
         return Err(AppError::BadRequest("no tasks selected".into()));
     }
@@ -349,7 +358,23 @@ async fn bulk(
         BulkOp::Label { labels } => {
             templates::bulk_labels(&state.db, ctx.id, &req.task_keys, &labels).await?
         }
-        BulkOp::Delete => templates::bulk_delete(&state.db, ctx.id, &req.task_keys).await?,
+        BulkOp::Delete => {
+            let gone = templates::bulk_delete(&state.db, ctx.id, &req.task_keys).await?;
+            // Same event a single delete sends, so every open board drops the
+            // cards — not just the tab that pressed the button.
+            for (task_id, key) in &gone {
+                crate::infra::events::publish(
+                    &state.redis,
+                    &crate::infra::events::Event::TaskDeleted {
+                        project_id: ctx.id,
+                        task_id: *task_id,
+                        key: key.clone(),
+                    },
+                )
+                .await;
+            }
+            gone.len() as u64
+        }
     };
 
     Ok(Json(serde_json::json!({ "affected": affected })))

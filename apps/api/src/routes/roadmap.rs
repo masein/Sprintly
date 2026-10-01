@@ -4,6 +4,7 @@
 //!   POST   /projects/:key/epics            { name, color?, start_date?, end_date? }
 //!   PATCH  /epics/:id                       { name?, color?, start_date?, end_date? }
 //!   DELETE /epics/:id
+//!   GET    /epics/:id/tasks                 — the epic's tasks, for the roadmap
 //!   GET    /projects/:key/milestones
 //!   POST   /projects/:key/milestones        { name, due_date }
 //!   PATCH  /milestones/:id                  { name?, due_date? }
@@ -41,6 +42,7 @@ pub fn router() -> Router<AppState> {
             "/epics/:id",
             axum::routing::patch(update_epic).delete(delete_epic),
         )
+        .route("/epics/:id/tasks", get(list_epic_tasks))
         .route(
             "/projects/:key/milestones",
             get(list_milestones).post(create_milestone),
@@ -139,6 +141,22 @@ async fn list_epics(
         return Err(AppError::Forbidden);
     }
     Ok(Json(roadmap::epics_list(&state.db, ctx.id).await?))
+}
+
+/// What's inside an epic (QA report 6: clicking an epic on the roadmap should
+/// show its tasks). Readable by anyone who can see the project.
+async fn list_epic_tasks(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Path(id): Path<Uuid>,
+) -> AppResult<impl IntoResponse> {
+    let pid = roadmap::epic_project_of(&state.db, id).await?;
+    let ctx = project_ctx::load_by_id(&state.db, pid, user.id).await?;
+    if !can(&user.as_actor(), Action::ViewProject, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
+    let items = roadmap::epic_tasks(&state.db, id).await?;
+    Ok(Json(serde_json::json!({ "items": items })))
 }
 
 async fn create_epic(
@@ -293,7 +311,7 @@ async fn assign_epic(
 ) -> AppResult<impl IntoResponse> {
     let (project_id, project_key) = resolve_project_from_task_key(&state.db, &task_key).await?;
     let ctx = project_ctx::load_by_key(&state.db, &project_key, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
     // An epic can only group tasks from its own project.
