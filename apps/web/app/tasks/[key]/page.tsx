@@ -1,8 +1,9 @@
 "use client";
 
 // Task detail page. Two-column layout: main content (title, markdown body,
-// comments, activity) on the left; sidebar (status/priority/type, watchers,
-// attachments) on the right. Inline edit on title and description.
+// attachments, subtasks, comments, activity) on the left; sidebar
+// (status/priority/type, timer, links, watchers) on the right. Inline edit on
+// title and description.
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -23,6 +24,7 @@ import { GitLinksPanel } from "@/components/GitLinksPanel";
 import { TaskTimer } from "@/components/TaskTimer";
 import { Avatar } from "@/components/Avatar";
 import { AssigneePicker } from "@/components/AssigneePicker";
+import { CopyTaskLink } from "@/components/CopyTaskLink";
 import { deleteTask, editTask, getTask, moveTask, restoreTask, type Task } from "@/lib/tasks";
 import { showToast } from "@/lib/toast";
 import { listSubtasks, setTaskParent } from "@/lib/relations";
@@ -53,6 +55,7 @@ export default function TaskPage() {
     enabled: !!taskQ.data?.project_key,
   });
   const meQ = useQuery({ queryKey: ["me"], queryFn: () => me() });
+  const qc = useQueryClient();
 
   if (taskQ.error) {
     const err = taskQ.error as unknown as ApiError;
@@ -93,13 +96,36 @@ export default function TaskPage() {
             { label: task.key },
           ]}
         />
+        <CopyTaskLink taskKey={task.key} size={13} className="-ml-2" />
         {canDelete && (
           <button
             type="button"
             onClick={async () => {
               const key = task.key;
               const projectKey = task.project_key;
+              const projectId = task.project_id;
               await deleteTask(key);
+              // These calls aren't TanStack mutations, so the app-wide
+              // "every mutation invalidates" net never ran: the board we
+              // navigate to rendered its cached list — deleted card included
+              // — and only a realtime event could correct it. Behind a proxy
+              // or CDN that doesn't carry the WebSocket, nothing ever did,
+              // and the card stayed until a manual reload (QA report 6).
+              // Drop it from every cached list now, then refetch for real.
+              qc.setQueriesData<Task[]>({ queryKey: ["tasks", projectId] }, (old) =>
+                Array.isArray(old) ? old.filter((t) => t.key !== key) : old,
+              );
+              // The page we're leaving still observes this task; refetching
+              // it now would flash a 404 before the navigation lands. Mark it
+              // stale instead, so a later visit asks the server again.
+              void qc.invalidateQueries({
+                predicate: (q) => !(q.queryKey[0] === "task" && q.queryKey[1] === key),
+              });
+              void qc.invalidateQueries({
+                queryKey: ["task", key],
+                exact: true,
+                refetchType: "none",
+              });
               router.push(`/projects/${projectKey}`);
               // No confirm dialog — the undo IS the safety net, and it
               // recovers faster than anyone can re-read a warning.
@@ -108,6 +134,9 @@ export default function TaskPage() {
                 onAction: async () => {
                   try {
                     await restoreTask(key);
+                    // Same story in reverse: bring it back on whatever
+                    // screen is showing, without waiting for the socket.
+                    void qc.invalidateQueries();
                     showToast(`${key} is back.`);
                   } catch {
                     showToast(`Couldn't restore ${key} — an admin still can.`);
@@ -126,6 +155,10 @@ export default function TaskPage() {
         <div className="min-w-0 space-y-8">
           <Header task={task} canEdit={canManage} />
           <Description task={task} canEdit={canManage} />
+          {/* Files belong with the description they support — roadmaps,
+              screenshots, specs — not at the bottom of the sidebar under the
+              timer and links, where they were easy to miss (QA report 6). */}
+          <Attachments taskKey={task.key} canManage={canManage} />
           {/* Subtasks are work, not metadata — they read better at full width
               under the description than squeezed into the 280px sidebar, where
               every title truncated (QA report 5). */}
@@ -145,7 +178,6 @@ export default function TaskPage() {
           <LinksPanel taskKey={task.key} canManage={canManage} />
           <GitLinksPanel taskKey={task.key} />
           <Watchers taskKey={task.key} />
-          <Attachments taskKey={task.key} canManage={canManage} />
         </aside>
       </div>
     </AppShell>

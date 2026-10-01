@@ -2645,6 +2645,115 @@ async fn a_completed_sprint_remembers_its_tasks_even_after_carry_over(pool: PgPo
     assert_eq!(live["snapshot"], false);
 }
 
+/// QA report 6: label names are editable. Tasks hold labels by name, so a
+/// rename has to follow onto every tagged task — otherwise they keep the old
+/// name, lose its colour, and stop matching `label:<new>`.
+#[sqlx::test(migrations = "./migrations")]
+async fn renaming_a_label_renames_it_on_every_task(pool: PgPool) {
+    let app = app(pool.clone());
+    let (token, _) = register(&app, "relabeler").await;
+    make_project(&app, &token, "RLB").await;
+
+    let (status, label) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/RLB/labels",
+        Some(&token),
+        Some(json!({ "name": "front", "color": "#7c5cff" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{label:?}");
+    let id = label["id"].as_str().unwrap().to_string();
+
+    let tagged = make_task_http(&app, &token, "RLB", "tagged").await;
+    let both = make_task_http(&app, &token, "RLB", "already has the new name").await;
+    let other = make_task_http(&app, &token, "RLB", "someone else's label").await;
+    for (key, labels) in [
+        (&tagged, json!(["urgent", "FRONT"])),
+        (&both, json!(["front", "frontend"])),
+        (&other, json!(["back"])),
+    ] {
+        let (s, b) = send(
+            &app,
+            "PATCH",
+            &format!("/api/v1/tasks/{key}"),
+            Some(&token),
+            Some(json!({ "labels": labels })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b:?}");
+    }
+
+    let (status, renamed) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/labels/{id}"),
+        Some(&token),
+        Some(json!({ "name": "frontend" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed:?}");
+    assert_eq!(renamed["name"], "frontend");
+    assert_eq!(renamed["color"], "#7c5cff", "a rename keeps the colour");
+
+    let labels_of = |key: String| {
+        let app = app.clone();
+        let token = token.clone();
+        async move {
+            let (_, t) = send(
+                &app,
+                "GET",
+                &format!("/api/v1/tasks/{key}"),
+                Some(&token),
+                None,
+            )
+            .await;
+            t["labels"].clone()
+        }
+    };
+    // Case-insensitive match, position kept.
+    assert_eq!(
+        labels_of(tagged.clone()).await,
+        json!(["urgent", "frontend"])
+    );
+    // The rename would have produced a duplicate; one copy survives.
+    assert_eq!(labels_of(both.clone()).await, json!(["frontend"]));
+    // Unrelated labels are untouched.
+    assert_eq!(labels_of(other.clone()).await, json!(["back"]));
+
+    // A colour-only edit renames nothing.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/labels/{id}"),
+        Some(&token),
+        Some(json!({ "color": "#22d3ee" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(labels_of(tagged).await, json!(["urgent", "frontend"]));
+
+    // Renaming onto a name the palette already has is a conflict, not a merge.
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/RLB/labels",
+        Some(&token),
+        Some(json!({ "name": "design", "color": "#10b981" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/labels/{id}"),
+        Some(&token),
+        Some(json!({ "name": "Design" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
 /// QA report 6: "my open work in the running sprint", the way Jira people
 /// write it — `sprint is active` used to be a parse error at character 59.
 #[sqlx::test(migrations = "./migrations")]
