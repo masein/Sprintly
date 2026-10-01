@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! project = SPR AND status IN (todo, in_progress) AND assignee = currentUser()
-//!   AND due <= 7d ORDER BY priority ASC, updated DESC
+//!   AND due <= 7d AND sprint is active ORDER BY priority ASC, updated DESC
 //! ```
 //!
 //! into an AST, then compile the AST to a parameterised SQL `WHERE` fragment.
@@ -73,6 +73,22 @@ fn lex(src: &str) -> Result<Vec<Spanned>, ParseError> {
             continue;
         }
         let at = i;
+        // Fonts with programming ligatures draw `!=` as `≠`, and people type
+        // what they see (QA report 6's screenshot shows exactly that). Accept
+        // the glyphs as the operators they look like.
+        if let Some(rest) = src.get(i..) {
+            if let Some((glyph, op)) = [("≠", "!="), ("≤", "<="), ("≥", ">=")]
+                .into_iter()
+                .find(|(g, _)| rest.starts_with(g))
+            {
+                out.push(Spanned {
+                    tok: Tok::Op(op.to_string()),
+                    at,
+                });
+                i += glyph.len();
+                continue;
+            }
+        }
         match c {
             '(' => {
                 out.push(Spanned {
@@ -223,6 +239,9 @@ pub enum Value {
     Date(NaiveDate),
     /// `currentUser()` — resolved against the caller at compile time.
     CurrentUser,
+    /// Sprint *state* rather than sprint name: `sprint is active`,
+    /// `sprint in openSprints()`. Holds `sprints.state` values.
+    SprintStates(Vec<&'static str>),
     /// `is (not) empty` takes no value.
     None,
 }
@@ -476,7 +495,7 @@ impl Parser {
             None => return err(format!("unknown field `{word}`"), at),
         };
 
-        // `is empty` / `is not empty`
+        // `is empty` / `is not empty` — and, for sprints, `is [not] active`.
         if self.word_is("is") {
             self.bump();
             let negate = if self.word_is("not") {
@@ -486,9 +505,30 @@ impl Parser {
                 false
             };
             let at_kw = self.at();
+            if field == Field::Sprint {
+                let state = match self.peek().map(|s| &s.tok) {
+                    Some(Tok::Word(w)) => sprint_state_word(w),
+                    _ => None,
+                };
+                if let Some(states) = state {
+                    self.bump();
+                    return Ok(Cond {
+                        field,
+                        op: if negate { CmpOp::Ne } else { CmpOp::Eq },
+                        value: Value::SprintStates(states),
+                    });
+                }
+            }
             let ok = self.word_is("empty") || self.word_is("null");
             if !ok {
-                return err("expected `empty` after `is`", at_kw);
+                return err(
+                    if field == Field::Sprint {
+                        "expected `empty`, `active`, `future` or `closed` after `is`"
+                    } else {
+                        "expected `empty` after `is`"
+                    },
+                    at_kw,
+                );
             }
             self.bump();
             return Ok(Cond {
@@ -512,7 +552,43 @@ impl Parser {
                 }
             }
             self.bump();
+            // Jira's `sprint in openSprints()` — the function is one word
+            // (the lexer keeps a trailing `()`), not a parenthesised list.
+            if field == Field::Sprint {
+                let func = match self.peek().map(|s| &s.tok) {
+                    Some(Tok::Word(w)) => sprint_function(w),
+                    _ => None,
+                };
+                if let Some(states) = func {
+                    self.bump();
+                    return Ok(Cond {
+                        field,
+                        op: if negate { CmpOp::NotIn } else { CmpOp::In },
+                        value: Value::SprintStates(states),
+                    });
+                }
+            }
+            let list_at = self.at();
             let items = self.value_list()?;
+            if field == Field::Sprint {
+                let funcs: Vec<_> = items.iter().filter_map(|i| sprint_function(i)).collect();
+                if !funcs.is_empty() {
+                    if funcs.len() != items.len() {
+                        return err(
+                            "sprint functions and sprint names can't share one list — join them with OR",
+                            list_at,
+                        );
+                    }
+                    let mut states: Vec<&'static str> = funcs.into_iter().flatten().collect();
+                    states.sort_unstable();
+                    states.dedup();
+                    return Ok(Cond {
+                        field,
+                        op: if negate { CmpOp::NotIn } else { CmpOp::In },
+                        value: Value::SprintStates(states),
+                    });
+                }
+            }
             return Ok(Cond {
                 field,
                 op: if negate { CmpOp::NotIn } else { CmpOp::In },
@@ -642,6 +718,30 @@ impl Parser {
 }
 
 /// Turn a raw literal into a typed value, checking it against the field.
+/// `sprint is <word>`: the sprint's lifecycle state, in the words people use.
+/// `open` follows Jira's `openSprints()` — started or not, just not finished.
+fn sprint_state_word(w: &str) -> Option<Vec<&'static str>> {
+    Some(match w.to_ascii_lowercase().as_str() {
+        "active" | "running" | "started" | "current" => vec!["active"],
+        "future" | "planned" | "upcoming" => vec!["planned"],
+        "closed" | "completed" | "complete" | "done" | "finished" => vec!["completed"],
+        "open" => vec!["active", "planned"],
+        _ => return None,
+    })
+}
+
+/// Jira's sprint functions. `openSprints()` is every sprint that isn't
+/// complete — active *and* not-yet-started, as in Jira.
+fn sprint_function(w: &str) -> Option<Vec<&'static str>> {
+    Some(match w.to_ascii_lowercase().as_str() {
+        "opensprints()" => vec!["active", "planned"],
+        "activesprints()" => vec!["active"],
+        "futuresprints()" => vec!["planned"],
+        "closedsprints()" => vec!["completed"],
+        _ => return None,
+    })
+}
+
 fn coerce(field: Field, raw: &str, quoted: bool) -> Result<Value, String> {
     if !quoted && raw.eq_ignore_ascii_case("currentUser()") {
         return match field {
@@ -651,6 +751,11 @@ fn coerce(field: Field, raw: &str, quoted: bool) -> Result<Value, String> {
                 field.name()
             )),
         };
+    }
+    if !quoted && field == Field::Sprint {
+        if let Some(states) = sprint_function(raw) {
+            return Ok(Value::SprintStates(states));
+        }
     }
     if !quoted && (raw.eq_ignore_ascii_case("empty") || raw.eq_ignore_ascii_case("null")) {
         // `assignee = empty` is such a common reflex that treating it as
@@ -845,6 +950,22 @@ fn compile_cond(cond: &Cond, c: &mut Ctx) -> String {
         };
     }
 
+    // Sprint state: compare `s.state`, not the sprint's name. Negation keeps
+    // tasks with no sprint at all — "not in an active sprint" includes the
+    // backlog, which is what people mean (same rule as `!=` on text).
+    if let Value::SprintStates(states) = &cond.value {
+        let ph = c.bind(Param::TextList(
+            states.iter().map(|s| (*s).to_string()).collect(),
+        ));
+        let any = format!("s.state = ANY({ph})");
+        return match cond.op {
+            CmpOp::Ne | CmpOp::NotIn | CmpOp::NotLike => {
+                format!("(s.state IS NULL OR NOT ({any}))")
+            }
+            _ => format!("({any})"),
+        };
+    }
+
     match (kind, &cond.value) {
         // ── text[] ───────────────────────────────────────────────────────
         (Kind::Array, Value::Text(v)) => {
@@ -977,7 +1098,7 @@ fn compile_cond(cond: &Cond, c: &mut Ctx) -> String {
             let ph = c.bind(Param::Text(d.to_string()));
             format!("(lower({col}) = lower({ph}))")
         }
-        (_, Value::None) => "true".into(),
+        (_, Value::None) | (_, Value::SprintStates(_)) => "true".into(),
     }
 }
 
@@ -1210,5 +1331,93 @@ mod tests {
             sql("(status = todo OR status = review) AND NOT (assignee = currentUser())");
         assert!(where_sql.contains(" OR "), "{where_sql}");
         assert!(where_sql.contains("NOT"), "{where_sql}");
+    }
+
+    fn states(v: &[&str]) -> Param {
+        Param::TextList(v.iter().map(|s| s.to_string()).collect())
+    }
+
+    #[test]
+    fn the_qa_report_query_parses() {
+        // QA report 6, verbatim — it used to fail at character 59.
+        let q = parse(
+            "assignee = currentUser() AND status != done AND sprint is active ORDER BY priority ASC",
+        )
+        .expect("parses");
+        assert_eq!(q.order.len(), 1);
+        let c = compile(&q, "masein", 2);
+        assert!(c.where_sql.contains("s.state = ANY("), "{}", c.where_sql);
+        assert!(c.params.contains(&states(&["active"])), "{:?}", c.params);
+    }
+
+    #[test]
+    fn sprint_state_words() {
+        assert_eq!(sql("sprint is active").1, vec![states(&["active"])]);
+        assert_eq!(sql("sprint is future").1, vec![states(&["planned"])]);
+        assert_eq!(sql("sprint is closed").1, vec![states(&["completed"])]);
+        assert_eq!(
+            sql("sprint is open").1,
+            vec![states(&["active", "planned"])]
+        );
+        // Case doesn't matter, like every other keyword.
+        assert_eq!(sql("Sprint IS Active").1, vec![states(&["active"])]);
+    }
+
+    #[test]
+    fn sprint_is_not_active_keeps_the_backlog() {
+        let (where_sql, _) = sql("sprint is not active");
+        assert!(where_sql.contains("s.state IS NULL OR NOT"), "{where_sql}");
+    }
+
+    #[test]
+    fn jira_sprint_functions() {
+        assert_eq!(
+            sql("sprint in openSprints()").1,
+            vec![states(&["active", "planned"])]
+        );
+        assert_eq!(
+            sql("sprint in futureSprints()").1,
+            vec![states(&["planned"])]
+        );
+        assert_eq!(
+            sql("sprint = closedSprints()").1,
+            vec![states(&["completed"])]
+        );
+        assert_eq!(
+            sql("sprint in (openSprints(), closedSprints())").1,
+            vec![states(&["active", "completed", "planned"])]
+        );
+        let (where_sql, _) = sql("sprint not in openSprints()");
+        assert!(where_sql.contains("IS NULL OR NOT"), "{where_sql}");
+    }
+
+    #[test]
+    fn sprint_names_still_mean_names() {
+        let (where_sql, params) = sql("sprint = \"Sprint 3\"");
+        assert!(where_sql.contains("lower(s.name)"), "{where_sql}");
+        assert_eq!(params, vec![Param::Text("Sprint 3".into())]);
+        // A sprint literally called "active" is reachable by quoting it.
+        let (where_sql, _) = sql("sprint = \"active\"");
+        assert!(where_sql.contains("s.name"), "{where_sql}");
+        // `is empty` is untouched.
+        let (where_sql, _) = sql("sprint is empty");
+        assert!(where_sql.contains("s.name IS NULL"), "{where_sql}");
+    }
+
+    #[test]
+    fn sprint_state_errors_say_what_would_work() {
+        let e = parse("sprint is banana").unwrap_err();
+        assert!(e.message.contains("active"), "{}", e.message);
+        let e = parse("status is active").unwrap_err();
+        assert_eq!(e.message, "expected `empty` after `is`");
+        let e = parse("sprint in (openSprints(), \"Sprint 1\")").unwrap_err();
+        assert!(e.message.contains("OR"), "{}", e.message);
+    }
+
+    #[test]
+    fn ligature_glyphs_are_operators() {
+        assert_eq!(sql("status ≠ done"), sql("status != done"));
+        assert_eq!(sql("points ≥ 3"), sql("points >= 3"));
+        assert_eq!(sql("points ≤ 3"), sql("points <= 3"));
     }
 }

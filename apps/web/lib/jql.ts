@@ -85,7 +85,12 @@ export const JQL_EXAMPLES: { label: string; jql: string }[] = [
     label: "my open work",
     jql: "assignee = currentUser() AND status != done ORDER BY priority ASC",
   },
-  { label: "unassigned in this sprint", jql: "sprint is not empty AND assignee is empty" },
+  {
+    label: "my open work this sprint",
+    jql: "assignee = currentUser() AND status != done AND sprint is active ORDER BY priority ASC",
+  },
+  // This used to say `sprint is not empty` — "in *any* sprint", not this one.
+  { label: "unassigned in this sprint", jql: "sprint is active AND assignee is empty" },
   { label: "overdue", jql: "due < today AND status != done ORDER BY due ASC" },
   { label: "p0/p1 bugs", jql: "type = bug AND priority in (p0, p1)" },
   { label: "touched this week", jql: "updated >= -7d ORDER BY updated DESC" },
