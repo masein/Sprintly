@@ -2855,3 +2855,129 @@ async fn jql_finds_my_open_work_in_the_active_sprint(pool: PgPool) {
     want.sort();
     assert_eq!(got, want);
 }
+
+/// QA report 6: subtasks are reorderable by drag-and-drop, and the order is
+/// stored. New subtasks land after the arranged ones; a stale list is refused.
+#[sqlx::test(migrations = "./migrations")]
+async fn subtasks_keep_the_order_they_were_dragged_into(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "arranger").await;
+    make_project(&app, &token, "SUB").await;
+    let parent = make_task_http(&app, &token, "SUB", "the parent").await;
+    let mut kids = Vec::new();
+    for t in ["one", "two", "three"] {
+        let child = make_task_http(&app, &token, "SUB", t).await;
+        assert_eq!(
+            set_parent(&app, &token, &child, Some(&parent)).await,
+            StatusCode::NO_CONTENT
+        );
+        kids.push(child);
+    }
+    let order = |app: Router, token: String, parent: String| async move {
+        let (s, body) = send(
+            &app,
+            "GET",
+            &format!("/api/v1/tasks/{parent}/subtasks"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["key"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        kids
+    );
+
+    let wanted = vec![kids[2].clone(), kids[0].clone(), kids[1].clone()];
+    let (s, b) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&token),
+        Some(json!({ "keys": wanted })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT, "{b:?}");
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        wanted
+    );
+
+    // A new subtask goes after the arranged ones.
+    let four = make_task_http(&app, &token, "SUB", "four").await;
+    assert_eq!(
+        set_parent(&app, &token, &four, Some(&parent)).await,
+        StatusCode::NO_CONTENT
+    );
+    let mut with_four = wanted.clone();
+    with_four.push(four.clone());
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        with_four
+    );
+
+    // A list that leaves one out (someone added a subtask meanwhile) is a
+    // conflict, and changes nothing.
+    let (s, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&token),
+        Some(json!({ "keys": [&kids[0], &kids[1], &kids[2]] })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    // So is one naming a stranger, or the same key twice.
+    let (s, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&token),
+        Some(json!({ "keys": [&kids[0], &kids[0], &kids[1], &kids[2], &four] })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        with_four
+    );
+
+    // Moving a subtask to another parent forgets its old position.
+    let other = make_task_http(&app, &token, "SUB", "other parent").await;
+    let only = make_task_http(&app, &token, "SUB", "only child").await;
+    assert_eq!(
+        set_parent(&app, &token, &only, Some(&other)).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set_parent(&app, &token, &kids[2], Some(&other)).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        order(app.clone(), token.clone(), other.clone()).await,
+        vec![only, kids[2].clone()],
+        "a newcomer lands at the end, not at its old slot"
+    );
+
+    // Someone outside the project can't reorder it.
+    let (stranger, _) = register(&app, "outsider").await;
+    let (s, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&stranger),
+        Some(json!({ "keys": with_four })),
+    )
+    .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s}"
+    );
+}
