@@ -2181,6 +2181,11 @@ async fn send_with_headers(
     (status, value)
 }
 
+/// QA reports 5 and 6: attachments must work on whatever address the app was
+/// opened at — and behind a TLS-terminating CDN, where the proxy chain claims
+/// `http`. Path-form endpoints produce *relative* upload URLs (the page's own
+/// scheme and host), signed for the host the request arrived with; downloads
+/// go through a stable API link that re-signs at click time.
 #[sqlx::test(migrations = "./migrations")]
 async fn attachment_urls_are_signed_for_the_host_the_browser_used(pool: PgPool) {
     let app = app_with_path_s3(pool);
@@ -2191,89 +2196,129 @@ async fn attachment_urls_are_signed_for_the_host_the_browser_used(pool: PgPool) 
     let body =
         json!({ "filename": "spec.pdf", "mime_type": "application/pdf", "size_bytes": 1234 });
 
-    // Opened by hostname, behind the proxy: the upload URL must live on that
-    // hostname — a URL on some other host is exactly the "pending forever" bug.
-    let (status, a) = send_with_headers(
-        &app,
-        "POST",
-        &format!("/api/v1/tasks/{key}/attachments"),
-        Some(&token),
-        Some(body.clone()),
-        &[
-            ("x-forwarded-proto", "https"),
+    // Opened by hostname behind a CDN that terminates TLS: the proxy says
+    // `http`, the page is `https`. An absolute http:// URL is exactly what the
+    // browser blocked; a relative one can't disagree with the page.
+    for headers in [
+        vec![
+            ("x-forwarded-proto", "http"),
             ("x-forwarded-host", "sprintly.example"),
         ],
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{a:?}");
-    let url = a["upload_url"].as_str().expect("upload_url");
-    assert!(
-        url.starts_with("https://sprintly.example/s3/"),
-        "expected the request's origin, got {url}"
-    );
-
-    // Same deployment, opened by IP: same config, different origin, still right.
-    let (status, b) = send_with_headers(
-        &app,
-        "POST",
-        &format!("/api/v1/tasks/{key}/attachments"),
-        Some(&token),
-        Some(body.clone()),
-        &[
-            ("x-forwarded-proto", "http"),
+        vec![
+            ("x-forwarded-proto", "https"),
             ("x-forwarded-host", "212.33.206.34:8083"),
         ],
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{b:?}");
-    assert!(
-        b["upload_url"]
-            .as_str()
-            .unwrap()
-            .starts_with("http://212.33.206.34:8083/s3/"),
-        "{b:?}"
-    );
-
-    // No proxy headers at all (worker-style / odd client): the public URL
-    // fills in rather than producing a relative or empty host.
-    let (status, c) = send(
-        &app,
-        "POST",
-        &format!("/api/v1/tasks/{key}/attachments"),
-        Some(&token),
-        Some(body),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{c:?}");
-    assert!(
-        c["upload_url"]
-            .as_str()
-            .unwrap()
-            .starts_with("http://fallback.test/s3/"),
-        "{c:?}"
-    );
-
-    // A forged scheme can't smuggle anything into the URL.
-    let (status, d) = send_with_headers(
-        &app,
-        "POST",
-        &format!("/api/v1/tasks/{key}/attachments"),
-        Some(&token),
-        Some(json!({ "filename": "x.pdf", "mime_type": "application/pdf", "size_bytes": 1 })),
-        &[
+        vec![],
+        // A forged scheme/host can't smuggle anything into the URL either.
+        vec![
             ("x-forwarded-proto", "javascript"),
             ("x-forwarded-host", "evil.example/../"),
         ],
+    ] {
+        let (status, a) = send_with_headers(
+            &app,
+            "POST",
+            &format!("/api/v1/tasks/{key}/attachments"),
+            Some(&token),
+            Some(body.clone()),
+            &headers,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{a:?}");
+        let url = a["upload_url"].as_str().expect("upload_url");
+        assert!(
+            url.starts_with("/s3/sprintly/tasks/"),
+            "path-form endpoints give relative URLs, got {url} for {headers:?}"
+        );
+        assert!(url.contains("X-Amz-Signature="), "{url}");
+    }
+
+    // Finish one upload; the list hands out the stable download link, not a
+    // presigned URL that expires while the page sits open.
+    let (status, a) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{key}/attachments"),
+        Some(&token),
+        Some(body.clone()),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{d:?}");
-    assert!(
-        d["upload_url"]
-            .as_str()
-            .unwrap()
-            .starts_with("http://fallback.test/s3/"),
-        "junk headers must fall back, got {d:?}"
+    assert_eq!(status, StatusCode::CREATED);
+    let id = a["id"].as_str().unwrap().to_string();
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/attachments/{id}/complete"),
+        Some(&token),
+        Some(json!({ "size_bytes": 1234 })),
+    )
+    .await;
+    assert!(status.is_success());
+    let (_, list) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{key}/attachments"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let ready = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == id.as_str())
+        .unwrap();
+    assert_eq!(
+        ready["download_url"],
+        format!("/api/v1/attachments/{id}/download")
     );
+    // Unfinished uploads have no download link at all.
+    assert!(list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["status"] == "pending")
+        .all(|i| i["download_url"].is_null()));
+
+    // Following it: a fresh, short-lived, relative presigned URL, uncached.
+    let (status, headers, _) =
+        send_raw(&app, &format!("/api/v1/attachments/{id}/download"), &token).await;
+    assert_eq!(status, StatusCode::FOUND);
+    let loc = headers[header::LOCATION].to_str().unwrap();
+    assert!(loc.starts_with("/s3/sprintly/tasks/"), "{loc}");
+    assert!(loc.contains("X-Amz-Expires=120"), "{loc}");
+    assert!(loc.contains("response-content-disposition="), "{loc}");
+    assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+
+    // Access is checked at click time: an outsider gets nothing.
+    let (stranger, _) = register(&app, "attstranger").await;
+    let (status, _, _) = send_raw(
+        &app,
+        &format!("/api/v1/attachments/{id}/download"),
+        &stranger,
+    )
+    .await;
+    assert!(
+        status == StatusCode::FORBIDDEN || status == StatusCode::NOT_FOUND,
+        "{status}"
+    );
+    // A pending upload can't be downloaded.
+    let pending = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["status"] == "pending")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, _, _) = send_raw(
+        &app,
+        &format!("/api/v1/attachments/{pending}/download"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
 }
 
 // ── subtask counts ride along on every list (QA5 item 3) ─────────────────────

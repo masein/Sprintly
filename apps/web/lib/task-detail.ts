@@ -157,20 +157,29 @@ export async function uploadAttachment(
     mime_type: file.type || "application/octet-stream",
   });
 
-  await new Promise<void>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", init.upload_url);
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) resolve();
-      else reject(new Error(`upload failed: ${xhr.status}`));
-    };
-    xhr.onerror = () => reject(new Error("upload network error"));
-    if (file.type) xhr.setRequestHeader("Content-Type", file.type);
-    xhr.send(file);
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", init.upload_url);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error(`storage refused the upload (${xhr.status})`));
+      };
+      // Status 0: the browser never got a response — blocked (mixed content,
+      // a proxy without the /s3 route) or offline. Say that, not "error".
+      xhr.onerror = () => reject(new Error("the upload didn't reach storage"));
+      if (file.type) xhr.setRequestHeader("Content-Type", file.type);
+      xhr.send(file);
+    });
+  } catch (e) {
+    // Don't leave a row sitting at "pending" forever for bytes that never
+    // arrived (QA report 6) — take it back out, then report the failure.
+    await deleteAttachment(init.id).catch(() => {});
+    throw e;
+  }
 
   await completeAttachment(init.id, { size_bytes: file.size });
 }
