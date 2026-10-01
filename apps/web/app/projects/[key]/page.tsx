@@ -17,6 +17,7 @@ import { WebhooksManager } from "@/components/WebhooksManager";
 import { ProjectAppearance } from "@/components/ProjectAppearance";
 import { DeleteProjectModal } from "@/components/DeleteProjectModal";
 import { showToast } from "@/lib/toast";
+import { canEditTasks } from "@/lib/roles";
 import {
   archiveProject,
   editProject,
@@ -390,6 +391,7 @@ export default function ProjectPage() {
           projectId={project.id}
           board={defaultBoard}
           canManage={canManage && !project.archived_at}
+          canEditTasks={canEditTasks(project, isAdmin ? "admin" : null)}
           onBoardChange={(next) => {
             setBoards(
               boards.map((b) => (b.id === next.id ? next : b)),

@@ -43,6 +43,9 @@ import {
 import { listBacklog } from "@/lib/templates";
 import { search } from "@/lib/search";
 import { createTask } from "@/lib/tasks";
+import { getProject } from "@/lib/projects";
+import { me } from "@/lib/auth-bundle";
+import { canEditTasks, canManageProject } from "@/lib/roles";
 import { pluralize } from "@/lib/format";
 import type { ApiError } from "@/lib/api";
 
@@ -68,6 +71,18 @@ export default function SprintDetailPage() {
   const isSnapshot = tasksFullQ.data?.snapshot === true;
   const snappedAt = tasksFullQ.data?.snapped_at;
   const projectKey = sprintQ.data?.project_key;
+  // Who may do what here, matching the API: moving work in and out of the
+  // sprint is task work (leads + contributors); starting and completing it is
+  // the lead's. This page used to check the sprint's state only, so read-only
+  // members saw every control and met a 403 behind each.
+  const projectQ = useQuery({
+    queryKey: ["project", projectKey],
+    queryFn: () => getProject(projectKey!),
+    enabled: !!projectKey,
+  });
+  const meQ = useQuery({ queryKey: ["me"], queryFn: () => me() });
+  const canWork = canEditTasks(projectQ.data, meQ.data?.role);
+  const canRun = canManageProject(projectQ.data, meQ.data?.role);
   const sprintOpen = sprintQ.data != null && sprintQ.data.state !== "completed";
   const backlogQ = useQuery({
     queryKey: ["backlog", projectKey],
@@ -197,7 +212,7 @@ export default function SprintDetailPage() {
       </header>
 
       <div className="mb-4 flex items-center gap-2">
-        {sprint.state === "planned" && (
+        {sprint.state === "planned" && canRun && (
           <button
             type="button"
             onClick={() => start.mutate()}
@@ -207,7 +222,7 @@ export default function SprintDetailPage() {
             <Play size={14} /> start sprint
           </button>
         )}
-        {sprint.state === "active" && (
+        {sprint.state === "active" && canRun && (
           <button
             type="button"
             onClick={() => setCompleting(true)}
@@ -276,10 +291,10 @@ export default function SprintDetailPage() {
             <TaskList
               tasks={(tasksQ.data ?? []).filter((t) => matchesTask(taskQuery, t))}
               sprintId={id}
-              canManage={sprint.state !== "completed"}
-              draggable={sprintOpen}
+              canManage={sprint.state !== "completed" && canWork}
+              draggable={sprintOpen && canWork}
             />
-            {sprint.state !== "completed" && (
+            {sprint.state !== "completed" && canWork && (
               <AddTaskRow sprintId={id} projectKey={sprint.project_key} onAdded={invalidateLists} />
             )}
           </SprintDropZone>
@@ -288,6 +303,7 @@ export default function SprintDetailPage() {
               <BacklogPanel
                 items={(backlogQ.data ?? []).filter((t) => matchesTask(taskQuery, t))}
                 loading={backlogQ.isLoading}
+                draggable={canWork}
               />
             )}
             {sprint.summary_md && (
@@ -597,9 +613,11 @@ function DragHandle({
 function BacklogPanel({
   items,
   loading,
+  draggable,
 }: {
   items: { key: string; title: string; subtask_count: number }[];
   loading: boolean;
+  draggable: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: "backlog-drop" });
   return (
@@ -611,7 +629,7 @@ function BacklogPanel({
       }`}
     >
       <h2 className="mono mb-2 text-xs uppercase tracking-widest text-chrome-dim">
-        backlog ({items.length}) · drag across
+        backlog ({items.length}){draggable ? " · drag across" : ""}
       </h2>
       <ul className="max-h-72 space-y-1 overflow-y-auto">
         {loading && (
@@ -623,7 +641,13 @@ function BacklogPanel({
           </li>
         )}
         {items.map((t) => (
-          <BacklogRow key={t.key} taskKey={t.key} title={t.title} subtaskCount={t.subtask_count} />
+          <BacklogRow
+            key={t.key}
+            taskKey={t.key}
+            title={t.title}
+            subtaskCount={t.subtask_count}
+            draggable={draggable}
+          />
         ))}
       </ul>
     </section>
@@ -634,13 +658,16 @@ function BacklogRow({
   taskKey,
   title,
   subtaskCount,
+  draggable,
 }: {
   taskKey: string;
   title: string;
   subtaskCount: number;
+  draggable: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `backlog:${taskKey}`,
+    disabled: !draggable,
   });
   return (
     <li
@@ -653,7 +680,7 @@ function BacklogRow({
       }}
       className="flex items-center gap-2 rounded border border-white/10 bg-ink px-2 py-1.5"
     >
-      <DragHandle attributes={attributes} listeners={listeners} />
+      {draggable && <DragHandle attributes={attributes} listeners={listeners} />}
       <Link
         href={`/tasks/${taskKey}`}
         className="mono shrink-0 text-xs text-accent hover:underline"

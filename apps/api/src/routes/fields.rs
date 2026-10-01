@@ -246,8 +246,7 @@ async fn set_value(
     Path((task_key, field_id)): Path<(String, Uuid)>,
     Json(req): Json<SetValueReq>,
 ) -> AppResult<impl IntoResponse> {
-    let (task_id, project_id, _) =
-        resolve_task(&state, &user, &task_key, Action::EditProject).await?;
+    let (task_id, project_id, _) = resolve_task(&state, &user, &task_key, Action::EditTask).await?;
     let field = fields::get(&state.db, field_id).await?;
     if field.project_id != project_id {
         return Err(AppError::NotFound);
@@ -286,8 +285,7 @@ async fn clear_value(
     user: CurrentUser,
     Path((task_key, field_id)): Path<(String, Uuid)>,
 ) -> AppResult<impl IntoResponse> {
-    let (task_id, project_id, _) =
-        resolve_task(&state, &user, &task_key, Action::EditProject).await?;
+    let (task_id, project_id, _) = resolve_task(&state, &user, &task_key, Action::EditTask).await?;
     let field = fields::get(&state.db, field_id).await?;
     if field.project_id != project_id {
         return Err(AppError::NotFound);

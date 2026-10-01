@@ -177,12 +177,16 @@ export function Board({
   projectId,
   board,
   canManage,
+  canEditTasks,
   onBoardChange,
 }: {
   projectKey: string;
   projectId: string;
   board: BoardModel;
+  /** Columns and board setup — leads. */
   canManage: boolean;
+  /** Cards: drag between columns, add new ones — leads and contributors. */
+  canEditTasks: boolean;
   onBoardChange: (next: BoardModel) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -347,9 +351,9 @@ export function Board({
           projectId={projectId}
           board={board}
           tasks={tasks}
-          canMoveCards={canManage}
+          canMoveCards={canEditTasks}
           manageColumns={canManage}
-          canAddCards={canManage}
+          canAddCards={canEditTasks}
           cardDefaults={{ sprint_id: scopedSprintId }}
           move={move}
           onBoardChange={onBoardChange}
@@ -375,9 +379,9 @@ export function Board({
                 projectId={projectId}
                 board={board}
                 tasks={lane.tasks}
-                canMoveCards={canManage}
+                canMoveCards={canEditTasks}
                 manageColumns={false}
-                canAddCards={canManage}
+                canAddCards={canEditTasks}
                 cardDefaults={
                   // The lane's own defaults (incl. its sprint when grouped by
                   // sprint); the board scope's sprint overrides only when the

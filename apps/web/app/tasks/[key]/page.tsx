@@ -27,6 +27,7 @@ import { AssigneePicker } from "@/components/AssigneePicker";
 import { CopyTaskLink } from "@/components/CopyTaskLink";
 import { deleteTask, editTask, getTask, moveTask, restoreTask, type Task } from "@/lib/tasks";
 import { showToast } from "@/lib/toast";
+import { canEditTasks } from "@/lib/roles";
 import { listSubtasks, setTaskParent } from "@/lib/relations";
 import { search } from "@/lib/search";
 import { assignTaskEpic, listEpics } from "@/lib/roadmap";
@@ -80,7 +81,10 @@ export default function TaskPage() {
   }
 
   const task = taskQ.data;
-  const canManage = projectQ.data?.your_role === "lead" || projectQ.data?.your_role === "contributor";
+  // Mirrors the API's EditTask: leads + contributors (+ admins), not on an
+  // archived project. It said lead-or-contributor before while the API took
+  // only leads, so contributors met a 403 behind every control on this page.
+  const canManage = canEditTasks(projectQ.data, meQ.data?.role);
   const canDelete = projectQ.data?.your_role === "lead" || meQ.data?.role === "admin";
 
   return (

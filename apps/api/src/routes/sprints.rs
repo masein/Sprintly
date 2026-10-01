@@ -591,7 +591,7 @@ async fn assign_task(
 ) -> AppResult<impl IntoResponse> {
     let project_id = project_of_sprint(&state.db, id).await?;
     let ctx = project_ctx::load_by_id(&state.db, project_id, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
     let updated = sqlx::query(
@@ -618,7 +618,7 @@ async fn unassign_task(
 ) -> AppResult<impl IntoResponse> {
     let project_id = project_of_sprint(&state.db, id).await?;
     let ctx = project_ctx::load_by_id(&state.db, project_id, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
     sqlx::query(

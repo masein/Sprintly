@@ -12,6 +12,7 @@ import { CheckSquare, Plus, Square, Trash2, UserPlus, UserMinus } from "lucide-r
 import { SubtaskBadge } from "@/components/SubtaskBadge";
 import { CopyTaskLink } from "@/components/CopyTaskLink";
 import { TaskTitleInput } from "@/components/TaskTitleInput";
+import { canEditTasks, canManageProject } from "@/lib/roles";
 import { splitCommitMessage } from "@/lib/commitMessage";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
@@ -96,11 +97,11 @@ export default function BacklogPage() {
     );
   }
 
-  const canManage = projectQ.data?.your_role === "lead";
-  // Task creation is open to leads and contributors (watchers/viewers can't) —
-  // mirrors the API's create-task gate.
-  const canCreate =
-    projectQ.data?.your_role === "lead" || projectQ.data?.your_role === "contributor";
+  // Triage (select + bulk assign/move) and filing tasks: leads and
+  // contributors, like the API's EditTask. Bulk delete stays with leads.
+  const canManage = canEditTasks(projectQ.data, meQ.data?.role);
+  const canCreate = canManage;
+  const canDelete = canManageProject(projectQ.data, meQ.data?.role);
   const allItems = backlogQ.data ?? [];
   // Search filters in place; bulk actions then apply to what you can see, which
   // is the point — triage a slice without hand-picking rows.
@@ -169,16 +170,18 @@ export default function BacklogPage() {
               ))}
             </select>
           </label>
-          <button
-            type="button"
-            onClick={() => {
-              if (confirm(`Delete ${selected.size} task(s)? Soft delete — an admin can restore.`))
-                apply.mutate({ op: "delete" });
-            }}
-            className="inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-chrome-dim hover:border-red-500/40 hover:text-red-300"
-          >
-            <Trash2 size={12} /> delete
-          </button>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm(`Delete ${selected.size} task(s)? Soft delete — an admin can restore.`))
+                  apply.mutate({ op: "delete" });
+              }}
+              className="inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-chrome-dim hover:border-red-500/40 hover:text-red-300"
+            >
+              <Trash2 size={12} /> delete
+            </button>
+          )}
           {error && <span className="text-red-300">{error}</span>}
         </div>
       )}
