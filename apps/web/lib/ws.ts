@@ -144,6 +144,8 @@ function routeToQueryCache(e: ServerEvent, qc: QueryClient) {
       qc.invalidateQueries({ queryKey: ["sprints"] });
       qc.invalidateQueries({ queryKey: ["sprint-tasks"] });
       qc.invalidateQueries({ queryKey: ["sprint-burndown"] });
+      qc.invalidateQueries({ queryKey: ["sprint-stats"] });
+      qc.invalidateQueries({ queryKey: ["velocity"] });
       qc.invalidateQueries({ queryKey: ["backlog"] });
       break;
     case "comment_created":

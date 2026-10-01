@@ -15,6 +15,16 @@ export const listSubtasks = (taskKey: string) =>
     .then((r) => r.items);
 
 /**
+ * Put a task's subtasks in this order. `keys` must be exactly the current
+ * live subtasks — the server answers 409 if the list changed underneath.
+ */
+export const reorderSubtasks = (taskKey: string, keys: string[]) =>
+  api<void>(`/tasks/${encodeURIComponent(taskKey)}/subtasks/order`, {
+    method: "PUT",
+    body: { keys },
+  });
+
+/**
  * Convert / promote / reparent: a task key makes this task a subtask of it,
  * null promotes it back to a top-level task. One level deep; the server
  * refuses nesting, cross-project parents, and demoting a task that has

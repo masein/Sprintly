@@ -311,12 +311,17 @@ async fn create_task(
             id, project_id, board_id, column_id, key, title, description,
             type, priority, status, assignee_id, reporter_id, parent_task_id,
             estimate_minutes, story_points, due_date, labels, order_in_column,
-            sprint_id
+            sprint_id, subtask_position
         ) VALUES (
             $1, $2, $3, $4, $5, $6, $7,
             $8, $9, $10, $11, $12, $13,
             $14, $15, $16, $17, $18,
-            $19
+            $19,
+            -- A new subtask goes to the end of its parent's arranged order.
+            CASE WHEN $13::uuid IS NULL THEN NULL ELSE (
+                SELECT COALESCE(MAX(subtask_position), 0) + 1 FROM tasks
+                WHERE parent_task_id = $13 AND deleted_at IS NULL
+            ) END
         )
         "#,
     )

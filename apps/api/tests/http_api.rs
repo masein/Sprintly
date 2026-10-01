@@ -2181,6 +2181,11 @@ async fn send_with_headers(
     (status, value)
 }
 
+/// QA reports 5 and 6: attachments must work on whatever address the app was
+/// opened at — and behind a TLS-terminating CDN, where the proxy chain claims
+/// `http`. Path-form endpoints produce *relative* upload URLs (the page's own
+/// scheme and host), signed for the host the request arrived with; downloads
+/// go through a stable API link that re-signs at click time.
 #[sqlx::test(migrations = "./migrations")]
 async fn attachment_urls_are_signed_for_the_host_the_browser_used(pool: PgPool) {
     let app = app_with_path_s3(pool);
@@ -2191,89 +2196,129 @@ async fn attachment_urls_are_signed_for_the_host_the_browser_used(pool: PgPool) 
     let body =
         json!({ "filename": "spec.pdf", "mime_type": "application/pdf", "size_bytes": 1234 });
 
-    // Opened by hostname, behind the proxy: the upload URL must live on that
-    // hostname — a URL on some other host is exactly the "pending forever" bug.
-    let (status, a) = send_with_headers(
-        &app,
-        "POST",
-        &format!("/api/v1/tasks/{key}/attachments"),
-        Some(&token),
-        Some(body.clone()),
-        &[
-            ("x-forwarded-proto", "https"),
+    // Opened by hostname behind a CDN that terminates TLS: the proxy says
+    // `http`, the page is `https`. An absolute http:// URL is exactly what the
+    // browser blocked; a relative one can't disagree with the page.
+    for headers in [
+        vec![
+            ("x-forwarded-proto", "http"),
             ("x-forwarded-host", "sprintly.example"),
         ],
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{a:?}");
-    let url = a["upload_url"].as_str().expect("upload_url");
-    assert!(
-        url.starts_with("https://sprintly.example/s3/"),
-        "expected the request's origin, got {url}"
-    );
-
-    // Same deployment, opened by IP: same config, different origin, still right.
-    let (status, b) = send_with_headers(
-        &app,
-        "POST",
-        &format!("/api/v1/tasks/{key}/attachments"),
-        Some(&token),
-        Some(body.clone()),
-        &[
-            ("x-forwarded-proto", "http"),
+        vec![
+            ("x-forwarded-proto", "https"),
             ("x-forwarded-host", "212.33.206.34:8083"),
         ],
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{b:?}");
-    assert!(
-        b["upload_url"]
-            .as_str()
-            .unwrap()
-            .starts_with("http://212.33.206.34:8083/s3/"),
-        "{b:?}"
-    );
-
-    // No proxy headers at all (worker-style / odd client): the public URL
-    // fills in rather than producing a relative or empty host.
-    let (status, c) = send(
-        &app,
-        "POST",
-        &format!("/api/v1/tasks/{key}/attachments"),
-        Some(&token),
-        Some(body),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{c:?}");
-    assert!(
-        c["upload_url"]
-            .as_str()
-            .unwrap()
-            .starts_with("http://fallback.test/s3/"),
-        "{c:?}"
-    );
-
-    // A forged scheme can't smuggle anything into the URL.
-    let (status, d) = send_with_headers(
-        &app,
-        "POST",
-        &format!("/api/v1/tasks/{key}/attachments"),
-        Some(&token),
-        Some(json!({ "filename": "x.pdf", "mime_type": "application/pdf", "size_bytes": 1 })),
-        &[
+        vec![],
+        // A forged scheme/host can't smuggle anything into the URL either.
+        vec![
             ("x-forwarded-proto", "javascript"),
             ("x-forwarded-host", "evil.example/../"),
         ],
+    ] {
+        let (status, a) = send_with_headers(
+            &app,
+            "POST",
+            &format!("/api/v1/tasks/{key}/attachments"),
+            Some(&token),
+            Some(body.clone()),
+            &headers,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{a:?}");
+        let url = a["upload_url"].as_str().expect("upload_url");
+        assert!(
+            url.starts_with("/s3/sprintly/tasks/"),
+            "path-form endpoints give relative URLs, got {url} for {headers:?}"
+        );
+        assert!(url.contains("X-Amz-Signature="), "{url}");
+    }
+
+    // Finish one upload; the list hands out the stable download link, not a
+    // presigned URL that expires while the page sits open.
+    let (status, a) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{key}/attachments"),
+        Some(&token),
+        Some(body.clone()),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{d:?}");
-    assert!(
-        d["upload_url"]
-            .as_str()
-            .unwrap()
-            .starts_with("http://fallback.test/s3/"),
-        "junk headers must fall back, got {d:?}"
+    assert_eq!(status, StatusCode::CREATED);
+    let id = a["id"].as_str().unwrap().to_string();
+    let (status, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/attachments/{id}/complete"),
+        Some(&token),
+        Some(json!({ "size_bytes": 1234 })),
+    )
+    .await;
+    assert!(status.is_success());
+    let (_, list) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{key}/attachments"),
+        Some(&token),
+        None,
+    )
+    .await;
+    let ready = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == id.as_str())
+        .unwrap();
+    assert_eq!(
+        ready["download_url"],
+        format!("/api/v1/attachments/{id}/download")
     );
+    // Unfinished uploads have no download link at all.
+    assert!(list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["status"] == "pending")
+        .all(|i| i["download_url"].is_null()));
+
+    // Following it: a fresh, short-lived, relative presigned URL, uncached.
+    let (status, headers, _) =
+        send_raw(&app, &format!("/api/v1/attachments/{id}/download"), &token).await;
+    assert_eq!(status, StatusCode::FOUND);
+    let loc = headers[header::LOCATION].to_str().unwrap();
+    assert!(loc.starts_with("/s3/sprintly/tasks/"), "{loc}");
+    assert!(loc.contains("X-Amz-Expires=120"), "{loc}");
+    assert!(loc.contains("response-content-disposition="), "{loc}");
+    assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+
+    // Access is checked at click time: an outsider gets nothing.
+    let (stranger, _) = register(&app, "attstranger").await;
+    let (status, _, _) = send_raw(
+        &app,
+        &format!("/api/v1/attachments/{id}/download"),
+        &stranger,
+    )
+    .await;
+    assert!(
+        status == StatusCode::FORBIDDEN || status == StatusCode::NOT_FOUND,
+        "{status}"
+    );
+    // A pending upload can't be downloaded.
+    let pending = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["status"] == "pending")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, _, _) = send_raw(
+        &app,
+        &format!("/api/v1/attachments/{pending}/download"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
 }
 
 // ── subtask counts ride along on every list (QA5 item 3) ─────────────────────
@@ -2643,6 +2688,1152 @@ async fn a_completed_sprint_remembers_its_tasks_even_after_carry_over(pool: PgPo
     )
     .await;
     assert_eq!(live["snapshot"], false);
+}
+
+/// QA report 6: label names are editable. Tasks hold labels by name, so a
+/// rename has to follow onto every tagged task — otherwise they keep the old
+/// name, lose its colour, and stop matching `label:<new>`.
+#[sqlx::test(migrations = "./migrations")]
+async fn renaming_a_label_renames_it_on_every_task(pool: PgPool) {
+    let app = app(pool.clone());
+    let (token, _) = register(&app, "relabeler").await;
+    make_project(&app, &token, "RLB").await;
+
+    let (status, label) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/RLB/labels",
+        Some(&token),
+        Some(json!({ "name": "front", "color": "#7c5cff" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{label:?}");
+    let id = label["id"].as_str().unwrap().to_string();
+
+    let tagged = make_task_http(&app, &token, "RLB", "tagged").await;
+    let both = make_task_http(&app, &token, "RLB", "already has the new name").await;
+    let other = make_task_http(&app, &token, "RLB", "someone else's label").await;
+    for (key, labels) in [
+        (&tagged, json!(["urgent", "FRONT"])),
+        (&both, json!(["front", "frontend"])),
+        (&other, json!(["back"])),
+    ] {
+        let (s, b) = send(
+            &app,
+            "PATCH",
+            &format!("/api/v1/tasks/{key}"),
+            Some(&token),
+            Some(json!({ "labels": labels })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b:?}");
+    }
+
+    let (status, renamed) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/labels/{id}"),
+        Some(&token),
+        Some(json!({ "name": "frontend" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{renamed:?}");
+    assert_eq!(renamed["name"], "frontend");
+    assert_eq!(renamed["color"], "#7c5cff", "a rename keeps the colour");
+
+    let labels_of = |key: String| {
+        let app = app.clone();
+        let token = token.clone();
+        async move {
+            let (_, t) = send(
+                &app,
+                "GET",
+                &format!("/api/v1/tasks/{key}"),
+                Some(&token),
+                None,
+            )
+            .await;
+            t["labels"].clone()
+        }
+    };
+    // Case-insensitive match, position kept.
+    assert_eq!(
+        labels_of(tagged.clone()).await,
+        json!(["urgent", "frontend"])
+    );
+    // The rename would have produced a duplicate; one copy survives.
+    assert_eq!(labels_of(both.clone()).await, json!(["frontend"]));
+    // Unrelated labels are untouched.
+    assert_eq!(labels_of(other.clone()).await, json!(["back"]));
+
+    // A colour-only edit renames nothing.
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/labels/{id}"),
+        Some(&token),
+        Some(json!({ "color": "#22d3ee" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(labels_of(tagged).await, json!(["urgent", "frontend"]));
+
+    // Renaming onto a name the palette already has is a conflict, not a merge.
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/RLB/labels",
+        Some(&token),
+        Some(json!({ "name": "design", "color": "#10b981" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/labels/{id}"),
+        Some(&token),
+        Some(json!({ "name": "Design" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+/// QA report 6: "my open work in the running sprint", the way Jira people
+/// write it — `sprint is active` used to be a parse error at character 59.
+#[sqlx::test(migrations = "./migrations")]
+async fn jql_finds_my_open_work_in_the_active_sprint(pool: PgPool) {
+    let app = app(pool);
+    let (token, me) = register(&app, "sprinter").await;
+    let my_id = me["id"].as_str().unwrap().to_string();
+    make_project(&app, &token, "SIA").await;
+    let cols = columns(&app, &token, "SIA").await;
+    let done_col = cols.iter().find(|(_, c)| c == "done").unwrap().0.clone();
+
+    let running = make_sprint(&app, &token, "SIA", "Running").await;
+    let later = make_sprint(&app, &token, "SIA", "Later").await;
+
+    let mine_open = make_task_http(&app, &token, "SIA", "mine, open, running sprint").await;
+    let mine_done = make_task_http(&app, &token, "SIA", "mine, done, running sprint").await;
+    let mine_later = make_task_http(&app, &token, "SIA", "mine, open, future sprint").await;
+    let mine_backlog = make_task_http(&app, &token, "SIA", "mine, open, no sprint").await;
+    let nobodys = make_task_http(&app, &token, "SIA", "unassigned, running sprint").await;
+
+    for key in [&mine_open, &mine_done, &mine_later, &mine_backlog] {
+        let (s, b) = send(
+            &app,
+            "PATCH",
+            &format!("/api/v1/tasks/{key}"),
+            Some(&token),
+            Some(json!({ "assignee_id": my_id })),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b:?}");
+    }
+    for (sprint, key) in [
+        (&running, &mine_open),
+        (&running, &mine_done),
+        (&running, &nobodys),
+        (&later, &mine_later),
+    ] {
+        let (s, _) = send(
+            &app,
+            "POST",
+            &format!("/api/v1/sprints/{sprint}/tasks/{key}"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+    }
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{mine_done}/move"),
+        Some(&token),
+        Some(json!({ "column_id": done_col })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, b) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{running}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b:?}");
+
+    let (status, body) = jql(
+        &app,
+        &token,
+        "assignee = currentUser() AND status != done AND sprint is active ORDER BY priority ASC",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(keys(&body), vec![mine_open.clone()]);
+
+    // Jira's spelling of the same thing.
+    let (_, body) = jql(
+        &app,
+        &token,
+        "assignee = currentUser() AND sprint in openSprints()",
+    )
+    .await;
+    let mut got = keys(&body);
+    got.sort();
+    let mut want = vec![mine_open.clone(), mine_done.clone(), mine_later.clone()];
+    want.sort();
+    assert_eq!(got, want, "openSprints() is active + not yet started");
+
+    // "Not in the running sprint" includes the backlog.
+    let (_, body) = jql(
+        &app,
+        &token,
+        "assignee = currentUser() AND sprint is not active",
+    )
+    .await;
+    let mut got = keys(&body);
+    got.sort();
+    let mut want = vec![mine_later, mine_backlog];
+    want.sort();
+    assert_eq!(got, want);
+}
+
+/// QA report 6: subtasks are reorderable by drag-and-drop, and the order is
+/// stored. New subtasks land after the arranged ones; a stale list is refused.
+#[sqlx::test(migrations = "./migrations")]
+async fn subtasks_keep_the_order_they_were_dragged_into(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "arranger").await;
+    make_project(&app, &token, "SUB").await;
+    let parent = make_task_http(&app, &token, "SUB", "the parent").await;
+    let mut kids = Vec::new();
+    for t in ["one", "two", "three"] {
+        let child = make_task_http(&app, &token, "SUB", t).await;
+        assert_eq!(
+            set_parent(&app, &token, &child, Some(&parent)).await,
+            StatusCode::NO_CONTENT
+        );
+        kids.push(child);
+    }
+    let order = |app: Router, token: String, parent: String| async move {
+        let (s, body) = send(
+            &app,
+            "GET",
+            &format!("/api/v1/tasks/{parent}/subtasks"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["key"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        kids
+    );
+
+    let wanted = vec![kids[2].clone(), kids[0].clone(), kids[1].clone()];
+    let (s, b) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&token),
+        Some(json!({ "keys": wanted })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT, "{b:?}");
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        wanted
+    );
+
+    // A new subtask goes after the arranged ones.
+    let four = make_task_http(&app, &token, "SUB", "four").await;
+    assert_eq!(
+        set_parent(&app, &token, &four, Some(&parent)).await,
+        StatusCode::NO_CONTENT
+    );
+    let mut with_four = wanted.clone();
+    with_four.push(four.clone());
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        with_four
+    );
+
+    // A list that leaves one out (someone added a subtask meanwhile) is a
+    // conflict, and changes nothing.
+    let (s, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&token),
+        Some(json!({ "keys": [&kids[0], &kids[1], &kids[2]] })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    // So is one naming a stranger, or the same key twice.
+    let (s, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&token),
+        Some(json!({ "keys": [&kids[0], &kids[0], &kids[1], &kids[2], &four] })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert_eq!(
+        order(app.clone(), token.clone(), parent.clone()).await,
+        with_four
+    );
+
+    // Moving a subtask to another parent forgets its old position.
+    let other = make_task_http(&app, &token, "SUB", "other parent").await;
+    let only = make_task_http(&app, &token, "SUB", "only child").await;
+    assert_eq!(
+        set_parent(&app, &token, &only, Some(&other)).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set_parent(&app, &token, &kids[2], Some(&other)).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        order(app.clone(), token.clone(), other.clone()).await,
+        vec![only, kids[2].clone()],
+        "a newcomer lands at the end, not at its old slot"
+    );
+
+    // Someone outside the project can't reorder it.
+    let (stranger, _) = register(&app, "outsider").await;
+    let (s, _) = send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{parent}/subtasks/order"),
+        Some(&stranger),
+        Some(json!({ "keys": with_four })),
+    )
+    .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s}"
+    );
+}
+
+/// QA report 6: the team manages a task's watchers — not only "watch me".
+/// Leads and contributors add/remove teammates; read-only members only
+/// themselves; nobody outside the project can be added.
+#[sqlx::test(migrations = "./migrations")]
+async fn the_team_manages_who_watches_a_task(pool: PgPool) {
+    let app = app(pool);
+    let (lead, _) = register(&app, "wlead").await;
+    let (mate, mate_user) = register(&app, "wmate").await;
+    let (reader, reader_user) = register(&app, "wreader").await;
+    let (_, outsider_user) = register(&app, "woutsider").await;
+    make_project(&app, &lead, "WAT").await;
+    for (u, role) in [(&mate_user, "contributor"), (&reader_user, "watcher")] {
+        let (s, b) = send(
+            &app,
+            "POST",
+            "/api/v1/projects/WAT/members",
+            Some(&lead),
+            Some(json!({ "user_id": u["id"], "role": role })),
+        )
+        .await;
+        assert!(s.is_success(), "{b:?}");
+    }
+    let task = make_task_http(&app, &lead, "WAT", "watch this").await;
+    let add = |token: String, user_id: Value| {
+        let app = app.clone();
+        let task = task.clone();
+        async move {
+            send(
+                &app,
+                "POST",
+                &format!("/api/v1/tasks/{task}/watchers"),
+                Some(&token),
+                Some(json!({ "user_id": user_id })),
+            )
+            .await
+            .0
+        }
+    };
+    let watchers = || {
+        let app = app.clone();
+        let task = task.clone();
+        let lead = lead.clone();
+        async move {
+            let (_, b) = send(
+                &app,
+                "GET",
+                &format!("/api/v1/tasks/{task}/watchers"),
+                Some(&lead),
+                None,
+            )
+            .await;
+            let mut h: Vec<String> = b["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|w| w["handle"].as_str().unwrap().to_string())
+                .collect();
+            h.sort();
+            h
+        }
+    };
+
+    // The lead adds a contributor; the contributor adds the read-only member.
+    assert_eq!(
+        add(lead.clone(), mate_user["id"].clone()).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        add(mate.clone(), reader_user["id"].clone()).await,
+        StatusCode::NO_CONTENT
+    );
+    // The lead is on the list already: reporters auto-watch what they file.
+    assert_eq!(watchers().await, vec!["wlead", "wmate", "wreader"]);
+
+    // Someone who isn't on the project can't be made to watch it.
+    assert_eq!(
+        add(lead.clone(), outsider_user["id"].clone()).await,
+        StatusCode::BAD_REQUEST
+    );
+    // Nor can a made-up user id (used to be an FK violation → 500).
+    assert_eq!(
+        add(lead.clone(), json!(uuid::Uuid::now_v7().to_string())).await,
+        StatusCode::BAD_REQUEST
+    );
+
+    // A read-only member watches themselves, but doesn't manage others.
+    let (_, lead_me) = send(&app, "GET", "/api/v1/users/me", Some(&lead), None).await;
+    assert_eq!(
+        add(reader.clone(), lead_me["id"].clone()).await,
+        StatusCode::FORBIDDEN
+    );
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!(
+            "/api/v1/tasks/{task}/watchers/{}",
+            mate_user["id"].as_str().unwrap()
+        ),
+        Some(&reader),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!(
+            "/api/v1/tasks/{task}/watchers/{}",
+            reader_user["id"].as_str().unwrap()
+        ),
+        Some(&reader),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT, "anyone can stop watching");
+
+    // A contributor takes a teammate off.
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!(
+            "/api/v1/tasks/{task}/watchers/{}",
+            mate_user["id"].as_str().unwrap()
+        ),
+        Some(&mate),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    assert_eq!(watchers().await, vec!["wlead"]);
+}
+
+/// QA report 6: a safe way to delete a project. Lead only, the key must be
+/// typed out, everything in it disappears at once — and an admin can bring
+/// it back exactly as it was (without resurrecting tasks deleted earlier).
+#[sqlx::test(migrations = "./migrations")]
+async fn deleting_a_project_is_confirmed_hidden_and_restorable(pool: PgPool) {
+    let app = app(pool);
+    // First account is the bootstrap admin.
+    let (admin, _) = register(&app, "padmin").await;
+    let (lead, _) = register(&app, "plead").await;
+    let (mate, mate_user) = register(&app, "pmate").await;
+    make_project(&app, &lead, "DEL").await;
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/DEL/members",
+        Some(&lead),
+        Some(json!({ "user_id": mate_user["id"], "role": "contributor" })),
+    )
+    .await;
+    assert!(s.is_success());
+    let keep = make_task_http(&app, &lead, "DEL", "comes back").await;
+    let gone = make_task_http(&app, &lead, "DEL", "was already deleted").await;
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tasks/{gone}"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert!(s.is_success());
+
+    let del = |token: String, confirm: &'static str| {
+        let app = app.clone();
+        async move {
+            send(
+                &app,
+                "DELETE",
+                "/api/v1/projects/DEL",
+                Some(&token),
+                Some(json!({ "confirm": confirm })),
+            )
+            .await
+        }
+    };
+
+    // A contributor can't, whatever they type.
+    assert_eq!(del(mate.clone(), "DEL").await.0, StatusCode::FORBIDDEN);
+    // The lead has to type the key exactly.
+    let (s, b) = del(lead.clone(), "del").await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(
+        b["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("DEL"),
+        "{b:?}"
+    );
+    assert_eq!(del(lead.clone(), "").await.0, StatusCode::BAD_REQUEST);
+    // And then it's gone — the project, its tasks, from every angle.
+    assert_eq!(del(lead.clone(), "DEL").await.0, StatusCode::NO_CONTENT);
+    let (s, _) = send(&app, "GET", "/api/v1/projects/DEL", Some(&lead), None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (_, list) = send(&app, "GET", "/api/v1/projects", Some(&lead), None).await;
+    assert!(list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|p| p["key"] != "DEL"));
+    let (s, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{keep}"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    // Deleting twice is a 404, not a second audit row.
+    assert_eq!(del(lead.clone(), "DEL").await.0, StatusCode::NOT_FOUND);
+
+    // Only admins see the list, and it says what would come back.
+    let (s, _) = send(
+        &app,
+        "GET",
+        "/api/v1/admin/deleted-projects",
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, deleted) = send(
+        &app,
+        "GET",
+        "/api/v1/admin/deleted-projects",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{deleted:?}");
+    let row = deleted["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["key"] == "DEL")
+        .cloned()
+        .expect("listed");
+    assert_eq!(
+        row["task_count"], 1,
+        "the earlier-deleted task isn't counted"
+    );
+    assert_eq!(row["key_taken"], false);
+    let id = row["id"].as_str().unwrap().to_string();
+
+    // The key is free for a new project meanwhile; restoring then conflicts.
+    make_project(&app, &lead, "DEL").await;
+    let (s, _) = send(
+        &app,
+        "GET",
+        "/api/v1/admin/deleted-projects",
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/deleted-projects/{id}/restore"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    // Free the key again (delete the newcomer), then restore the original.
+    assert_eq!(del(lead.clone(), "DEL").await.0, StatusCode::NO_CONTENT);
+    let (s, b) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/deleted-projects/{id}/restore"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b:?}");
+    assert_eq!(b["tasks"], 1);
+    let (s, t) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{keep}"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{t:?}");
+    assert_eq!(t["title"], "comes back");
+    let (s, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/tasks/{gone}"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::NOT_FOUND,
+        "deleted before the project, stays deleted"
+    );
+
+    // Both ends are in the audit log.
+    let (_, audit) = send(&app, "GET", "/api/v1/admin/audit", Some(&admin), None).await;
+    let actions: Vec<&str> = audit["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|a| a["action"].as_str())
+        .collect();
+    assert!(actions.contains(&"project.deleted"), "{actions:?}");
+    assert!(actions.contains(&"project.restored"), "{actions:?}");
+}
+
+/// QA report 6: an epic opens to show its tasks. The list is exactly what the
+/// bar's "done/total" counts, unfinished work first.
+#[sqlx::test(migrations = "./migrations")]
+async fn an_epic_lists_the_tasks_its_progress_counts(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "epicist").await;
+    make_project(&app, &token, "EPC").await;
+    let cols = columns(&app, &token, "EPC").await;
+    let done_col = cols.iter().find(|(_, c)| c == "done").unwrap().0.clone();
+    let (s, epic) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/EPC/epics",
+        Some(&token),
+        Some(json!({ "name": "Phase 3" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{epic:?}");
+    let epic_id = epic["id"].as_str().unwrap().to_string();
+
+    let mut keys = Vec::new();
+    for (i, t) in ["a", "b", "c", "d"].iter().enumerate() {
+        let k = make_task_http(&app, &token, "EPC", t).await;
+        let (s, _) = send(
+            &app,
+            "PUT",
+            &format!("/api/v1/tasks/{k}/epic"),
+            Some(&token),
+            Some(json!({ "epic_id": epic_id })),
+        )
+        .await;
+        assert!(s.is_success());
+        if i < 3 {
+            let (s, _) = send(
+                &app,
+                "POST",
+                &format!("/api/v1/tasks/{k}/move"),
+                Some(&token),
+                Some(json!({ "column_id": done_col })),
+            )
+            .await;
+            assert_eq!(s, StatusCode::OK);
+        }
+        keys.push(k);
+    }
+    // A task outside the epic, and a deleted one inside it, don't show.
+    make_task_http(&app, &token, "EPC", "elsewhere").await;
+    let ghost = make_task_http(&app, &token, "EPC", "ghost").await;
+    send(
+        &app,
+        "PUT",
+        &format!("/api/v1/tasks/{ghost}/epic"),
+        Some(&token),
+        Some(json!({ "epic_id": epic_id })),
+    )
+    .await;
+    send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/tasks/{ghost}"),
+        Some(&token),
+        None,
+    )
+    .await;
+
+    let (s, list) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/epics/{epic_id}/tasks"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{list:?}");
+    let items = list["items"].as_array().unwrap();
+    assert_eq!(items.len(), 4);
+    assert_eq!(items[0]["key"], keys[3], "the open one leads");
+    assert_eq!(items[0]["status"], "todo");
+    assert_eq!(items.iter().filter(|i| i["status"] == "done").count(), 3);
+
+    // And the bar's numbers agree.
+    let (_, epics) = send(
+        &app,
+        "GET",
+        "/api/v1/projects/EPC/epics",
+        Some(&token),
+        None,
+    )
+    .await;
+    let e = epics
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == epic_id.as_str())
+        .unwrap();
+    assert_eq!(
+        (e["done_count"].as_i64(), e["task_count"].as_i64()),
+        (Some(3), Some(4))
+    );
+
+    // Outsiders can't peek.
+    let (other, _) = register(&app, "epicoutsider").await;
+    let (s, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/epics/{epic_id}/tasks"),
+        Some(&other),
+        None,
+    )
+    .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s}"
+    );
+}
+
+/// QA report 6: a sprint report in Word and PDF — all statuses, subtasks,
+/// descriptions, commits, attached files — and for a completed sprint, the
+/// tasks it had at completion even after carry-over moved them.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_sprint_exports_as_a_word_and_pdf_report(pool: PgPool) {
+    let app = app(pool.clone());
+    let (token, _) = register(&app, "sprintreporter").await;
+    make_project(&app, &token, "SRP").await;
+    let cols = columns(&app, &token, "SRP").await;
+    let done_col = cols.iter().find(|(_, c)| c == "done").unwrap().0.clone();
+    let (s, sprint) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/SRP/sprints",
+        Some(&token),
+        Some(json!({
+            "name": "Sprint 61",
+            "goal": "Improve system stability",
+            "starts_at": "2026-09-28T00:00:00Z",
+            "ends_at": "2026-10-05T00:00:00Z",
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{sprint:?}");
+    let sid = sprint["id"].as_str().unwrap().to_string();
+
+    let (s, t1) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/SRP/tasks",
+        Some(&token),
+        Some(json!({ "title": "mirror-sync is bloating the disk",
+                     "description": "Prune old snapshots nightly.",
+                     "story_points": 5 })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let t1 = t1["key"].as_str().unwrap().to_string();
+    let t2 = make_task_http(&app, &token, "SRP", "deploy on Parsian").await;
+    let sub = make_task_http(&app, &token, "SRP", "write the runbook").await;
+    assert_eq!(
+        set_parent(&app, &token, &sub, Some(&t1)).await,
+        StatusCode::NO_CONTENT
+    );
+    let outside = make_task_http(&app, &token, "SRP", "not in this sprint").await;
+    for k in [&t1, &t2] {
+        let (s, _) = send(
+            &app,
+            "POST",
+            &format!("/api/v1/sprints/{sid}/tasks/{k}"),
+            Some(&token),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+    }
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{t2}/move"),
+        Some(&token),
+        Some(json!({ "column_id": done_col })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    // A commit and a file on the parent.
+    sqlx::query(
+        r#"INSERT INTO git_links (id, task_id, provider, kind, external_ref, title, state)
+           SELECT $1, id, 'github', 'commit', 'abc1234def', 'prune snapshots', NULL
+           FROM tasks WHERE key = $2"#,
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(&t1)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (s, a) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{t1}/attachments"),
+        Some(&token),
+        Some(json!({ "filename": "disk-usage.png", "mime_type": "image/png" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{a:?}");
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/attachments/{}/complete", a["id"].as_str().unwrap()),
+        Some(&token),
+        Some(json!({ "size_bytes": 2048 })),
+    )
+    .await;
+    assert!(s.is_success());
+
+    let (status, headers, docx) = send_raw(
+        &app,
+        &format!("/api/v1/sprints/{sid}/report?format=docx"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers[header::CONTENT_DISPOSITION]
+        .to_str()
+        .unwrap()
+        .contains("SRP-sprint-61-report.docx"));
+    assert_eq!(&docx[..4], b"PK\x03\x04");
+    let xml = String::from_utf8_lossy(&docx).to_string();
+    for needle in [
+        "Sprint 61 — sprint report",
+        "Goal: Improve system stability",
+        "2 tasks · 1 to do · 0 in progress · 0 in review · 1 done",
+        "mirror-sync is bloating the disk",
+        "Prune old snapshots nightly.",
+        "write the runbook",
+        "commit abc1234def — prune snapshots",
+        "disk-usage.png (2.0 KB)",
+        "deploy on Parsian",
+    ] {
+        assert!(xml.contains(needle), "docx is missing {needle:?}");
+    }
+    assert!(
+        !xml.contains("not in this sprint"),
+        "{outside} isn't in the sprint"
+    );
+
+    let (status, headers, pdf) = send_raw(
+        &app,
+        &format!("/api/v1/sprints/{sid}/report?format=pdf"),
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CONTENT_TYPE], "application/pdf");
+    let text = String::from_utf8_lossy(&pdf).to_string();
+    assert!(text.starts_with("%PDF-1.4"));
+    assert!(
+        text.contains("Sprint 61 - sprint report"),
+        "dashes survive as '-'"
+    );
+    assert!(text.contains("disk-usage.png \\(2.0 KB\\)"));
+
+    // Complete the sprint, carrying the open task away: the report keeps it.
+    let (s, b) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sid}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b:?}");
+    let (s, b) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sid}/complete"),
+        Some(&token),
+        Some(json!({ "carry_over": { "to": "backlog" } })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b:?}");
+    let (_, _, docx) = send_raw(&app, &format!("/api/v1/sprints/{sid}/report"), &token).await;
+    let xml = String::from_utf8_lossy(&docx).to_string();
+    assert!(
+        xml.contains("mirror-sync is bloating the disk"),
+        "carried-over work is still history"
+    );
+    assert!(xml.contains("(as completed)"));
+    assert!(
+        xml.contains("write the runbook"),
+        "subtasks come along with the snapshot"
+    );
+
+    let (s, _) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sid}/report?format=xlsx"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
+
+/// KPI request + QA report 6: sprint progress, scope change (work added after
+/// the start ÷ the scope it started with), and a burn series that isn't empty
+/// — fed by the scope history the `sprint_scope_events` trigger keeps.
+#[sqlx::test(migrations = "./migrations")]
+async fn sprint_stats_track_progress_and_scope_change(pool: PgPool) {
+    let app = app(pool);
+    let (token, _) = register(&app, "kpi").await;
+    make_project(&app, &token, "KPI").await;
+    let cols = columns(&app, &token, "KPI").await;
+    let done_col = cols.iter().find(|(_, c)| c == "done").unwrap().0.clone();
+    let now = chrono::Utc::now();
+    let (s, sprint) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/KPI/sprints",
+        Some(&token),
+        Some(json!({
+            "name": "KPI sprint",
+            "starts_at": (now - chrono::Duration::days(1)).to_rfc3339(),
+            "ends_at": (now + chrono::Duration::days(5)).to_rfc3339(),
+        })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{sprint:?}");
+    let sid = sprint["id"].as_str().unwrap().to_string();
+    let task_with = |title: &'static str, points: i32| {
+        let app = app.clone();
+        let token = token.clone();
+        async move {
+            let (s, t) = send(
+                &app,
+                "POST",
+                "/api/v1/projects/KPI/tasks",
+                Some(&token),
+                Some(json!({ "title": title, "story_points": points })),
+            )
+            .await;
+            assert_eq!(s, StatusCode::CREATED);
+            t["key"].as_str().unwrap().to_string()
+        }
+    };
+    let assign = |key: String| {
+        let app = app.clone();
+        let token = token.clone();
+        let sid = sid.clone();
+        async move {
+            let (s, _) = send(
+                &app,
+                "POST",
+                &format!("/api/v1/sprints/{sid}/tasks/{key}"),
+                Some(&token),
+                None,
+            )
+            .await;
+            assert_eq!(s, StatusCode::NO_CONTENT);
+        }
+    };
+
+    let a = task_with("a", 5).await;
+    let b = task_with("b", 3).await;
+    let c = task_with("c", 2).await;
+    for k in [&a, &b, &c] {
+        assign(k.clone()).await;
+    }
+
+    // Before the start: no scope story yet, no chart.
+    let (s, before) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sid}/stats"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{before:?}");
+    assert!(before["scope"].is_null());
+    assert_eq!(before["series"].as_array().unwrap().len(), 0);
+    assert_eq!(before["progress"]["points_total"], 10);
+
+    let (s, b2) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sid}/start"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b2:?}");
+
+    // Mid-sprint: one task added, one dropped, one finished.
+    let late = task_with("late", 4).await;
+    assign(late.clone()).await;
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/sprints/{sid}/tasks/{c}"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/tasks/{a}/move"),
+        Some(&token),
+        Some(json!({ "column_id": done_col })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    let (s, st) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sid}/stats"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{st:?}");
+    assert_eq!(st["unit"], "points");
+    assert_eq!(st["sprint"]["name"], "KPI sprint");
+    let scope = &st["scope"];
+    assert_eq!(scope["original_tasks"], 3, "{st:?}");
+    assert_eq!(scope["added_tasks"], 1);
+    assert_eq!(scope["removed_tasks"], 1);
+    assert_eq!(scope["original_points"], 10);
+    assert_eq!(scope["added_points"], 4);
+    assert_eq!(scope["change_percent"], 40.0, "4 added ÷ 10 original");
+    assert_eq!(
+        scope["approximate"], false,
+        "observed by the trigger, not backfilled"
+    );
+    assert_eq!(
+        st["progress"],
+        json!({ "tasks_total": 3, "tasks_done": 1, "points_total": 12, "points_done": 5 })
+    );
+    assert_eq!(st["days"]["total"], 7);
+    // Today is measured: 12 in scope, 5 done → 7 remaining; the future isn't.
+    let series = st["series"].as_array().unwrap();
+    let today = series
+        .iter()
+        .rfind(|d| !d["remaining"].is_null())
+        .expect("a measured day");
+    assert_eq!(today["remaining"], 7);
+    assert_eq!(today["scope"], 12);
+    assert_eq!(today["done"], 5);
+    assert!(
+        series.last().unwrap()["remaining"].is_null(),
+        "no fake future"
+    );
+    assert_eq!(series.last().unwrap()["ideal"], 0.0);
+
+    // Complete it, carrying b and late away: velocity counts what was done.
+    let (s, b3) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/sprints/{sid}/complete"),
+        Some(&token),
+        Some(json!({ "carry_over": { "to": "backlog" } })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{b3:?}");
+    let (s, done_stats) = send(
+        &app,
+        "GET",
+        &format!("/api/v1/sprints/{sid}/stats"),
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        done_stats["scope"]["removed_tasks"], 1,
+        "carry-over at completion isn't removal"
+    );
+    assert_eq!(done_stats["progress"]["tasks_total"], 3);
+
+    let (s, v) = send(
+        &app,
+        "GET",
+        "/api/v1/projects/KPI/velocity",
+        Some(&token),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v:?}");
+    let rows = v["sprints"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["points"], 5);
+    assert_eq!(rows[0]["tasks"], 1);
+    assert!(v["current"].is_null());
 }
 
 /// KPI request: a clockwork table (members × days, any range) and each

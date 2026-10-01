@@ -15,6 +15,21 @@ export type Epic = {
   done_count: number;
 };
 
+/** A task inside an epic, as the roadmap's expanded epic lists it. */
+export type EpicTask = {
+  key: string;
+  title: string;
+  status: "todo" | "in_progress" | "review" | "done";
+  priority: "p0" | "p1" | "p2" | "p3";
+  type: string;
+  story_points: number | null;
+  assignee_handle: string | null;
+  parent_key: string | null;
+};
+
+export const listEpicTasks = (epicId: string) =>
+  api<{ items: EpicTask[] }>(`/epics/${encodeURIComponent(epicId)}/tasks`).then((r) => r.items);
+
 export type Milestone = {
   id: string;
   project_id: string;

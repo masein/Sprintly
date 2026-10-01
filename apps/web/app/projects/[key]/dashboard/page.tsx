@@ -8,19 +8,17 @@ import type { Route } from "next";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  AlertTriangle, Calendar, Clock, Flame, History, ListChecks, TrendingUp,
+  AlertTriangle, Calendar, Clock, History, ListChecks,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Breadcrumbs, projectCrumbs } from "@/components/Breadcrumbs";
 import { LoadError } from "@/components/LoadError";
 import { StatTile } from "@/components/StatTile";
-import { VelocityChart } from "@/components/VelocityChart";
-import { BurndownChart } from "@/components/BurndownChart";
+import { SprintCharts } from "@/components/SprintCharts";
 import { TeamPanel } from "@/components/TeamPanel";
 import { BurnWidget } from "@/components/BurnWidget";
 import { WeekNav, sundayOfISO, thisMondayISO } from "@/components/WeekNav";
 import { getProjectDashboard } from "@/lib/dashboards";
-import { getBurndown } from "@/lib/sprints";
 import { getProject } from "@/lib/projects";
 import { getTimeReport } from "@/lib/timeReport";
 import { fmtMinutes } from "@/lib/timetracking";
@@ -44,11 +42,6 @@ export default function ProjectDashboardPage() {
   });
   const canEditBudget = projectQ.data?.your_role === "lead";
   const sprintId = q.data?.current_sprint?.id ?? null;
-  const burnQ = useQuery({
-    queryKey: ["sprint-burndown", sprintId],
-    queryFn: () => getBurndown(sprintId!),
-    enabled: !!sprintId,
-  });
 
   if (q.error) {
     const e = q.error as unknown as ApiError;
@@ -143,21 +136,10 @@ export default function ProjectDashboardPage() {
             (a month of clockwork columns) would otherwise widen the column
             past the page instead of scrolling inside its own box. */}
         <div className="min-w-0 space-y-6">
-          <section>
-            <h2 className="mono mb-2 flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
-              <TrendingUp size={11} /> velocity history
-            </h2>
-            <VelocityChart points={d.velocity_history} />
-          </section>
-
-          {d.current_sprint && burnQ.data && (
-            <section>
-              <h2 className="mono mb-2 flex items-center gap-2 text-xs uppercase tracking-widest text-chrome-dim">
-                <Flame size={11} /> current sprint · {d.current_sprint.name}
-              </h2>
-              <BurndownChart points={burnQ.data.items} />
-            </section>
-          )}
+          {/* Burndown · burnup · velocity for the running sprint, with its
+              KPIs — progress, scope change, days, health — beside the chart
+              (KPI request: "project-level KPIs near the charts"). */}
+          <SprintCharts projectKey={projectKey} sprintId={sprintId} />
 
           {/* Everyone's hours by day (clockwork) and per-person sprint KPIs. */}
           <TeamPanel projectKey={projectKey} />
