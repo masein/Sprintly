@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Bug, Sparkles, Wrench, Beaker, Flame } from "lucide-react";
 import { SubtaskBadge } from "./SubtaskBadge";
+import { CopyTaskLink } from "./CopyTaskLink";
 import type { Task } from "@/lib/tasks";
 import { labelColorMap, listProjectLabels } from "@/lib/labels";
 import { listMembers } from "@/lib/projects";
@@ -127,6 +128,13 @@ export function TaskCard({
         >
           {task.key}
         </Link>
+        {/* Hover-revealed on the board: forty always-on link icons would be
+            noise. Keyboard users get it on focus. */}
+        <CopyTaskLink
+          taskKey={task.key}
+          size={10}
+          className="opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
+        />
         <SubtaskBadge count={task.subtask_count} className="ml-auto" />
       </div>
       <div className="line-clamp-3 text-sm leading-snug text-chrome">

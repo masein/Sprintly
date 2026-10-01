@@ -240,10 +240,8 @@ async fn bulk_assign_then_sprint_moves_off_backlog(pool: PgPool) {
     assert_eq!(backlog[0].key, "BK-3");
 
     // Keys outside the project (or absent) are no-ops, not errors.
-    assert_eq!(
-        templates::bulk_delete(&pool, pid, &["NOPE-9".to_string()])
-            .await
-            .unwrap(),
-        0
-    );
+    assert!(templates::bulk_delete(&pool, pid, &["NOPE-9".to_string()])
+        .await
+        .unwrap()
+        .is_empty());
 }
