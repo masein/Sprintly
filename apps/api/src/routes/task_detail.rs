@@ -276,8 +276,9 @@ async fn create_comment(
         .map_err(|e| AppError::Validation(e.to_string()))?;
     let task = resolve_task(&state.db, &task_key).await?;
     let ctx = project_ctx::load_by_id(&state.db, task.project_id, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
-        // Members & contributors can comment; viewers can't.
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
+        // Leads & contributors comment; watcher-role members and viewers
+        // read. (This said so for years while checking a leads-only action.)
         return Err(AppError::Forbidden);
     }
 
@@ -669,7 +670,7 @@ async fn add_link(
         return Err(AppError::BadRequest("cannot link a task to itself".into()));
     }
     let ctx = project_ctx::load_by_id(&state.db, from.project_id, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
     sqlx::query(
@@ -695,7 +696,7 @@ async fn remove_link(
     let from = resolve_task(&state.db, &task_key).await?;
     let to = resolve_task(&state.db, &req.to_task_key).await?;
     let ctx = project_ctx::load_by_id(&state.db, from.project_id, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
     sqlx::query(
@@ -826,7 +827,7 @@ async fn set_parent(
 ) -> AppResult<impl IntoResponse> {
     let task = resolve_task(&state.db, &task_key).await?;
     let ctx = project_ctx::load_by_id(&state.db, task.project_id, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
 
@@ -957,7 +958,7 @@ async fn create_attachment(
         .map_err(|e| AppError::Validation(e.to_string()))?;
     let task = resolve_task(&state.db, &task_key).await?;
     let ctx = project_ctx::load_by_id(&state.db, task.project_id, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
 

@@ -2644,3 +2644,284 @@ async fn a_completed_sprint_remembers_its_tasks_even_after_carry_over(pool: PgPo
     .await;
     assert_eq!(live["snapshot"], false);
 }
+
+/// Contributors do the work the task page offers them: file, edit, move,
+/// comment, link, attach, break down, plan into sprints and epics, fill in
+/// fields, bulk-triage. Until now every one of those was leads-only in the API
+/// while the UI showed contributors the controls — so they got 403s. Deleting
+/// a task and configuring the project stay with leads; watcher-role members
+/// and global viewers stay read-only (they could *create* tasks before).
+#[sqlx::test(migrations = "./migrations")]
+async fn contributors_work_on_tasks_and_readers_only_read(pool: PgPool) {
+    let app = app(pool);
+    // The first account is the bootstrap admin; it leads the project.
+    let (lead, _) = register(&app, "plead_ct").await;
+    let (contrib, contrib_user) = register(&app, "pcontrib").await;
+    let (reader, reader_user) = register(&app, "preader").await;
+    let (_, viewer_user) = register(&app, "pviewer").await;
+    make_project(&app, &lead, "CTB").await;
+    for (u, role) in [
+        (&contrib_user, "contributor"),
+        (&reader_user, "watcher"),
+        (&viewer_user, "contributor"),
+    ] {
+        let (s, b) = send(
+            &app,
+            "POST",
+            "/api/v1/projects/CTB/members",
+            Some(&lead),
+            Some(json!({ "user_id": u["id"], "role": role })),
+        )
+        .await;
+        assert!(s.is_success(), "{b:?}");
+    }
+    // A global viewer is read-only everywhere, even as a contributor.
+    let (s, b) = send(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/admin/users/{}/role",
+            viewer_user["id"].as_str().unwrap()
+        ),
+        Some(&lead),
+        Some(json!({ "role": "viewer" })),
+    )
+    .await;
+    assert!(s.is_success(), "{b:?}");
+    // The role rides in the access token: sign in again to pick it up.
+    let (s, login) = send(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(
+            json!({ "email": "pviewer@sprintly.test", "password": "correct-horse-battery-staple" }),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{login:?}");
+    let viewer = login["access_token"].as_str().unwrap().to_string();
+
+    let cols = columns(&app, &lead, "CTB").await;
+    let doing = cols
+        .iter()
+        .find(|(_, c)| c == "in_progress")
+        .unwrap()
+        .0
+        .clone();
+    let sprint = make_sprint(&app, &lead, "CTB", "Sprint 1").await;
+    let (_, epic) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/CTB/epics",
+        Some(&lead),
+        Some(json!({ "name": "Phase 1" })),
+    )
+    .await;
+    let other = make_task_http(&app, &lead, "CTB", "an existing task").await;
+
+    let ok = |s: StatusCode, what: &str, b: &Value| {
+        assert!(
+            s.is_success(),
+            "contributor should be able to {what}: {s} {b:?}"
+        );
+    };
+
+    // ── the contributor's working day ──
+    let (s, t) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/CTB/tasks",
+        Some(&contrib),
+        Some(json!({ "title": "filed by a contributor" })),
+    )
+    .await;
+    ok(s, "create a task", &t);
+    let key = t["key"].as_str().unwrap().to_string();
+    let steps: Vec<(&str, String, Option<Value>, &str)> = vec![
+        (
+            "PATCH",
+            format!("/api/v1/tasks/{key}"),
+            Some(json!({ "title": "renamed", "story_points": 3 })),
+            "edit a task",
+        ),
+        (
+            "POST",
+            format!("/api/v1/tasks/{key}/move"),
+            Some(json!({ "column_id": doing })),
+            "move a task",
+        ),
+        (
+            "POST",
+            format!("/api/v1/tasks/{key}/comments"),
+            Some(json!({ "body": "on it" })),
+            "comment",
+        ),
+        (
+            "POST",
+            format!("/api/v1/tasks/{key}/links"),
+            Some(json!({ "to_task_key": other, "kind": "relates_to" })),
+            "link tasks",
+        ),
+        (
+            "POST",
+            format!("/api/v1/tasks/{key}/attachments"),
+            Some(json!({ "filename": "notes.txt", "mime_type": "text/plain" })),
+            "attach a file",
+        ),
+        (
+            "POST",
+            format!("/api/v1/sprints/{sprint}/tasks/{key}"),
+            None,
+            "put a task in a sprint",
+        ),
+        (
+            "PUT",
+            format!("/api/v1/tasks/{key}/epic"),
+            Some(json!({ "epic_id": epic["id"] })),
+            "put a task in an epic",
+        ),
+        (
+            "POST",
+            "/api/v1/projects/CTB/tasks/bulk".to_string(),
+            Some(json!({ "task_keys": [key], "op": "assign", "assignee_id": contrib_user["id"] })),
+            "bulk-assign",
+        ),
+    ];
+    for (method, path, body, what) in steps {
+        let (s, b) = send(&app, method, &path, Some(&contrib), body).await;
+        ok(s, what, &b);
+    }
+    // Break it down into a subtask.
+    let (s, sub) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/CTB/tasks",
+        Some(&contrib),
+        Some(json!({ "title": "a piece of it" })),
+    )
+    .await;
+    ok(s, "create a task", &sub);
+    let sub_key = sub["key"].as_str().unwrap().to_string();
+    assert_eq!(
+        set_parent(&app, &contrib, &sub_key, Some(&key)).await,
+        StatusCode::NO_CONTENT
+    );
+    let (s, b) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/sprints/{sprint}/tasks/{key}"),
+        Some(&contrib),
+        None,
+    )
+    .await;
+    ok(s, "take a task out of a sprint", &b);
+
+    // ── still the lead's ──
+    for (method, path, body, what) in [
+        (
+            "DELETE",
+            format!("/api/v1/tasks/{key}"),
+            None,
+            "delete a task",
+        ),
+        (
+            "POST",
+            "/api/v1/projects/CTB/tasks/bulk".to_string(),
+            Some(json!({ "task_keys": [key], "op": "delete" })),
+            "bulk-delete",
+        ),
+        (
+            "POST",
+            "/api/v1/projects/CTB/labels".to_string(),
+            Some(json!({ "name": "mine" })),
+            "change the label palette",
+        ),
+        (
+            "POST",
+            format!("/api/v1/sprints/{sprint}/start"),
+            None,
+            "start a sprint",
+        ),
+        (
+            "PATCH",
+            "/api/v1/projects/CTB".to_string(),
+            Some(json!({ "name": "Taken over" })),
+            "edit the project",
+        ),
+    ] {
+        let (s, _) = send(&app, method, &path, Some(&contrib), body).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "a contributor must not {what}");
+    }
+
+    // ── readers read ──
+    for (who, token) in [("watcher-role member", &reader), ("global viewer", &viewer)] {
+        let (s, _) = send(
+            &app,
+            "GET",
+            &format!("/api/v1/tasks/{key}"),
+            Some(token),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "a {who} can read");
+        for (method, path, body, what) in [
+            (
+                "POST",
+                "/api/v1/projects/CTB/tasks".to_string(),
+                Some(json!({ "title": "sneaky" })),
+                "create a task",
+            ),
+            (
+                "PATCH",
+                format!("/api/v1/tasks/{key}"),
+                Some(json!({ "title": "sneaky" })),
+                "edit a task",
+            ),
+            (
+                "POST",
+                format!("/api/v1/tasks/{key}/comments"),
+                Some(json!({ "body": "sneaky" })),
+                "comment",
+            ),
+            (
+                "POST",
+                format!("/api/v1/tasks/{key}/move"),
+                Some(json!({ "column_id": doing })),
+                "move a task",
+            ),
+        ] {
+            let (s, _) = send(&app, method, &path, Some(token), body).await;
+            assert_eq!(s, StatusCode::FORBIDDEN, "a {who} must not {what}");
+        }
+    }
+
+    // Archived means read-only for the team too.
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/CTB/archive",
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert!(s.is_success());
+    let (s, _) = send(
+        &app,
+        "PATCH",
+        &format!("/api/v1/tasks/{key}"),
+        Some(&contrib),
+        Some(json!({ "title": "after archive" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/CTB/tasks",
+        Some(&contrib),
+        Some(json!({ "title": "after archive" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "says why: the project is archived");
+}

@@ -34,6 +34,13 @@ pub enum Action {
     RemoveProjectMember,
     ChangeProjectMemberRole,
 
+    // tasks
+    /// Day-to-day work on tasks: create, edit, move, comment, link, attach,
+    /// subtask, put in a sprint or an epic. The team does this — leads *and*
+    /// contributors — not just whoever administers the project. Deleting a
+    /// task stays with `EditProject` (leads): it's the one destructive act.
+    EditTask,
+
     // boards & columns
     ViewBoard,
     ManageBoards,  // create/edit/delete boards
@@ -147,6 +154,18 @@ pub fn can(actor: &Actor, action: Action, resource: Resource) -> bool {
             },
         ) => true,
 
+        // Working on tasks: leads and contributors, never on an archived
+        // project. Watcher-role members and global viewers read only.
+        (
+            Member,
+            A::EditTask,
+            R::Project {
+                actor_role: Some(PR::Lead | PR::Contributor),
+                archived: false,
+                ..
+            },
+        ) => true,
+
         // Project edit / archive / member management: project leads only,
         // and never on an archived project (un-archive first).
         (
@@ -247,6 +266,40 @@ mod tests {
             &member(),
             Action::EditProject,
             project(Some(ProjectRole::Watcher), false)
+        ));
+    }
+
+    #[test]
+    fn leads_and_contributors_work_on_tasks_watchers_dont() {
+        for r in [ProjectRole::Lead, ProjectRole::Contributor] {
+            assert!(
+                can(&member(), Action::EditTask, project(Some(r), false)),
+                "{r:?}"
+            );
+            // Archived is read-only for everyone on the team.
+            assert!(
+                !can(&member(), Action::EditTask, project(Some(r), true)),
+                "{r:?}"
+            );
+        }
+        assert!(!can(
+            &member(),
+            Action::EditTask,
+            project(Some(ProjectRole::Watcher), false)
+        ));
+        assert!(!can(&member(), Action::EditTask, project(None, false)));
+        // A global viewer stays read-only even as a contributor.
+        assert!(!can(
+            &viewer(),
+            Action::EditTask,
+            project(Some(ProjectRole::Contributor), false)
+        ));
+        assert!(can(&admin(), Action::EditTask, project(None, false)));
+        // …and editing tasks doesn't make a contributor a project editor.
+        assert!(!can(
+            &member(),
+            Action::EditProject,
+            project(Some(ProjectRole::Contributor), false)
         ));
     }
 

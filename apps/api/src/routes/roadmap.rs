@@ -293,7 +293,7 @@ async fn assign_epic(
 ) -> AppResult<impl IntoResponse> {
     let (project_id, project_key) = resolve_project_from_task_key(&state.db, &task_key).await?;
     let ctx = project_ctx::load_by_key(&state.db, &project_key, user.id).await?;
-    if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
     // An epic can only group tasks from its own project.
