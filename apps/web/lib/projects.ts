@@ -143,6 +143,31 @@ export async function uploadProjectDocument(
   });
 }
 
+/** Soft-delete. `confirm` must be the project key, typed by a human. */
+export const deleteProject = (key: string, confirm: string) =>
+  api<void>(`/projects/${encodeURIComponent(key)}`, {
+    method: "DELETE",
+    body: { confirm },
+  });
+
+export type DeletedProject = {
+  id: string;
+  key: string;
+  name: string;
+  deleted_at: string;
+  task_count: number;
+  key_taken: boolean;
+};
+
+export const listDeletedProjects = () =>
+  api<{ items: DeletedProject[] }>("/admin/deleted-projects").then((r) => r.items);
+
+export const restoreProject = (id: string) =>
+  api<{ key: string; tasks: number }>(
+    `/admin/deleted-projects/${encodeURIComponent(id)}/restore`,
+    { method: "POST" },
+  );
+
 // ── members ─────────────────────────────────────────────────────────────────
 
 export const listMembers = (key: string) =>

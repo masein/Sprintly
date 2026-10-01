@@ -49,6 +49,7 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::sprints::router())
         .merge(routes::retros::router())
         .merge(routes::dashboards::router())
+        .merge(routes::team::router())
         .merge(routes::metrics::router())
         .merge(routes::labels::router())
         .merge(routes::fields::router())

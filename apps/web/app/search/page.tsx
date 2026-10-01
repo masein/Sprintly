@@ -573,6 +573,20 @@ function Cheatsheet({ onExample }: { onExample: (jql: string) => void }) {
           </p>
         </div>
         <div>
+          <div className="text-chrome">sprints</div>
+          <p className="mt-1 leading-relaxed">
+            By name: <span className="text-chrome">sprint = &quot;Sprint 12&quot;</span>. By state:{" "}
+            <span className="text-chrome">sprint is active</span> ·{" "}
+            <span className="text-chrome">is future</span> ·{" "}
+            <span className="text-chrome">is closed</span> ·{" "}
+            <span className="text-chrome">is open</span> (active or future) — or Jira&apos;s{" "}
+            <span className="text-chrome">sprint in openSprints()</span>,{" "}
+            <span className="text-chrome">futureSprints()</span>,{" "}
+            <span className="text-chrome">closedSprints()</span>.{" "}
+            <span className="text-chrome">is not active</span> includes the backlog.
+          </p>
+        </div>
+        <div>
           <div className="text-chrome">joining, negating, ordering</div>
           <p className="mt-1 leading-relaxed">
             {"AND · OR (AND binds tighter) · NOT · parentheses · ORDER BY field ASC|DESC, …"}

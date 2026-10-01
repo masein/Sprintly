@@ -33,6 +33,7 @@ struct ReportRow {
     column_name: Option<String>,
     assignee_handle: Option<String>,
     due_date: Option<chrono::NaiveDate>,
+    story_points: Option<i32>,
 }
 
 pub struct ReportTask {
@@ -45,16 +46,23 @@ pub struct ReportTask {
     pub column_name: Option<String>,
     pub assignee_handle: Option<String>,
     pub due_date: Option<chrono::NaiveDate>,
+    pub story_points: Option<i32>,
+    /// Linked commits / pull requests / branches, one readable line each.
+    pub commits: Vec<String>,
+    /// Attached files, `name (size)`.
+    pub attachments: Vec<String>,
     pub subtasks: Vec<ReportTask>,
 }
 
 pub struct ReportData {
-    pub project_key: String,
-    pub project_name: String,
-    pub generated_on: chrono::NaiveDate,
+    /// "Sprintly — task report", "Sprint 61 — sprint report".
+    pub title: String,
+    /// The one-line meta under the title.
+    pub subtitle: String,
+    /// Extra lines before the task groups (a sprint's goal, dates, counts).
+    pub summary: Vec<String>,
     /// (group label, tasks) in board order: todo → in progress → review → done.
     pub groups: Vec<(String, Vec<ReportTask>)>,
-    pub total_tasks: usize,
 }
 
 const STATUS_ORDER: [(&str, &str); 4] = [
@@ -64,6 +72,22 @@ const STATUS_ORDER: [(&str, &str); 4] = [
     ("done", "Done"),
 ];
 
+const ROW_COLS: &str = r#"
+    t.id,
+    t.parent_task_id,
+    t.key,
+    t.title,
+    COALESCE(t.description, '')  AS description,
+    t.status,
+    t.type AS task_type,
+    t.priority,
+    bc.name    AS column_name,
+    u.handle   AS assignee_handle,
+    t.due_date,
+    t.story_points
+"#;
+
+/// The whole project: every live task, grouped by status.
 pub async fn report_data(db: &PgPool, project_id: Uuid) -> AppResult<ReportData> {
     let (project_key, project_name): (String, String) =
         sqlx::query_as(r#"SELECT key, name FROM projects WHERE id = $1"#)
@@ -71,39 +95,206 @@ pub async fn report_data(db: &PgPool, project_id: Uuid) -> AppResult<ReportData>
             .fetch_one(db)
             .await?;
 
-    let rows: Vec<ReportRow> = sqlx::query_as(
+    let rows: Vec<ReportRow> = sqlx::query_as(&format!(
         r#"
-        SELECT t.id,
-               t.parent_task_id,
-               t.key,
-               t.title,
-               COALESCE(t.description, '')  AS description,
-               t.status,
-               t.type AS task_type,
-               t.priority,
-               bc.name    AS column_name,
-               u.handle   AS assignee_handle,
-               t.due_date
+        SELECT {ROW_COLS}
         FROM   tasks t
         LEFT JOIN board_columns bc ON bc.id = t.column_id
         LEFT JOIN users u          ON u.id = t.assignee_id
         WHERE  t.project_id = $1 AND t.deleted_at IS NULL
         ORDER  BY t.key
-        "#,
-    )
+        "#
+    ))
     .bind(project_id)
     .fetch_all(db)
     .await?;
 
-    let total_tasks = rows.len();
+    let total = rows.len();
+    let groups = assemble(db, rows).await?;
+    let today = chrono::Utc::now().date_naive();
+    Ok(ReportData {
+        title: format!("{project_name} — task report"),
+        subtitle: format!("{project_key} · {total} tasks · generated {today}"),
+        summary: Vec::new(),
+        groups,
+    })
+}
+
+/// One sprint: its tasks across every status, with their subtasks,
+/// descriptions, commits and attached files (QA report 6). A completed sprint
+/// reports the tasks it had *when it was completed* — its snapshot — so work
+/// carried into the next sprint still appears here, in the state it left in;
+/// descriptions, files and commits come from the live task.
+pub async fn sprint_report_data(db: &PgPool, sprint_id: Uuid) -> AppResult<ReportData> {
+    #[derive(sqlx::FromRow)]
+    struct SprintRow {
+        name: String,
+        goal: Option<String>,
+        state: String,
+        starts_at: chrono::DateTime<chrono::Utc>,
+        ends_at: chrono::DateTime<chrono::Utc>,
+        project_key: String,
+        project_name: String,
+        snapshot: bool,
+    }
+    let sp: SprintRow = sqlx::query_as(
+        r#"
+        SELECT s.name, s.goal, s.state, s.starts_at, s.ends_at,
+               p.key AS project_key, p.name AS project_name,
+               (s.state = 'completed'
+                AND EXISTS (SELECT 1 FROM sprint_task_snapshots x WHERE x.sprint_id = s.id))
+                   AS snapshot
+        FROM   sprints s JOIN projects p ON p.id = s.project_id
+        WHERE  s.id = $1
+        "#,
+    )
+    .bind(sprint_id)
+    .fetch_one(db)
+    .await?;
+
+    // Top-level rows: the snapshot for a completed sprint, else the live list.
+    // Subtasks don't carry sprint membership; they come along with their parent.
+    let rows: Vec<ReportRow> = if sp.snapshot {
+        sqlx::query_as(&format!(
+            r#"
+            SELECT x.task_id AS id, NULL::uuid AS parent_task_id, x.key, x.title,
+                   COALESCE(t.description, '') AS description,
+                   x.status, x.type AS task_type, x.priority,
+                   NULL::text AS column_name, u.handle AS assignee_handle,
+                   t.due_date, x.story_points
+            FROM   sprint_task_snapshots x
+            LEFT JOIN tasks t ON t.id = x.task_id
+            LEFT JOIN users u ON u.id = x.assignee_id
+            WHERE  x.sprint_id = $1
+            UNION ALL
+            SELECT {ROW_COLS}
+            FROM   tasks t
+            LEFT JOIN board_columns bc ON bc.id = t.column_id
+            LEFT JOIN users u          ON u.id = t.assignee_id
+            WHERE  t.deleted_at IS NULL
+              AND  t.parent_task_id IN (SELECT task_id FROM sprint_task_snapshots WHERE sprint_id = $1)
+            ORDER  BY key
+            "#
+        ))
+        .bind(sprint_id)
+        .fetch_all(db)
+        .await?
+    } else {
+        sqlx::query_as(&format!(
+            r#"
+            SELECT {ROW_COLS}
+            FROM   tasks t
+            LEFT JOIN board_columns bc ON bc.id = t.column_id
+            LEFT JOIN users u          ON u.id = t.assignee_id
+            WHERE  t.deleted_at IS NULL
+              AND (t.sprint_id = $1
+                   OR t.parent_task_id IN (
+                        SELECT id FROM tasks WHERE sprint_id = $1 AND deleted_at IS NULL))
+            ORDER  BY t.key
+            "#
+        ))
+        .bind(sprint_id)
+        .fetch_all(db)
+        .await?
+    };
+
+    let groups = assemble(db, rows).await?;
+    let top: Vec<&ReportTask> = groups.iter().flat_map(|(_, ts)| ts.iter()).collect();
+    let count_in = |status: &str| top.iter().filter(|t| t.status == status).count();
+    let total_pts: i32 = top.iter().filter_map(|t| t.story_points).sum();
+    let done_pts: i32 = top
+        .iter()
+        .filter(|t| t.status == "done")
+        .filter_map(|t| t.story_points)
+        .sum();
+
+    let mut summary = Vec::new();
+    if let Some(goal) = sp.goal.as_deref().map(str::trim).filter(|g| !g.is_empty()) {
+        summary.push(format!("Goal: {goal}"));
+    }
+    summary.push(format!(
+        "{} → {} · {}{}",
+        sp.starts_at.date_naive(),
+        sp.ends_at.date_naive(),
+        sp.state,
+        if sp.snapshot { " (as completed)" } else { "" }
+    ));
+    let mut counts = vec![format!("{} tasks", top.len())];
+    for (s, label) in STATUS_ORDER {
+        counts.push(format!("{} {}", count_in(s), label.to_lowercase()));
+    }
+    if total_pts > 0 {
+        counts.push(format!("{done_pts}/{total_pts} pts done"));
+    }
+    summary.push(counts.join(" · "));
+
+    let today = chrono::Utc::now().date_naive();
+    Ok(ReportData {
+        title: format!("{} — sprint report", sp.name),
+        subtitle: format!(
+            "{} · {} · generated {today}",
+            sp.project_key, sp.project_name
+        ),
+        summary,
+        groups,
+    })
+}
+
+/// Rows → status groups, with subtasks hung off their parents and each task's
+/// commits and files attached. Two batched queries, not two per task.
+async fn assemble(db: &PgPool, rows: Vec<ReportRow>) -> AppResult<Vec<(String, Vec<ReportTask>)>> {
+    use std::collections::HashMap;
+
+    let ids: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
+    let mut commits: HashMap<Uuid, Vec<String>> = HashMap::new();
+    #[derive(sqlx::FromRow)]
+    struct LinkRow {
+        task_id: Uuid,
+        kind: String,
+        external_ref: String,
+        title: Option<String>,
+        state: Option<String>,
+    }
+    let links: Vec<LinkRow> = sqlx::query_as(
+        r#"SELECT task_id, kind, external_ref, title, state
+           FROM git_links WHERE task_id = ANY($1)
+           ORDER BY created_at"#,
+    )
+    .bind(&ids)
+    .fetch_all(db)
+    .await?;
+    for l in links {
+        commits.entry(l.task_id).or_default().push(link_line(
+            &l.kind,
+            &l.external_ref,
+            l.title.as_deref(),
+            l.state.as_deref(),
+        ));
+    }
+    let mut files: HashMap<Uuid, Vec<String>> = HashMap::new();
+    let atts: Vec<(Uuid, String, Option<i64>)> = sqlx::query_as(
+        r#"SELECT task_id, filename, size_bytes
+           FROM task_attachments
+           WHERE task_id = ANY($1) AND deleted_at IS NULL AND status = 'ready'
+           ORDER BY created_at"#,
+    )
+    .bind(&ids)
+    .fetch_all(db)
+    .await?;
+    for (task_id, name, size) in atts {
+        files.entry(task_id).or_default().push(match size {
+            Some(b) => format!("{name} ({})", human_size(b)),
+            None => name,
+        });
+    }
 
     // Split parents from subtasks, then hang children off their parents.
-    let mut subtasks_of: std::collections::HashMap<Uuid, Vec<ReportTask>> =
-        std::collections::HashMap::new();
+    let mut subtasks_of: HashMap<Uuid, Vec<ReportTask>> = HashMap::new();
     let mut parents: Vec<(Uuid, ReportTask)> = Vec::new();
-
     for r in rows {
         let task = ReportTask {
+            commits: commits.remove(&r.id).unwrap_or_default(),
+            attachments: files.remove(&r.id).unwrap_or_default(),
             key: r.key,
             title: r.title,
             description: r.description,
@@ -113,6 +304,7 @@ pub async fn report_data(db: &PgPool, project_id: Uuid) -> AppResult<ReportData>
             column_name: r.column_name,
             assignee_handle: r.assignee_handle,
             due_date: r.due_date,
+            story_points: r.story_points,
             subtasks: Vec::new(),
         };
         match r.parent_task_id {
@@ -125,36 +317,51 @@ pub async fn report_data(db: &PgPool, project_id: Uuid) -> AppResult<ReportData>
         .iter()
         .map(|(_, label)| ((*label).to_string(), Vec::new()))
         .collect();
-
+    let slot = |status: &str| {
+        STATUS_ORDER
+            .iter()
+            .position(|(s, _)| *s == status)
+            .unwrap_or(0)
+    };
     for (id, mut task) in parents {
         if let Some(subs) = subtasks_of.remove(&id) {
             task.subtasks = subs;
         }
-        let idx = STATUS_ORDER
-            .iter()
-            .position(|(s, _)| *s == task.status)
-            .unwrap_or(0);
-        groups[idx].1.push(task);
+        groups[slot(&task.status)].1.push(task);
     }
-
     // Orphaned subtasks (parent deleted) still deserve a line.
     for (_, mut orphans) in subtasks_of.drain() {
         for task in orphans.drain(..) {
-            let idx = STATUS_ORDER
-                .iter()
-                .position(|(s, _)| *s == task.status)
-                .unwrap_or(0);
-            groups[idx].1.push(task);
+            groups[slot(&task.status)].1.push(task);
         }
     }
+    Ok(groups)
+}
 
-    Ok(ReportData {
-        project_key,
-        project_name,
-        generated_on: chrono::Utc::now().date_naive(),
-        groups,
-        total_tasks,
-    })
+fn link_line(kind: &str, ext: &str, title: Option<&str>, state: Option<&str>) -> String {
+    let head = match kind {
+        "pull_request" => format!("PR #{ext}"),
+        "branch" => format!("branch {ext}"),
+        _ => format!("commit {}", ext.chars().take(10).collect::<String>()),
+    };
+    let mut line = match title.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => format!("{head} — {t}"),
+        None => head,
+    };
+    if let Some(st) = state.filter(|s| !s.is_empty()) {
+        line.push_str(&format!(" ({st})"));
+    }
+    line
+}
+
+fn human_size(b: i64) -> String {
+    if b < 1024 {
+        format!("{b} B")
+    } else if b < 1024 * 1024 {
+        format!("{:.1} KB", b as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", b as f64 / 1024.0 / 1024.0)
+    }
 }
 
 fn meta_line(t: &ReportTask) -> String {
@@ -167,6 +374,9 @@ fn meta_line(t: &ReportTask) -> String {
     }
     if let Some(d) = &t.due_date {
         bits.push(format!("due {d}"));
+    }
+    if let Some(p) = t.story_points {
+        bits.push(format!("{p} pts"));
     }
     bits.join(" · ")
 }
@@ -203,23 +413,33 @@ fn docx_para(style: Option<&str>, runs: &[(&str, bool)]) -> String {
     p
 }
 
+/// Commits and files under a task, if it has any.
+fn docx_extras(body: &mut String, t: &ReportTask, indent: &str) {
+    if !t.commits.is_empty() {
+        body.push_str(&docx_para(None, &[(&format!("{indent}Commits:"), true)]));
+        for c in &t.commits {
+            body.push_str(&docx_para(None, &[(&format!("{indent}  - {c}"), false)]));
+        }
+    }
+    if !t.attachments.is_empty() {
+        body.push_str(&docx_para(
+            None,
+            &[(&format!("{indent}Attached files:"), true)],
+        ));
+        for f in &t.attachments {
+            body.push_str(&docx_para(None, &[(&format!("{indent}  - {f}"), false)]));
+        }
+    }
+}
+
 pub fn to_docx(data: &ReportData) -> AppResult<Vec<u8>> {
     let mut body = String::new();
 
-    body.push_str(&docx_para(
-        Some("Title"),
-        &[(&format!("{} — task report", data.project_name), false)],
-    ));
-    body.push_str(&docx_para(
-        None,
-        &[(
-            &format!(
-                "{} · {} tasks · generated {}",
-                data.project_key, data.total_tasks, data.generated_on
-            ),
-            false,
-        )],
-    ));
+    body.push_str(&docx_para(Some("Title"), &[(&data.title, false)]));
+    body.push_str(&docx_para(None, &[(&data.subtitle, false)]));
+    for line in &data.summary {
+        body.push_str(&docx_para(None, &[(line, true)]));
+    }
 
     for (label, tasks) in &data.groups {
         if tasks.is_empty() {
@@ -238,6 +458,7 @@ pub fn to_docx(data: &ReportData) -> AppResult<Vec<u8>> {
             for line in t.description.lines().filter(|l| !l.trim().is_empty()) {
                 body.push_str(&docx_para(None, &[(line, false)]));
             }
+            docx_extras(&mut body, t, "");
             if !t.subtasks.is_empty() {
                 body.push_str(&docx_para(None, &[("Subtasks:", true)]));
                 for s in &t.subtasks {
@@ -256,6 +477,7 @@ pub fn to_docx(data: &ReportData) -> AppResult<Vec<u8>> {
                     for line in s.description.lines().filter(|l| !l.trim().is_empty()) {
                         body.push_str(&docx_para(None, &[(&format!("      {line}"), false)]));
                     }
+                    docx_extras(&mut body, s, "      ");
                 }
             }
         }
@@ -405,9 +627,25 @@ struct PdfLine {
 /// multi-byte in UTF-8 (even Latin-1's é or ·) would render as mojibake in
 /// a WinAnsi text stream. '?' is honest; the .docx is the faithful export.
 fn pdf_sanitize(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_ascii() { c } else { '?' })
-        .collect()
+    // The app's own typography first — dashes, arrows, quotes — so headings
+    // read "TR-1 - Ship it", not "TR-1 ? Ship it". Anything else outside ASCII
+    // still becomes '?' (the .docx is the faithful copy).
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '—' | '–' | '‐' | '−' => out.push('-'),
+            '→' => out.push_str("->"),
+            '←' => out.push_str("<-"),
+            '…' => out.push_str("..."),
+            '“' | '”' | '„' => out.push('"'),
+            '‘' | '’' => out.push('\''),
+            '•' | '·' => out.push('*'),
+            '\u{a0}' => out.push(' '),
+            c if c.is_ascii() => out.push(c),
+            _ => out.push('?'),
+        }
+    }
+    out
 }
 
 fn pdf_escape(s: &str) -> String {
@@ -444,6 +682,21 @@ fn wrap(text: &str, size: f32, indent: f32) -> Vec<String> {
     out
 }
 
+fn pdf_extras(push: &mut impl FnMut(&str, f32, bool, f32, f32), t: &ReportTask, indent: f32) {
+    if !t.commits.is_empty() {
+        push("Commits:", 9.0, true, indent, 3.0);
+        for c in &t.commits {
+            push(&format!("- {c}"), 9.0, false, indent + 8.0, 1.0);
+        }
+    }
+    if !t.attachments.is_empty() {
+        push("Attached files:", 9.0, true, indent, 3.0);
+        for f in &t.attachments {
+            push(&format!("- {f}"), 9.0, false, indent + 8.0, 1.0);
+        }
+    }
+}
+
 pub fn to_pdf(data: &ReportData) -> Vec<u8> {
     // 1. Flatten the report into styled lines.
     let mut lines: Vec<PdfLine> = Vec::new();
@@ -462,23 +715,11 @@ pub fn to_pdf(data: &ReportData) -> Vec<u8> {
         }
     };
 
-    push(
-        &format!("{} — task report", data.project_name),
-        16.0,
-        true,
-        0.0,
-        0.0,
-    );
-    push(
-        &format!(
-            "{} · {} tasks · generated {}",
-            data.project_key, data.total_tasks, data.generated_on
-        ),
-        9.5,
-        false,
-        0.0,
-        4.0,
-    );
+    push(&data.title, 16.0, true, 0.0, 0.0);
+    push(&data.subtitle, 9.5, false, 0.0, 4.0);
+    for line in &data.summary {
+        push(line, 9.5, true, 0.0, 3.0);
+    }
 
     for (label, tasks) in &data.groups {
         if tasks.is_empty() {
@@ -491,6 +732,7 @@ pub fn to_pdf(data: &ReportData) -> Vec<u8> {
             for line in t.description.lines().filter(|l| !l.trim().is_empty()) {
                 push(line, 9.5, false, 8.0, 2.0);
             }
+            pdf_extras(&mut push, t, 8.0);
             if !t.subtasks.is_empty() {
                 push("Subtasks:", 9.5, true, 8.0, 4.0);
                 for s in &t.subtasks {
@@ -506,6 +748,10 @@ pub fn to_pdf(data: &ReportData) -> Vec<u8> {
                         16.0,
                         2.0,
                     );
+                    for line in s.description.lines().filter(|l| !l.trim().is_empty()) {
+                        push(line, 9.0, false, 24.0, 1.0);
+                    }
+                    pdf_extras(&mut push, s, 24.0);
                 }
             }
         }
@@ -594,9 +840,9 @@ mod tests {
 
     fn sample() -> ReportData {
         ReportData {
-            project_key: "TR".into(),
-            project_name: "Test réport".into(),
-            generated_on: chrono::NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
+            title: "Test réport — task report".into(),
+            subtitle: "TR · 2 tasks · generated 2026-08-12".into(),
+            summary: vec!["Goal: ship the (report)".into()],
             groups: vec![
                 (
                     "To do".into(),
@@ -610,6 +856,9 @@ mod tests {
                         column_name: Some("To do".into()),
                         assignee_handle: Some("sam".into()),
                         due_date: None,
+                        story_points: Some(5),
+                        commits: vec!["commit 1a2b3c4d — fix the thing".into()],
+                        attachments: vec!["spec.pdf (12.0 KB)".into()],
                         subtasks: vec![ReportTask {
                             key: "TR-2".into(),
                             title: "Subtask".into(),
@@ -620,13 +869,15 @@ mod tests {
                             column_name: None,
                             assignee_handle: None,
                             due_date: None,
+                            story_points: None,
+                            commits: vec!["PR #12 — tidy up (merged)".into()],
+                            attachments: vec![],
                             subtasks: vec![],
                         }],
                     }],
                 ),
                 ("Done".into(), vec![]),
             ],
-            total_tasks: 2,
         }
     }
 
@@ -650,6 +901,37 @@ mod tests {
         assert!(hay.contains("word/document.xml"));
         assert!(hay.contains("&lt;tags&gt; &amp; &quot;quotes&quot;"));
         assert!(hay.contains("TR-2 Subtask — Done"));
+        // QA report 6: commits and files ride along, for subtasks too.
+        assert!(hay.contains("Goal: ship the (report)"));
+        assert!(hay.contains("commit 1a2b3c4d — fix the thing"));
+        assert!(hay.contains("spec.pdf (12.0 KB)"));
+        assert!(hay.contains("PR #12 — tidy up (merged)"));
+        assert!(hay.contains("5 pts"));
+    }
+
+    #[test]
+    fn pdf_carries_commits_and_files() {
+        let s = String::from_utf8_lossy(&to_pdf(&sample())).to_string();
+        assert!(s.contains("Attached files:"));
+        assert!(s.contains("spec.pdf \\(12.0 KB\\)"), "{s}");
+        assert!(s.contains("PR #12 - tidy up \\(merged\\)"), "{s}");
+        // Dashes and arrows are spelled out, not turned into '?'.
+        assert!(s.contains("Test r?port - task report"), "{s}");
+    }
+
+    #[test]
+    fn link_lines_read_like_a_changelog() {
+        assert_eq!(
+            link_line("commit", "1a2b3c4d5e6f7a8b", Some("fix it"), None),
+            "commit 1a2b3c4d5e — fix it"
+        );
+        assert_eq!(
+            link_line("pull_request", "12", Some(" tidy "), Some("merged")),
+            "PR #12 — tidy (merged)"
+        );
+        assert_eq!(link_line("branch", "feat/x", None, None), "branch feat/x");
+        assert_eq!(human_size(12_288), "12.0 KB");
+        assert_eq!(human_size(10), "10 B");
     }
 
     #[test]
