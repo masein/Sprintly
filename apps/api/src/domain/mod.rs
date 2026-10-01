@@ -25,6 +25,7 @@ pub mod projects;
 pub mod public_status;
 pub mod roadmap;
 pub mod sessions;
+pub mod sprint_stats;
 pub mod sprints;
 pub mod task_report;
 pub mod tasks;

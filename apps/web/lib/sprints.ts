@@ -118,6 +118,63 @@ export const getBurndown = (id: string) =>
     `/sprints/${id}/burndown`,
   );
 
+// ── Sprint KPIs + charts ────────────────────────────────────────────────────
+
+export type BurnDay = {
+  date: string;
+  ideal: number;
+  /** null past "as of" — the chart doesn't draw a future it hasn't seen. */
+  remaining: number | null;
+  done: number | null;
+  scope: number | null;
+};
+
+export type SprintStats = {
+  sprint: {
+    id: string;
+    name: string;
+    goal: string | null;
+    state: SprintState;
+    starts_at: string;
+    ends_at: string;
+    started_at: string | null;
+    completed_at: string | null;
+  };
+  /** What `series` counts: story points, or tasks when nobody estimated. */
+  unit: "points" | "tasks";
+  progress: { tasks_total: number; tasks_done: number; points_total: number; points_done: number };
+  scope: null | {
+    original_tasks: number;
+    added_tasks: number;
+    removed_tasks: number;
+    original_points: number;
+    added_points: number;
+    removed_points: number;
+    change_percent: number | null;
+    approximate: boolean;
+  };
+  days: { elapsed: number; total: number };
+  health: { on_track: number; at_risk: number; blocked: number };
+  series: BurnDay[];
+};
+
+export const getSprintStats = (id: string) => api<SprintStats>(`/sprints/${id}/stats`);
+
+export type VelocitySprint = {
+  id: string;
+  name: string;
+  completed_at: string | null;
+  points: number;
+  tasks: number;
+  estimate_minutes: number;
+  logged_minutes: number;
+};
+
+export const getVelocity = (projectKey: string, limit = 10) =>
+  api<{ sprints: VelocitySprint[]; current: VelocitySprint | null }>(
+    `/projects/${encodeURIComponent(projectKey)}/velocity?limit=${limit}`,
+  );
+
 // ── Retros ──────────────────────────────────────────────────────────────────
 
 export type RetroNote = {
