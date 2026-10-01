@@ -117,7 +117,9 @@ export function Attachments({ taskKey, canManage }: { taskKey: string; canManage
         </div>
       )}
 
-      <ul className="space-y-1.5">
+      {/* Two columns once there's room: the panel lives in the main column
+          now, and a full-width row per file wastes most of it. */}
+      <ul className="grid grid-cols-1 gap-1.5 md:grid-cols-2">
         {(q.data ?? []).map((a) => (
           <Row
             key={a.id}
