@@ -20,6 +20,7 @@ pub mod labels;
 pub mod metrics;
 pub mod notifications;
 pub mod payroll;
+pub mod project_documents;
 pub mod projects;
 pub mod public_status;
 pub mod retros;

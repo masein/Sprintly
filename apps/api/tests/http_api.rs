@@ -2644,3 +2644,190 @@ async fn a_completed_sprint_remembers_its_tasks_even_after_carry_over(pool: PgPo
     .await;
     assert_eq!(live["snapshot"], false);
 }
+
+/// QA report 6: leads describe the project and keep its documents on the
+/// dashboard. Leads upload and remove; everyone on the project reads and
+/// downloads; outsiders get nothing.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_project_keeps_a_description_and_documents(pool: PgPool) {
+    let app = app_with_path_s3(pool);
+    let (lead, _) = register(&app, "doclead").await;
+    let (mate, mate_user) = register(&app, "docmate").await;
+    let (outsider, _) = register(&app, "docoutsider").await;
+    make_project(&app, &lead, "DOC").await;
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/DOC/members",
+        Some(&lead),
+        Some(json!({ "user_id": mate_user["id"], "role": "contributor" })),
+    )
+    .await;
+    assert!(s.is_success());
+
+    // The description round-trips through the existing project PATCH.
+    let (s, p) = send(
+        &app,
+        "PATCH",
+        "/api/v1/projects/DOC",
+        Some(&lead),
+        Some(json!({ "description": "# CCTV\nDetection + live feed for **three** sites." })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{p:?}");
+    let (_, p) = send(&app, "GET", "/api/v1/projects/DOC", Some(&mate), None).await;
+    assert!(p["description"].as_str().unwrap().contains("three"));
+    let (s, _) = send(
+        &app,
+        "PATCH",
+        "/api/v1/projects/DOC",
+        Some(&mate),
+        Some(json!({ "description": "mine now" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "only leads edit it");
+
+    // Upload: leads only.
+    let doc = json!({ "filename": "roadmap.pdf", "mime_type": "application/pdf" });
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/DOC/documents",
+        Some(&mate),
+        Some(doc.clone()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, init) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/DOC/documents",
+        Some(&lead),
+        Some(doc),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{init:?}");
+    assert!(init["upload_url"]
+        .as_str()
+        .unwrap()
+        .contains("/s3/sprintly/projects/"));
+    let id = init["id"].as_str().unwrap().to_string();
+
+    // Pending: listed, but no download yet.
+    let (_, list) = send(
+        &app,
+        "GET",
+        "/api/v1/projects/DOC/documents",
+        Some(&mate),
+        None,
+    )
+    .await;
+    assert_eq!(list["items"][0]["status"], "pending");
+    assert!(list["items"][0]["download_url"].is_null());
+    let (s, _, _) = send_raw(
+        &app,
+        &format!("/api/v1/project-documents/{id}/download"),
+        &mate,
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT);
+
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/project-documents/{id}/complete"),
+        Some(&lead),
+        Some(json!({ "size_bytes": 4096 })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/project-documents/{id}/complete"),
+        Some(&lead),
+        Some(json!({ "size_bytes": 4096 })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "completing twice");
+
+    // Ready: members see it and can download it; outsiders can't.
+    let (_, list) = send(
+        &app,
+        "GET",
+        "/api/v1/projects/DOC/documents",
+        Some(&mate),
+        None,
+    )
+    .await;
+    let item = &list["items"][0];
+    assert_eq!(item["filename"], "roadmap.pdf");
+    assert_eq!(item["size_bytes"], 4096);
+    assert_eq!(item["uploader_handle"], "doclead");
+    assert_eq!(
+        item["download_url"],
+        format!("/api/v1/project-documents/{id}/download")
+    );
+    let (s, h, _) = send_raw(
+        &app,
+        &format!("/api/v1/project-documents/{id}/download"),
+        &mate,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FOUND);
+    assert!(h[header::LOCATION]
+        .to_str()
+        .unwrap()
+        .contains("/s3/sprintly/projects/"));
+    let (s, _) = send(
+        &app,
+        "GET",
+        "/api/v1/projects/DOC/documents",
+        Some(&outsider),
+        None,
+    )
+    .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s}"
+    );
+    let (s, _, _) = send_raw(
+        &app,
+        &format!("/api/v1/project-documents/{id}/download"),
+        &outsider,
+    )
+    .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "{s}"
+    );
+
+    // Removing: not the contributor, yes the lead.
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/project-documents/{id}"),
+        Some(&mate),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/project-documents/{id}"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_, list) = send(
+        &app,
+        "GET",
+        "/api/v1/projects/DOC/documents",
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert!(list["items"].as_array().unwrap().is_empty());
+}

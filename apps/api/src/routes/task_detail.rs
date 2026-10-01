@@ -941,7 +941,7 @@ fn request_origin(headers: &HeaderMap) -> Option<String> {
 
 /// Presigner for a browser-facing URL: signs for the host the caller actually
 /// used when `MINIO_PUBLIC_ENDPOINT` is a path, verbatim otherwise.
-fn presigner_for<'a>(state: &'a AppState, headers: &HeaderMap) -> Presigner<'a> {
+pub(crate) fn presigner_for<'a>(state: &'a AppState, headers: &HeaderMap) -> Presigner<'a> {
     let origin = request_origin(headers);
     Presigner::for_request(&state.cfg.minio, origin.as_deref(), &state.cfg.public_url)
 }

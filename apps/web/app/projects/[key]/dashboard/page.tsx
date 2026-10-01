@@ -16,6 +16,7 @@ import { LoadError } from "@/components/LoadError";
 import { StatTile } from "@/components/StatTile";
 import { VelocityChart } from "@/components/VelocityChart";
 import { BurndownChart } from "@/components/BurndownChart";
+import { ProjectAbout } from "@/components/ProjectAbout";
 import { BurnWidget } from "@/components/BurnWidget";
 import { WeekNav, sundayOfISO, thisMondayISO } from "@/components/WeekNav";
 import { getProjectDashboard } from "@/lib/dashboards";
@@ -111,6 +112,10 @@ export default function ProjectDashboardPage() {
           </Link>
         </div>
       </header>
+
+      {projectQ.data && (
+        <ProjectAbout project={projectQ.data} canEdit={projectQ.data.your_role === "lead"} />
+      )}
 
       {/* Stat tiles */}
       <section className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-4">
