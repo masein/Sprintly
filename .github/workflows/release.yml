@@ -11,11 +11,14 @@ name: release
 # runner that sits on that network. Everything else in this workflow is the same
 # either way.
 #
-# The registry requires no authentication — there is no docker login step and
-# no credential secrets. The runner only needs network reachability to
-# $REGISTRY_HOST (see the reachability caveat above).
+# The registry sits behind token auth (2026-10-05): the job logs in with the
+# repo secrets REGISTRY_USERNAME / REGISTRY_PASSWORD — an account that may push
+# sprintly-api and sprintly-web. The prod host needs its own `docker login`
+# (a pull-only account) before `docker compose pull`.
 #
-# Optional repo config (Settings → Secrets and variables → Actions):
+# Repo config (Settings → Secrets and variables → Actions):
+#   secrets.REGISTRY_USERNAME   required
+#   secrets.REGISTRY_PASSWORD   required
 #   vars.REGISTRY_HOST          optional; defaults to docker.netixsystem.com
 #   vars.NEXT_PUBLIC_APP_NAME   optional; defaults to "Sprintly"
 
@@ -51,6 +54,12 @@ jobs:
         run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to ${{ env.REGISTRY_HOST }}
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin
 
       - name: Build ${{ matrix.image }} (linux/amd64)
         run: |
