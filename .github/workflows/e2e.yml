@@ -25,6 +25,15 @@ jobs:
           # registry's mirror of the same pinned release (amd64, like runners).
           echo 'MINIO_IMAGE=docker.netixsystem.com/minio:RELEASE.2024-10-13T13-34-11Z' >> .env
 
+      # The MinIO image above comes from the project registry, which sits
+      # behind token auth (2026-10-05). Same repo secrets as release.yml; a
+      # Dependabot PR reads them from the Dependabot secret store instead.
+      - name: Log in to docker.netixsystem.com
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: printf '%s' "$REGISTRY_PASSWORD" | docker login docker.netixsystem.com -u "$REGISTRY_USERNAME" --password-stdin
+
       - name: Boot the stack
         run: docker compose -f infra/compose/docker-compose.yml --env-file .env up -d --build
 
