@@ -143,13 +143,6 @@ export async function uploadProjectDocument(
   });
 }
 
-/** Soft-delete. `confirm` must be the project key, typed by a human. */
-export const deleteProject = (key: string, confirm: string) =>
-  api<void>(`/projects/${encodeURIComponent(key)}`, {
-    method: "DELETE",
-    body: { confirm },
-  });
-
 export type DeletedProject = {
   id: string;
   key: string;
