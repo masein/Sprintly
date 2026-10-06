@@ -1,6 +1,8 @@
-// feat/project-delete: a lead can delete a project, behind a type-the-key
-// confirmation, and a global admin can restore it (QA report 6: "a safe
-// project deletion workflow with appropriate confirmation safeguards").
+// Project deletion: the API soft-deletes a project only when the key is typed
+// back as confirmation, and a global admin can restore it. The project page
+// offers no delete button — review of the QA 6 screenshots: what was wanted
+// was undo for deleted *tasks* (board-delete-undo-live), not a red button on
+// every board header.
 //
 // Pre-reqs: dev stack up (`just up`) + `just seed` (demo@sprintly.local /
 // sprintly is the seeded global admin), SPRINTLY_OPEN_SIGNUP=true.
@@ -15,8 +17,13 @@ async function fill(page: Page, label: string, value: string) {
   await page.getByLabel(label, { exact: false }).fill(value);
 }
 
+async function csrf(page: Page): Promise<string> {
+  const cookies = await page.context().cookies();
+  return cookies.find((c) => c.name === "sprintly_csrf")?.value ?? "";
+}
+
 test.describe("project deletion", () => {
-  test("type the key to delete; an admin can bring it back", async ({ page, browser }) => {
+  test("no delete on the board header; the API wants the key; an admin can bring it back", async ({ page, browser }) => {
     const handle = `e2e${rand()}`;
     const key = `PD${rand().slice(0, 3).toUpperCase()}`;
 
@@ -40,31 +47,27 @@ test.describe("project deletion", () => {
     await page.getByRole("button", { name: /^add$/ }).click();
     await expect(page.getByText("survive the purge")).toBeVisible();
 
-    await test.step("the delete button asks for the key", async () => {
-      await page.getByRole("button", { name: /^delete$/ }).click();
-      const dialog = page.getByRole("dialog", { name: `delete ${key}` });
-      await expect(dialog.getByText(/every task and subtask/)).toBeVisible();
-      const confirm = dialog.getByRole("button", { name: `delete ${key}` });
-      await expect(confirm).toBeDisabled();
-      await dialog.getByLabel("type the project key to confirm").fill(key.toLowerCase());
-      await expect(confirm).toBeDisabled();
-      // Backing out leaves everything alone.
-      await dialog.getByRole("button", { name: /keep it/ }).click();
-      await expect(dialog).toHaveCount(0);
-      await expect(page.getByText("survive the purge")).toBeVisible();
+    await test.step("the project header offers archive, not delete", async () => {
+      await expect(page.getByRole("button", { name: /^archive$/ })).toBeVisible();
+      await expect(page.getByRole("button", { name: /^delete$/ })).toHaveCount(0);
     });
 
-    await test.step("typing the key exactly deletes it", async () => {
-      await page.getByRole("button", { name: /^delete$/ }).click();
-      const dialog = page.getByRole("dialog", { name: `delete ${key}` });
-      await dialog.getByLabel("type the project key to confirm").fill(key);
-      await dialog.getByRole("button", { name: `delete ${key}` }).click();
-      await expect(page).toHaveURL(/\/projects$/);
-      await expect(page.getByRole("status").filter({ hasText: `Deleted ${key}` })).toBeVisible();
-      await expect(page.getByRole("link", { name: new RegExp(key) })).toHaveCount(0);
+    await test.step("the API deletes only with the key typed back", async () => {
+      const token = await csrf(page);
+      const del = (confirm: string) =>
+        page.request.fetch(`/api/v1/projects/${key}`, {
+          method: "DELETE",
+          data: { confirm },
+          headers: { "X-CSRF-Token": token },
+        });
+      expect((await del(key.toLowerCase())).status()).toBe(400);
+      const ok = await del(key);
+      expect(ok.status(), await ok.text()).toBe(204);
       // Its tasks are gone with it.
       const res = await page.request.get(`/api/v1/tasks/${key}-1`);
       expect(res.status()).toBe(404);
+      await page.goto("/projects");
+      await expect(page.getByRole("link", { name: new RegExp(key) })).toHaveCount(0);
     });
 
     await test.step("an admin restores it", async () => {
