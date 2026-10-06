@@ -5,6 +5,9 @@ This is the operational runbook for the deployment model where:
 - The **target server** can reach only **you (SSH)** and the **private registry**
   `REGISTRY_HOST` (`docker.netixsystem.com`). It has **no public internet**.
   Every image it runs must already live in that registry.
+- The registry sits behind **token auth** (since 2026-10-05): every push and
+  every pull needs a `docker login` first — a **push** account for CI and the
+  dual-access machine, a **pull-only** account for the server.
 - Only the **web/frontend port** (Caddy, HTTP) is published on the host. `api`,
   `web`, `postgres`, `redis`, and `minio` stay on the internal compose network.
 - Secrets live in an on-server `.env` (fail-fast; nothing is committed).
@@ -53,10 +56,13 @@ five base images must be copied into `REGISTRY_HOST` first.
 > dual-access machine is Apple Silicon / arm64, force amd64 on pull so the
 > mirrored image runs on the server. The `--platform` flag below does that.
 
-The registry needs no authentication, so there's no `docker login` — just push.
+Log in first with an account that may push (the registry refuses anonymous
+pushes since 2026-10-05). `docker login` prompts for the password, so it stays
+out of your shell history:
 
 ```sh
 export REGISTRY_HOST=docker.netixsystem.com
+docker login "$REGISTRY_HOST"
 
 # Flat-named bases (repo name unchanged):
 for img in postgres:16-alpine redis:7-alpine caddy:2.8-alpine; do
@@ -87,9 +93,14 @@ You only repeat this if you bump one of these base-image tags in
 `sprintly-api` and `sprintly-web` for `linux/amd64`, tags each `latest` +
 `sha-<short>`, and pushes to `REGISTRY_HOST` with retries.
 
-The registry requires no authentication, so no credential secrets are needed.
-Optionally configure in GitHub → *Settings → Secrets and variables → Actions*:
+The job logs in before it pushes, with an account that may push
+`sprintly-api` and `sprintly-web`. Configure in GitHub → *Settings → Secrets and
+variables → Actions*:
 
+- `secrets.REGISTRY_USERNAME` / `secrets.REGISTRY_PASSWORD` — **required**. The
+  e2e workflow uses them too (it pulls the mirrored MinIO image). Dependabot PRs
+  can't read Actions secrets, so put the same two in *Secrets and variables →
+  Dependabot* as well, or Dependabot's e2e runs fail at boot.
 - `vars.REGISTRY_HOST` — optional (defaults to `docker.netixsystem.com`).
 - `vars.NEXT_PUBLIC_APP_NAME` — optional (defaults to `Sprintly`).
 
@@ -102,6 +113,7 @@ and you have no self-hosted runner). From a repo checkout:
 
 ```sh
 export REGISTRY_HOST=docker.netixsystem.com
+docker login "$REGISTRY_HOST"            # push account; once per machine
 SHORT=$(git rev-parse --short HEAD)
 
 docker buildx build --platform linux/amd64 \
@@ -194,10 +206,20 @@ Then edit the non-secret settings in `.env` by hand:
 > Sanity check without booting: `grep -c __GENERATE_ON_SERVER__ .env` must print
 > `0`. Any leftover placeholder means a secret wasn't filled in.
 
-The registry needs no login, so the server can pull straight away. (If the
-registry is served over plain HTTP rather than HTTPS, add it to the Docker
-daemon's `insecure-registries` in `/etc/docker/daemon.json` and restart Docker —
-this is the one registry-side setup the daemon needs.)
+Log the server in to the registry once, as the user that runs
+`docker compose`, with a **pull-only** account (it never pushes, so it
+shouldn't be able to):
+
+```sh
+docker login docker.netixsystem.com      # prompts for the password
+```
+
+Docker keeps the credential in that user's `~/.docker/config.json` (base64,
+not encrypted, unless a credential helper is configured), and every later
+`pull` uses it — keep the file `600` and the account pull-only. When the
+password rotates, run `docker login` again. (If the registry is served over
+plain HTTP rather than HTTPS, also add it to the Docker daemon's
+`insecure-registries` in `/etc/docker/daemon.json` and restart Docker.)
 
 ---
 
@@ -212,7 +234,9 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d
 
 That's the whole per-deploy flow. `pull` fetches the images named in `.env`
 (`IMAGE_TAG`, default `latest`) from the registry; `up -d` recreates changed
-containers. The API applies any pending migrations at startup before it accepts
+containers. A `pull` that fails with `unauthorized` or `no basic auth
+credentials` means the server isn't logged in (or its password rotated) — see
+the end of §4. The API applies any pending migrations at startup before it accepts
 traffic (idempotent — see §7).
 
 Check status / logs:
