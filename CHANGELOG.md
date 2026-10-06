@@ -148,6 +148,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The registry wants a login** — `docker.netixsystem.com` refuses anonymous pushes and pulls since 2026-10-05. CI already logs in with the `REGISTRY_USERNAME` / `REGISTRY_PASSWORD` secrets (release and e2e workflows; Dependabot needs the same pair in its own secret store). The production runbook said the opposite in three places and now walks through it: a push account on the dual-access machine, a one-time pull-only `docker login` on the server before the first `pull`, and what an `unauthorized` pull means.
 - **Migrations run at API startup** — `sprintly-api` (serve) now applies pending SQLx migrations before binding, controlled by `SPRINTLY_AUTO_MIGRATE` (default `true`); idempotent, so a redeploy or restart converges the schema with no separate step.
 - **Host-agnostic web image** — the WebSocket URL is resolved from the page origin at runtime (falling back to same-origin `/ws`) and `NEXT_PUBLIC_*` default to relative paths, so one CI-built web image works behind any host/scheme without a rebuild.
 
