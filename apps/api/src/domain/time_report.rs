@@ -334,7 +334,6 @@ pub fn to_csv(logs: &[FetchedLog], total_minutes: i64) -> String {
     csv
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

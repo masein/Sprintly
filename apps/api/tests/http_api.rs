@@ -4894,15 +4894,37 @@ async fn role_changes_apply_to_existing_tokens_immediately(pool: PgPool) {
     let (s, _) = send(&app, "GET", "/api/v1/admin/users", Some(&bob), None).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "a member isn't an admin");
 
-    let (s, _) = send(&app, "POST", &role_path, Some(&admin), Some(json!({ "role": "admin" }))).await;
+    let (s, _) = send(
+        &app,
+        "POST",
+        &role_path,
+        Some(&admin),
+        Some(json!({ "role": "admin" })),
+    )
+    .await;
     assert!(s.is_success(), "{s}");
     let (s, _) = send(&app, "GET", "/api/v1/admin/users", Some(&bob), None).await;
-    assert_eq!(s, StatusCode::OK, "promotion applies to the token Bob already has");
+    assert_eq!(
+        s,
+        StatusCode::OK,
+        "promotion applies to the token Bob already has"
+    );
 
-    let (s, _) = send(&app, "POST", &role_path, Some(&admin), Some(json!({ "role": "member" }))).await;
+    let (s, _) = send(
+        &app,
+        "POST",
+        &role_path,
+        Some(&admin),
+        Some(json!({ "role": "member" })),
+    )
+    .await;
     assert!(s.is_success(), "{s}");
     let (s, _) = send(&app, "GET", "/api/v1/admin/users", Some(&bob), None).await;
-    assert_eq!(s, StatusCode::FORBIDDEN, "demotion applies at once, not at token expiry");
+    assert_eq!(
+        s,
+        StatusCode::FORBIDDEN,
+        "demotion applies at once, not at token expiry"
+    );
 }
 
 /// Reacting needs the same rights as commenting; outsiders can't react (or
@@ -4916,25 +4938,69 @@ async fn reactions_and_time_logs_need_team_rights(pool: PgPool) {
     let (watcher, watcher_user) = register(&app, "rxwatch").await;
     let (outsider, _) = register(&app, "rxout").await;
     make_project(&app, &lead, "RX").await;
-    let (s, _) = send(&app, "POST", "/api/v1/projects/RX/members", Some(&lead),
-        Some(json!({ "user_id": watcher_user["id"], "role": "watcher" }))).await;
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/RX/members",
+        Some(&lead),
+        Some(json!({ "user_id": watcher_user["id"], "role": "watcher" })),
+    )
+    .await;
     assert!(s.is_success(), "{s}");
-    let (s, _) = send(&app, "POST", "/api/v1/projects/RX/tasks", Some(&lead),
-        Some(json!({ "title": "react to me" }))).await;
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/RX/tasks",
+        Some(&lead),
+        Some(json!({ "title": "react to me" })),
+    )
+    .await;
     assert_eq!(s, StatusCode::CREATED);
 
     let react = json!({ "task_key": "RX-1", "emoji": "👍" });
-    let (s, _) = send(&app, "POST", "/api/v1/reactions", Some(&outsider), Some(react.clone())).await;
-    assert_eq!(s, StatusCode::NOT_FOUND, "outsiders can't react — or tell the task exists");
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/reactions",
+        Some(&outsider),
+        Some(react.clone()),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::NOT_FOUND,
+        "outsiders can't react — or tell the task exists"
+    );
     let (s, _) = send(&app, "POST", "/api/v1/reactions", Some(&lead), Some(react)).await;
     assert_eq!(s, StatusCode::CREATED);
 
     let entry = json!({ "started_at": "2026-05-13T09:00:00Z", "duration_minutes": 30 });
-    let (s, _) = send(&app, "POST", "/api/v1/tasks/RX-1/time-logs", Some(&watcher), Some(entry.clone())).await;
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/tasks/RX-1/time-logs",
+        Some(&watcher),
+        Some(entry.clone()),
+    )
+    .await;
     assert_eq!(s, StatusCode::FORBIDDEN, "a watcher can't log time");
-    let (s, _) = send(&app, "POST", "/api/v1/tasks/RX-1/timer/start", Some(&watcher), None).await;
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/tasks/RX-1/timer/start",
+        Some(&watcher),
+        None,
+    )
+    .await;
     assert_eq!(s, StatusCode::FORBIDDEN, "…or start a timer");
-    let (s, body) = send(&app, "POST", "/api/v1/tasks/RX-1/time-logs", Some(&lead), Some(entry)).await;
+    let (s, body) = send(
+        &app,
+        "POST",
+        "/api/v1/tasks/RX-1/time-logs",
+        Some(&lead),
+        Some(entry),
+    )
+    .await;
     assert!(s.is_success(), "the team can: {s} {body:?}");
 }
 
@@ -4998,5 +5064,9 @@ async fn cors_is_dev_only(pool: PgPool) {
     };
     let prod = sprintly_api::app::router(state);
     let resp = prod.oneshot(preflight()).await.unwrap();
-    assert_eq!(allow_origin(&resp), None, "prod grants no cross-origin access");
+    assert_eq!(
+        allow_origin(&resp),
+        None,
+        "prod grants no cross-origin access"
+    );
 }

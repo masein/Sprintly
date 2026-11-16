@@ -1461,7 +1461,13 @@ mod panic_regressions {
 
     #[test]
     fn odd_relative_dates_are_errors_not_panics() {
-        for v in ["5é", "é", "999999999999y", "-999999999999d", "9223372036854775807w"] {
+        for v in [
+            "5é",
+            "é",
+            "999999999999y",
+            "-999999999999d",
+            "9223372036854775807w",
+        ] {
             let r = std::panic::catch_unwind(|| parse(&format!("due < {v}")));
             assert!(r.is_ok(), "panicked on due < {v}");
         }

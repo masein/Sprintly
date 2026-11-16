@@ -243,5 +243,8 @@ async fn invoice_numbers_survive_deleted_drafts_and_races(pool: PgPool) {
     assert_ne!(na, nb);
     let mut got = [na, nb];
     got.sort();
-    assert_eq!(got, ["INV-2026-0005".to_string(), "INV-2026-0006".to_string()]);
+    assert_eq!(
+        got,
+        ["INV-2026-0005".to_string(), "INV-2026-0006".to_string()]
+    );
 }

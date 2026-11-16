@@ -360,4 +360,3 @@ async fn invoice_csv(
     );
     Ok((StatusCode::OK, h, csv).into_response())
 }
-
