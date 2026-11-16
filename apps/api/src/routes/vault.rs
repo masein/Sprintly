@@ -250,10 +250,12 @@ async fn list_items(
     .fetch_all(&state.db)
     .await?;
 
-    // Contributors only see items they were explicitly granted.
+    // Contributors only see items they were explicitly granted — and grants
+    // only count for current leads/contributors (see `require_access`).
+    let grants_count = grant_eligible(&ctx);
     let items: Vec<VaultItemDto> = rows
         .into_iter()
-        .filter(|r| user_is_lead_or_admin || r.explicit_view)
+        .filter(|r| user_is_lead_or_admin || (grants_count && r.explicit_view))
         .map(|r| VaultItemDto {
             id: r.id,
             project_id: r.project_id,
@@ -477,7 +479,21 @@ async fn grant_access(
     Path(id): Path<Uuid>,
     Json(req): Json<GrantAccessReq>,
 ) -> AppResult<impl IntoResponse> {
-    require_access(&state.db, &user, id, AccessNeed::Edit).await?;
+    let (ctx, _) = require_access(&state.db, &user, id, AccessNeed::Edit).await?;
+    // Only the project's leads and contributors can hold a grant — never a
+    // watcher (read-only by definition) or someone outside the project.
+    let grantee_role: Option<String> = sqlx::query_scalar(
+        "SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2",
+    )
+    .bind(ctx.id)
+    .bind(req.user_id)
+    .fetch_optional(&state.db)
+    .await?;
+    if !matches!(grantee_role.as_deref(), Some("lead" | "contributor")) {
+        return Err(AppError::BadRequest(
+            "vault access can only be granted to this project's leads and contributors".into(),
+        ));
+    }
     let can_view = req.can_view.unwrap_or(true);
     let can_edit = req.can_edit.unwrap_or(false);
     let mut tx = state.db.begin().await?;
@@ -597,21 +613,43 @@ async fn require_access(
     let ctx = project_ctx::load_by_id(db, row.project_id, user.id).await?;
     let is_admin = user.role == GlobalRole::Admin;
     let is_lead = ctx.actor_role == Some(ProjectRole::Lead);
-    let explicit_view = row.can_view.unwrap_or(false);
-    let explicit_edit = row.can_edit.unwrap_or(false);
+    // An explicit grant only counts while its holder is still on the team as
+    // a lead or contributor. Grants used to outlive removal from the project
+    // (and could be handed to watchers or non-members), so a departed
+    // contributor kept revealing secrets.
+    let grants_count = grant_eligible(&ctx);
+    let explicit_view = grants_count && row.can_view.unwrap_or(false);
+    let explicit_edit = grants_count && row.can_edit.unwrap_or(false);
+    // Writes follow the project's write rules: a global Viewer stays
+    // read-only even as a lead, and an archived project takes no writes —
+    // except from global admins, who bypass both, as everywhere else.
+    let may_write = is_admin || (user.role != GlobalRole::Viewer && !ctx.archived);
 
+    let can_edit = is_admin || (may_write && (is_lead || explicit_edit));
     let allowed = match need {
         AccessNeed::View => is_admin || is_lead || explicit_view,
-        AccessNeed::Edit => is_admin || is_lead || explicit_edit,
+        AccessNeed::Edit => can_edit,
     };
     if !allowed {
         return Err(AppError::Forbidden);
     }
-    Ok((ctx, is_admin || is_lead || explicit_edit))
+    Ok((ctx, can_edit))
+}
+
+/// Whether explicit vault grants apply to the caller in this project: only
+/// current leads and contributors hold them (never watchers or ex-members).
+fn grant_eligible(ctx: &project_ctx::ProjectContext) -> bool {
+    matches!(
+        ctx.actor_role,
+        Some(ProjectRole::Lead | ProjectRole::Contributor)
+    )
 }
 
 fn can_manage_vault(user: &CurrentUser, ctx: &project_ctx::ProjectContext) -> bool {
-    user.role == GlobalRole::Admin || ctx.actor_role == Some(ProjectRole::Lead)
+    user.role == GlobalRole::Admin
+        || (ctx.actor_role == Some(ProjectRole::Lead)
+            && user.role != GlobalRole::Viewer
+            && !ctx.archived)
 }
 
 fn valid_kind(s: &str) -> bool {

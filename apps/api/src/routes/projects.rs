@@ -737,11 +737,24 @@ async fn remove_member(
         return Err(AppError::Forbidden);
     }
     ensure_not_last_lead(&state.db, ctx.id, target).await?;
+    // Leaving the project ends their vault grants too (they're ignored for
+    // non-members anyway; this keeps the access lists honest).
+    let mut tx = state.db.begin().await?;
     sqlx::query("DELETE FROM project_members WHERE project_id = $1 AND user_id = $2")
         .bind(ctx.id)
         .bind(target)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+    sqlx::query(
+        r#"DELETE FROM vault_access
+            WHERE user_id = $2
+              AND vault_item_id IN (SELECT id FROM vault_items WHERE project_id = $1)"#,
+    )
+    .bind(ctx.id)
+    .bind(target)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
     events::publish(
         &state.redis,
         &Event::MemberChanged {

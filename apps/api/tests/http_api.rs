@@ -4696,3 +4696,53 @@ async fn api_tokens_cannot_manage_credentials(pool: PgPool) {
     let (status, _) = send(&app, "POST", "/api/v1/me/tokens", Some(&session_token), Some(mint)).await;
     assert_eq!(status, StatusCode::CREATED);
 }
+
+/// Vault grants follow team membership: they can only be given to current
+/// leads/contributors, and stop working the moment the holder leaves the
+/// project. (Regression: grants outlived removal, so a departed contributor
+/// could keep revealing secrets; and they could be handed to anyone.)
+#[sqlx::test(migrations = "./migrations")]
+async fn vault_grants_end_with_project_membership(pool: PgPool) {
+    let app = app(pool.clone());
+    let (_admin, _) = register(&app, "vaultadmin").await; // first user → admin
+    let (lead, _) = register(&app, "vaultlead").await;
+    let (contrib, contrib_user) = register(&app, "vaultdev").await;
+    let (_outsider, outsider_user) = register(&app, "outsider").await;
+    let contrib_id = contrib_user["id"].as_str().unwrap().to_string();
+    let outsider_id = outsider_user["id"].as_str().unwrap().to_string();
+
+    let (s, _) = send(&app, "POST", "/api/v1/projects", Some(&lead),
+        Some(json!({ "key": "VLT", "name": "Vault" }))).await;
+    assert_eq!(s, StatusCode::CREATED);
+    let (s, _) = send(&app, "POST", "/api/v1/projects/VLT/members", Some(&lead),
+        Some(json!({ "user_id": contrib_id, "role": "contributor" }))).await;
+    assert!(s.is_success(), "{s}");
+    let (s, item) = send(&app, "POST", "/api/v1/projects/VLT/vault", Some(&lead),
+        Some(json!({ "name": "db", "kind": "password", "value": "hunter2" }))).await;
+    assert_eq!(s, StatusCode::CREATED, "{item:?}");
+    let item_id = item["id"].as_str().unwrap().to_string();
+
+    // Granting to someone outside the project is refused.
+    let (s, _) = send(&app, "POST", &format!("/api/v1/vault/{item_id}/access"), Some(&lead),
+        Some(json!({ "user_id": outsider_id, "can_view": true }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "no grants to non-members");
+
+    // A contributor with a grant can reveal…
+    let (s, _) = send(&app, "POST", &format!("/api/v1/vault/{item_id}/access"), Some(&lead),
+        Some(json!({ "user_id": contrib_id, "can_view": true }))).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, body) = send(&app, "POST", &format!("/api/v1/vault/{item_id}/reveal"), Some(&contrib), None).await;
+    assert_eq!(s, StatusCode::OK, "{body:?}");
+
+    // …until they leave the project.
+    let (s, _) = send(&app, "DELETE", &format!("/api/v1/projects/VLT/members/{contrib_id}"), Some(&lead), None).await;
+    assert!(s.is_success(), "{s}");
+    let (s, _) = send(&app, "POST", &format!("/api/v1/vault/{item_id}/reveal"), Some(&contrib), None).await;
+    assert!(s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND, "ex-member must be refused, got {s}");
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM vault_access WHERE user_id = $1::uuid")
+        .bind(&contrib_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "removal cleans up their grants");
+}
