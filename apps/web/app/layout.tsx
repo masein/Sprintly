@@ -13,6 +13,13 @@ export const metadata: Metadata = {
   icons: { icon: [{ url: "/icon.svg", type: "image/svg+xml" }], apple: "/icon.svg" },
 };
 
+// Render every page per request. The CSP nonce (middleware.ts) is fresh on
+// each request, and Next.js stamps it on the scripts it renders — a page
+// prerendered at build time would carry no nonce and its scripts would be
+// blocked. The pages fetch their data client-side anyway, so the cost is
+// one cheap server render per navigation.
+export const dynamic = "force-dynamic";
+
 export const viewport: Viewport = {
   themeColor: "#7c5cff",
   width: "device-width",
