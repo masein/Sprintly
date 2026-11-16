@@ -239,7 +239,7 @@ async fn approve(
     user: CurrentUser,
     Path((target_user, period_start)): Path<(Uuid, NaiveDate)>,
 ) -> AppResult<impl IntoResponse> {
-    require_can_approve(&state.db, &user, target_user).await?;
+    require_can_approve(&state.db, &user, target_user, period_start).await?;
     let n = sqlx::query(
         r#"
         UPDATE timesheets SET
@@ -299,7 +299,7 @@ async fn csv_export(
         .parse()
         .map_err(|_| AppError::BadRequest("invalid period_start".into()))?;
     if target_user != user.id {
-        require_can_approve(&state.db, &user, target_user).await?;
+        require_can_approve(&state.db, &user, target_user, period_start).await?;
     }
     let view = compute_view(&state.db, target_user, period_start).await?;
 
@@ -437,6 +437,9 @@ async fn pending_approvals(
     };
     let items: Vec<_> = rows
         .into_iter()
+        // A lead's own timesheet isn't theirs to approve (see
+        // `require_can_approve`), so don't offer it in their queue.
+        .filter(|r| user.role == GlobalRole::Admin || r.user_id != user.id)
         .map(|r| {
             serde_json::json!({
                 "user_id": r.user_id,
@@ -627,9 +630,22 @@ async fn compute_view(
 /// True if `actor` is allowed to approve `target`'s timesheets:
 ///   • global admin, OR
 ///   • project lead of any project where `target` logged time.
-async fn require_can_approve(db: &PgPool, actor: &CurrentUser, target: Uuid) -> AppResult<()> {
+/// Who may approve (or read) `target`'s timesheet for the week starting
+/// `period_start`: a global admin, or a lead of a project `target` logged time
+/// on **in that week** — the same rule the pending-approvals queue uses. Never
+/// the timesheet's owner: a member who leads a side project of their own must
+/// not be able to sign off their own hours (pay included).
+async fn require_can_approve(
+    db: &PgPool,
+    actor: &CurrentUser,
+    target: Uuid,
+    period_start: NaiveDate,
+) -> AppResult<()> {
     if actor.role == GlobalRole::Admin {
         return Ok(());
+    }
+    if actor.id == target {
+        return Err(AppError::Forbidden);
     }
     let ok: bool = sqlx::query_scalar(
         r#"
@@ -642,11 +658,14 @@ async fn require_can_approve(db: &PgPool, actor: &CurrentUser, target: Uuid) -> 
                    AND pm.user_id = $1
                    AND pm.role = 'lead'
             WHERE  tl.user_id = $2 AND tl.deleted_at IS NULL
+              AND  tl.started_at >= $3::date::timestamptz
+              AND  tl.started_at <  ($3::date + 7)::timestamptz
         )
         "#,
     )
     .bind(actor.id)
     .bind(target)
+    .bind(period_start)
     .fetch_one(db)
     .await?;
     if ok {
