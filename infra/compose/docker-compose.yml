@@ -81,12 +81,18 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    # The bucket is PRIVATE. Every browser read/write goes through a URL the
+    # API presigns after its own permission check. `set none` (not just "don't
+    # set download") actively revokes the anonymous-read policy older versions
+    # of this file applied, so existing volumes are fixed on the next `up`.
+    # No `|| true`: if revoking fails, this container exits non-zero instead of
+    # silently leaving every attachment and backup world-readable.
     entrypoint: >
       /bin/sh -c "
         mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
         mc mb --ignore-existing local/${MINIO_BUCKET} &&
-        mc anonymous set download local/${MINIO_BUCKET} || true &&
-        echo 'MinIO bucket ready.'
+        mc anonymous set none local/${MINIO_BUCKET} &&
+        echo 'MinIO bucket ready (private).'
       "
     restart: "no"
 

@@ -52,6 +52,13 @@
     # dev/CI on the exact prod topology — a host+path signing bug shipped
     # precisely because they diverged.
     handle_path /s3/* {
+        # Stored objects are user uploads served from the app's own origin.
+        # `sandbox` gives any document rendered from here an opaque origin with
+        # scripts disabled, so an uploaded .html/.svg can never act as the app
+        # (read the CSRF cookie, call the API) — even if a Content-Type slips
+        # through. Downloads and images are unaffected.
+        header Content-Security-Policy "sandbox"
+        header X-Content-Type-Options "nosniff"
         reverse_proxy minio:9000
     }
 

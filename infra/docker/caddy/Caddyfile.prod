@@ -75,6 +75,11 @@
     # MinIO (presigned attachment URLs). Strip /s3 before proxying — see the
     # SigV4 note above.
     handle_path /s3/* {
+        # User uploads served from the app's own origin: `sandbox` gives any
+        # document rendered from here an opaque origin with scripts off, so an
+        # uploaded .html/.svg can't act as the app. Downloads/images unaffected.
+        header Content-Security-Policy "sandbox"
+        header X-Content-Type-Options "nosniff"
         reverse_proxy minio:9000
     }
 
