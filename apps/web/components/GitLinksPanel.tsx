@@ -4,6 +4,7 @@
 // GitHub integration. Hidden when there's nothing linked.
 
 import { useQuery } from "@tanstack/react-query";
+import { safeExternalUrl } from "@/lib/links";
 import {
   CircleDot,
   CircleCheck,
@@ -76,6 +77,9 @@ export function GitLinksPanel({ taskKey }: { taskKey: string }) {
       <ul className="space-y-1">
         {links.map((l) => {
           const Icon = ICON[l.kind] ?? GitCommit;
+          // Only http(s): the URL came from a provider payload, and a
+          // `javascript:` href would run on our origin when clicked.
+          const href = safeExternalUrl(l.url);
           return (
             <li key={l.id} className="mono flex items-start gap-2 text-xs">
               <Icon size={12} />
@@ -84,9 +88,9 @@ export function GitLinksPanel({ taskKey }: { taskKey: string }) {
                   title then ran out of the 280px sidebar and gave the whole
                   task page a horizontal scrollbar. */}
               <span className="flex min-w-0 flex-1 items-baseline">
-                {l.url ? (
+                {href ? (
                   <a
-                    href={l.url}
+                    href={href}
                     target="_blank"
                     rel="noreferrer"
                     className="shrink-0 text-accent hover:underline"
