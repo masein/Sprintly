@@ -79,6 +79,9 @@ async fn cmd_serve() -> anyhow::Result<()> {
     }
 
     let state = infra::AppState::connect(&cfg).await?;
+    // Build login's no-such-account hash now, so even the first unknown-email
+    // login costs exactly what a real one does (it's built lazily otherwise).
+    let _ = sprintly_api::domain::password::dummy_hash(&cfg.auth);
     // Background worker: achievement scans, backups, and webhook delivery. The
     // vault master key lets it decrypt webhook signing secrets.
     sprintly_api::jobs::spawn(
@@ -206,27 +209,36 @@ async fn cmd_restore(args: Vec<String>) -> anyhow::Result<()> {
     let url = signer.get(&storage_key, None, 900);
     let tmp = format!("/tmp/sprintly-restore-{backup_id}.dump");
     info!(%backup_id, "downloading backup object");
-    let dl = tokio::process::Command::new("curl")
-        .args(["--fail-with-body", "-sS", "-o", &tmp, &url])
-        .status()
-        .await?;
-    if !dl.success() {
-        anyhow::bail!("failed to download backup object from MinIO");
+    // Presigned URL to curl on stdin, and the DB password to pg_restore via
+    // its environment — never argv, which every process on the host can read.
+    let dl = infra::outbound::curl_with_config(
+        &["--fail-with-body", "-sS", "-o", &tmp],
+        &[("url", url.as_str())],
+    )
+    .await?;
+    if !dl.status.success() {
+        anyhow::bail!(
+            "failed to download backup object from MinIO: {}",
+            String::from_utf8_lossy(&dl.stderr).trim()
+        );
     }
 
     info!("running pg_restore (this overwrites the target database)");
-    let restore = tokio::process::Command::new("pg_restore")
-        .args([
-            "--clean",
-            "--if-exists",
-            "--no-owner",
-            "--no-acl",
-            "--dbname",
-            &target,
-            &tmp,
-        ])
-        .status()
-        .await;
+    let (restore_target, restore_password) = infra::db::libpq_target(&target);
+    let mut restore_cmd = tokio::process::Command::new("pg_restore");
+    restore_cmd.args([
+        "--clean",
+        "--if-exists",
+        "--no-owner",
+        "--no-acl",
+        "--dbname",
+        &restore_target,
+        &tmp,
+    ]);
+    if let Some(pw) = &restore_password {
+        restore_cmd.env("PGPASSWORD", pw);
+    }
+    let restore = restore_cmd.status().await;
     let _ = tokio::fs::remove_file(&tmp).await;
     let restore = restore?;
 

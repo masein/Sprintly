@@ -242,6 +242,26 @@ async fn create_task(
         }
     }
 
+    // Same for a parent: a subtask lives in its parent's project. Without
+    // this, a contributor of project A could hang a task under one of
+    // project B's tasks (it showed up in B's subtask list and counts, and the
+    // response echoed B's task key). `set_parent` already enforced it.
+    if let Some(parent_id) = req.parent_task_id {
+        let same_project: bool = sqlx::query_scalar(
+            r#"SELECT EXISTS(SELECT 1 FROM tasks
+                              WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL)"#,
+        )
+        .bind(parent_id)
+        .bind(ctx.id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !same_project {
+            return Err(AppError::BadRequest(
+                "parent task does not belong to this project".into(),
+            ));
+        }
+    }
+
     // Resolve the destination column. If unspecified, first column of the
     // default board.
     let (board_id, column_id) = match req.column_id {

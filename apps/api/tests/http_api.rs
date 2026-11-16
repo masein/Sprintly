@@ -509,6 +509,97 @@ async fn invite_role_wins_over_open_signup(pool: PgPool) {
     assert_eq!(walkin["role"], "member");
 }
 
+fn signup_body(handle: &str, invite: Option<&str>) -> Value {
+    let mut b = json!({
+        "email": format!("{handle}@sprintly.test"),
+        "handle": handle,
+        "display_name": handle,
+        "password": "correct-horse-battery-staple",
+    });
+    if let Some(t) = invite {
+        b["invite_token"] = json!(t);
+    }
+    b
+}
+
+/// A single-use invite stays single-use under concurrency: two registrations
+/// racing on the same (admin!) invite must not both get in. (Regression: the
+/// check and the consume weren't atomic, so both could pass the check.)
+#[sqlx::test(migrations = "./migrations")]
+async fn racing_registrations_cannot_spend_one_invite_twice(pool: PgPool) {
+    let app = app(pool.clone());
+    let (admin_token, _) = register(&app, "founder").await;
+    let (_, invite) = send(
+        &app,
+        "POST",
+        "/api/v1/admin/invites",
+        Some(&admin_token),
+        Some(json!({ "suggested_role": "admin" })),
+    )
+    .await;
+    let token = invite["token"].as_str().unwrap().to_string();
+
+    let ((s1, b1), (s2, b2)) = tokio::join!(
+        send(
+            &app,
+            "POST",
+            "/api/v1/auth/register",
+            None,
+            Some(signup_body("racer1", Some(&token)))
+        ),
+        send(
+            &app,
+            "POST",
+            "/api/v1/auth/register",
+            None,
+            Some(signup_body("racer2", Some(&token)))
+        ),
+    );
+    let ok = [s1, s2].iter().filter(|s| **s == StatusCode::OK).count();
+    assert_eq!(
+        ok, 1,
+        "exactly one may use the invite: {s1} {b1:?} / {s2} {b2:?}"
+    );
+    let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(admins, 2, "the founder plus exactly one invitee");
+}
+
+/// "First user becomes admin" can only be won once, even when the first two
+/// sign-ups on a fresh instance race.
+#[sqlx::test(migrations = "./migrations")]
+async fn racing_first_signups_yield_one_admin(pool: PgPool) {
+    let app = app(pool.clone());
+    let ((s1, _), (s2, _)) = tokio::join!(
+        send(
+            &app,
+            "POST",
+            "/api/v1/auth/register",
+            None,
+            Some(signup_body("first1", None))
+        ),
+        send(
+            &app,
+            "POST",
+            "/api/v1/auth/register",
+            None,
+            Some(signup_body("first2", None))
+        ),
+    );
+    assert_eq!(
+        (s1, s2),
+        (StatusCode::OK, StatusCode::OK),
+        "open signup lets both in"
+    );
+    let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(admins, 1, "only one of them may become admin");
+}
+
 /// Admin email change over HTTP: applies, rejects duplicates with 409, and
 /// requires admin.
 #[sqlx::test(migrations = "./migrations")]
@@ -4569,5 +4660,223 @@ async fn custom_field_values_save_and_clear(pool: PgPool) {
     assert!(
         kinds.contains("field_set") && kinds.contains("field_cleared"),
         "{activity:?}"
+    );
+}
+
+/// Credential management needs an interactive session: a write-scoped
+/// personal API token can't mint more tokens (a leaked token could otherwise
+/// mint a non-expiring successor that survives its own revocation), revoke
+/// tokens, or turn 2FA on/off (and lock the owner out).
+#[sqlx::test(migrations = "./migrations")]
+async fn api_tokens_cannot_manage_credentials(pool: PgPool) {
+    let app = app(pool.clone());
+    let (session_token, user) = register(&app, "scripter").await;
+    let uid: uuid::Uuid = user["id"].as_str().unwrap().parse().unwrap();
+    let (row, api_token) = sprintly_api::domain::api_tokens::create(
+        &pool,
+        uid,
+        "ci",
+        &["read".to_string(), "write".to_string()],
+        None,
+    )
+    .await
+    .unwrap();
+
+    let mint = json!({ "name": "child", "scopes": ["read", "write"] });
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/v1/me/tokens",
+        Some(&api_token),
+        Some(mint.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a token can't mint tokens");
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/me/tokens/{}", row.id),
+        Some(&api_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a token can't revoke tokens");
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/v1/me/2fa/enroll",
+        Some(&api_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a token can't enrol 2FA");
+
+    // It still works for ordinary API use, and the session can do all of it.
+    let (status, _) = send(&app, "GET", "/api/v1/users/me", Some(&api_token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send(
+        &app,
+        "POST",
+        "/api/v1/me/tokens",
+        Some(&session_token),
+        Some(mint),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+/// Vault grants follow team membership: they can only be given to current
+/// leads/contributors, and stop working the moment the holder leaves the
+/// project. (Regression: grants outlived removal, so a departed contributor
+/// could keep revealing secrets; and they could be handed to anyone.)
+#[sqlx::test(migrations = "./migrations")]
+async fn vault_grants_end_with_project_membership(pool: PgPool) {
+    let app = app(pool.clone());
+    let (_admin, _) = register(&app, "vaultadmin").await; // first user → admin
+    let (lead, _) = register(&app, "vaultlead").await;
+    let (contrib, contrib_user) = register(&app, "vaultdev").await;
+    let (_outsider, outsider_user) = register(&app, "outsider").await;
+    let contrib_id = contrib_user["id"].as_str().unwrap().to_string();
+    let outsider_id = outsider_user["id"].as_str().unwrap().to_string();
+
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects",
+        Some(&lead),
+        Some(json!({ "key": "VLT", "name": "Vault" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/VLT/members",
+        Some(&lead),
+        Some(json!({ "user_id": contrib_id, "role": "contributor" })),
+    )
+    .await;
+    assert!(s.is_success(), "{s}");
+    let (s, item) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/VLT/vault",
+        Some(&lead),
+        Some(json!({ "name": "db", "kind": "password", "value": "hunter2" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{item:?}");
+    let item_id = item["id"].as_str().unwrap().to_string();
+
+    // Granting to someone outside the project is refused.
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/vault/{item_id}/access"),
+        Some(&lead),
+        Some(json!({ "user_id": outsider_id, "can_view": true })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "no grants to non-members");
+
+    // A contributor with a grant can reveal…
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/vault/{item_id}/access"),
+        Some(&lead),
+        Some(json!({ "user_id": contrib_id, "can_view": true })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, body) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/vault/{item_id}/reveal"),
+        Some(&contrib),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body:?}");
+
+    // …until they leave the project.
+    let (s, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/projects/VLT/members/{contrib_id}"),
+        Some(&lead),
+        None,
+    )
+    .await;
+    assert!(s.is_success(), "{s}");
+    let (s, _) = send(
+        &app,
+        "POST",
+        &format!("/api/v1/vault/{item_id}/reveal"),
+        Some(&contrib),
+        None,
+    )
+    .await;
+    assert!(
+        s == StatusCode::FORBIDDEN || s == StatusCode::NOT_FOUND,
+        "ex-member must be refused, got {s}"
+    );
+    let left: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM vault_access WHERE user_id = $1::uuid")
+            .bind(&contrib_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(left, 0, "removal cleans up their grants");
+}
+
+/// A new task's parent must be in the same project (as `set_parent` already
+/// required), and re-adding the only lead with a lesser role can't leave the
+/// project leaderless.
+#[sqlx::test(migrations = "./migrations")]
+async fn task_parent_and_last_lead_guards(pool: PgPool) {
+    let app = app(pool.clone());
+    let (lead, lead_user) = register(&app, "guardlead").await; // first user → admin
+    let lead_id = lead_user["id"].as_str().unwrap().to_string();
+    make_project(&app, &lead, "PA").await;
+    make_project(&app, &lead, "PB").await;
+    let (s, other) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/PB/tasks",
+        Some(&lead),
+        Some(json!({ "title": "B's task" })),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{other:?}");
+    let other_id = other["id"].as_str().unwrap().to_string();
+
+    let (s, body) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/PA/tasks",
+        Some(&lead),
+        Some(json!({ "title": "stray", "parent_task_id": other_id })),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::BAD_REQUEST,
+        "cross-project parent refused: {body:?}"
+    );
+
+    // The creator is PA's only lead; re-adding them as a watcher must fail.
+    let (s, _) = send(
+        &app,
+        "POST",
+        "/api/v1/projects/PA/members",
+        Some(&lead),
+        Some(json!({ "user_id": lead_id, "role": "watcher" })),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::CONFLICT,
+        "can't demote the last lead via add_member"
     );
 }

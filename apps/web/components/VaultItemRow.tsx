@@ -1,6 +1,6 @@
 "use client";
 
-import { copyText } from "@/lib/clipboard";
+import { copyText, scheduleClipboardWipe } from "@/lib/clipboard";
 
 // One row in the vault list. Owns the reveal lifecycle for its own item:
 // click-to-reveal renders plaintext in local state for 10s with a countdown
@@ -8,7 +8,10 @@ import { copyText } from "@/lib/clipboard";
 //
 // Plaintext is wiped on unmount (the local state goes out of scope) and on
 // route change (React unmounts the page-level tree). It never enters
-// TanStack cache or any global store.
+// TanStack cache or any global store — which is why reveal is a plain call,
+// not a useMutation (a mutation's result lingers in the MutationCache for
+// minutes after unmount). The clipboard wipe is module-scoped
+// (lib/clipboard) so leaving the page doesn't cancel it.
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -56,7 +59,6 @@ export function VaultItemRow({
   const [remaining, setRemaining] = useState(0);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tickTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const clipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Always wipe on unmount.
   useEffect(() => {
@@ -64,30 +66,37 @@ export function VaultItemRow({
       setRevealed(null);
       if (revealTimer.current) clearTimeout(revealTimer.current);
       if (tickTimer.current) clearInterval(tickTimer.current);
-      if (clipTimer.current) clearTimeout(clipTimer.current);
     };
   }, []);
 
-  const reveal = useMutation({
-    mutationFn: () => revealVaultItem(item.id),
-    onSuccess: (r) => {
-      setRevealed(r.value);
-      setRemaining(REVEAL_TTL_MS / 1000);
+  const [revealing, setRevealing] = useState(false);
+
+  function showPlaintext(value: string) {
+    setRevealed(value);
+    setRemaining(REVEAL_TTL_MS / 1000);
+    if (tickTimer.current) clearInterval(tickTimer.current);
+    tickTimer.current = setInterval(() => {
+      setRemaining((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    if (revealTimer.current) clearTimeout(revealTimer.current);
+    revealTimer.current = setTimeout(() => {
+      setRevealed(null);
       if (tickTimer.current) clearInterval(tickTimer.current);
-      tickTimer.current = setInterval(() => {
-        setRemaining((s) => (s > 0 ? s - 1 : 0));
-      }, 1000);
-      if (revealTimer.current) clearTimeout(revealTimer.current);
-      revealTimer.current = setTimeout(() => {
-        setRevealed(null);
-        if (tickTimer.current) clearInterval(tickTimer.current);
-      }, REVEAL_TTL_MS);
-    },
-    onError: (e) => {
+    }, REVEAL_TTL_MS);
+  }
+
+  async function doReveal() {
+    setRevealing(true);
+    try {
+      const r = await revealVaultItem(item.id);
+      showPlaintext(r.value);
+    } catch (e) {
       const err = e as unknown as ApiError;
       alert(err.status === 429 ? "Reveal rate limit hit. Try again in an hour." : err.message);
-    },
-  });
+    } finally {
+      setRevealing(false);
+    }
+  }
 
   async function copyToClipboard() {
     // Reveal first if we don't already have it in memory.
@@ -108,15 +117,9 @@ export function VaultItemRow({
         return;
       }
       await markCopied(item.id).catch(() => {});
-      // Schedule auto-wipe.
-      if (clipTimer.current) clearTimeout(clipTimer.current);
-      clipTimer.current = setTimeout(async () => {
-        // Best-effort overwrite. Some browsers reject writes without a user
-        // gesture; we then write empty which still clears in the common case.
-        await copyText("").catch(() => {
-          /* nothing else to do */
-        });
-      }, CLIPBOARD_TTL_MS);
+      // Auto-wipe in 30s — module-scoped, so it survives leaving this page,
+      // and retried on refocus if the browser refuses while you're away.
+      scheduleClipboardWipe(CLIPBOARD_TTL_MS);
     } catch {
       alert("Clipboard write failed — your browser blocked it.");
     }
@@ -325,8 +328,8 @@ export function VaultItemRow({
             </span>
             <button
               type="button"
-              onClick={() => reveal.mutate()}
-              disabled={reveal.isPending}
+              onClick={() => void doReveal()}
+              disabled={revealing}
               className="mono inline-flex items-center gap-1 rounded border border-white/10 px-2 py-1 text-[11px] text-chrome-dim hover:border-white/20 hover:text-chrome disabled:opacity-50"
             >
               <Eye size={11} /> reveal

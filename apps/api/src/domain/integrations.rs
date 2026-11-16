@@ -82,6 +82,11 @@ pub async fn link(
     pr_state: Option<&str>,
     sha: Option<&str>,
 ) -> AppResult<bool> {
+    // The URL comes from a webhook payload — signed, but by a secret the
+    // project's lead holds — and the UI renders it as a link. Only keep plain
+    // http(s) URLs: a `javascript:` one would run script in whoever clicks it
+    // (an admin, say), on the app's origin.
+    let url = url.map(str::trim).filter(|u| is_http_url(u));
     let task_id: Option<Uuid> = sqlx::query_scalar(
         r#"SELECT id FROM tasks
            WHERE key = $1 AND deleted_at IS NULL
@@ -577,9 +582,31 @@ pub async fn queue_status_updates(db: &PgPool, task_id: Uuid) -> AppResult<()> {
     Ok(())
 }
 
+/// `http://` or `https://` (any case) — the only link schemes we store.
+fn is_http_url(u: &str) -> bool {
+    let lower = u.get(..8).unwrap_or(u).to_ascii_lowercase();
+    lower.starts_with("https://") || lower.starts_with("http://")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_http_links_are_kept() {
+        assert!(is_http_url("https://github.com/acme/app/pull/5"));
+        assert!(is_http_url("HTTP://gitlab.internal/x"));
+        for bad in [
+            "javascript:alert(1)",
+            "JavaScript:alert(1)",
+            "data:text/html,<script>",
+            "vbscript:x",
+            "//evil.example/x",
+            "",
+        ] {
+            assert!(!is_http_url(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn extracts_keys_at_boundaries() {

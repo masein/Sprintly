@@ -122,32 +122,57 @@ async fn register(
     //   1. If there are no users yet, anyone can register and becomes admin.
     //   2. Else, if SPRINTLY_OPEN_SIGNUP=true, anyone can register as member.
     //   3. Else, an invite token is required.
-    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL")
-        .fetch_one(&state.db)
-        .await?;
-
     let presented_token = req
         .invite_token
         .as_deref()
         .map(str::trim)
         .filter(|t| !t.is_empty());
+
+    // Cheap early refusal, before the (deliberately expensive) password hash:
+    // this endpoint isn't rate-limited, so a closed instance shouldn't burn an
+    // Argon2 hash per rejected attempt. Advisory only — the authoritative
+    // decision is re-made under the lock below.
+    if presented_token.is_none() && !state.cfg.open_signup {
+        let any_user: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE deleted_at IS NULL)")
+                .fetch_one(&state.db)
+                .await?;
+        if any_user {
+            return Err(AppError::Forbidden);
+        }
+    }
+
+    let hash = password::hash(&state.cfg.auth, &req.password)?;
+    let user_id = Uuid::now_v7();
+
+    // Everything from here is one transaction, serialized across concurrent
+    // registrations by an advisory lock. Before, two racing requests could
+    // both see "no users yet" and both become admin, or both pass the
+    // invite check and spend one single-use invite twice (its role
+    // included). A failure anywhere — e.g. a taken handle — rolls the
+    // invite consumption back with the user row.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(REGISTRATION_LOCK)
+        .execute(&mut *tx)
+        .await?;
+
+    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL")
+        .fetch_one(&mut *tx)
+        .await?;
     let (assigned_role, consumed_invite_id): (String, Option<Uuid>) = if user_count == 0 {
         ("admin".into(), None)
     } else if let Some(token) = presented_token {
         // An explicit invite wins even when open signup is on: it carries the
         // role an admin chose, and a single-use token someone pasted must be
         // consumed (or rejected if stale) — never silently ignored.
-        let (role, invite_id) = consume_invite(&state.db, token).await?;
+        let (role, invite_id) = consume_invite(&mut tx, token).await?;
         (role, Some(invite_id))
     } else if state.cfg.open_signup {
         ("member".into(), None)
     } else {
         return Err(AppError::Forbidden);
     };
-
-    // Hash password.
-    let hash = password::hash(&state.cfg.auth, &req.password)?;
-    let user_id = Uuid::now_v7();
 
     // Insert user. Friendly conflict errors for duplicate email/handle.
     let insert = sqlx::query(
@@ -162,7 +187,7 @@ async fn register(
     .bind(&req.display_name)
     .bind(&hash)
     .bind(&assigned_role)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await;
 
     if let Err(sqlx::Error::Database(db_err)) = &insert {
@@ -174,11 +199,11 @@ async fn register(
     }
     insert?;
 
-    // If we consumed an invite, stamp it. Done outside the user-insert tx for
-    // simplicity — a failed stamp doesn't undo registration, but the invite
-    // is marked consumed atomically.
+    // Spend the invite in the same transaction. Under the lock nothing else
+    // can have consumed it since `consume_invite` checked, but the row count
+    // is still verified rather than assumed.
     if let Some(invite_id) = consumed_invite_id {
-        sqlx::query(
+        let stamped = sqlx::query(
             r#"
             UPDATE invite_tokens
                SET consumed_by = $1, consumed_at = now()
@@ -187,9 +212,13 @@ async fn register(
         )
         .bind(user_id)
         .bind(invite_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+        if stamped.rows_affected() != 1 {
+            return Err(AppError::Forbidden);
+        }
     }
+    tx.commit().await?;
 
     // Auto-login: mint a session immediately so the UX is "register → in".
     issue_session_response(&state, user_id, &assigned_role, &headers).await
@@ -242,20 +271,16 @@ async fn login(
     .fetch_optional(&state.db)
     .await?;
 
-    // Always run a verify even on miss to keep the timing constant-ish.
-    // The argon2 verify against a dummy hash takes ~the same time as a real
-    // one; that's enough to defeat naive email-enumeration timing attacks.
+    // Always run a verify, even on a miss, against a hash with the same
+    // configured cost as a real account's — so "no such email" and "wrong
+    // password" take the same time and timing can't enumerate accounts.
     let (matched, user) = match row {
         Some(u) => {
             let ok = password::verify(&u.password_hash, &req.password)?;
             (ok, Some(u))
         }
         None => {
-            // Dummy verify against a known hash. We don't actually mint a
-            // hash on every miss because that would be slow; instead we run
-            // verify against a baked PHC string.
-            const DUMMY: &str = "$argon2id$v=19$m=4096,t=1,p=1$YWFhYWFhYWFhYWFhYWFhYQ$X9DkxLgGCgnLEXJ2v0+TJoLg+8iX/qsAqK1zybvk7n0";
-            let _ = password::verify(DUMMY, &req.password);
+            let _ = password::verify(password::dummy_hash(&state.cfg.auth), &req.password);
             (false, None)
         }
     };
@@ -347,9 +372,14 @@ async fn two_factor_login(
         .await?
         .ok_or(AppError::Unauthorized)?;
 
+    // A TOTP code is good once: its time step must be newer than the last
+    // accepted one, or it's a replay (RFC 6238 §5.2). Recovery codes are
+    // single-use by construction.
     let now = Utc::now().timestamp() as u64;
-    let ok = totp::verify(&secret, &req.code, now, 1)
-        || two_factor::consume_recovery_code(&state.db, claims.sub, &req.code).await?;
+    let ok = match totp::verify_step(&secret, &req.code, now, 1) {
+        Some(step) => two_factor::accept_totp_step(&state.db, claims.sub, step).await?,
+        None => two_factor::consume_recovery_code(&state.db, claims.sub, &req.code).await?,
+    };
     if !ok {
         return Err(AppError::Unauthorized);
     }
@@ -806,7 +836,14 @@ async fn load_user_dto(db: &PgPool, user_id: Uuid) -> AppResult<UserDto> {
     })
 }
 
-async fn consume_invite(db: &PgPool, token_plain: &str) -> AppResult<(String, Uuid)> {
+/// Advisory-lock key serializing registrations (see `register`). Arbitrary
+/// but fixed; only this code path takes it.
+const REGISTRATION_LOCK: i64 = 0x5350_5249_4e54_0001; // "SPRINT" + 1
+
+async fn consume_invite(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    token_plain: &str,
+) -> AppResult<(String, Uuid)> {
     let presented = hash_token(token_plain);
     let row = sqlx::query!(
         r#"
@@ -819,7 +856,7 @@ async fn consume_invite(db: &PgPool, token_plain: &str) -> AppResult<(String, Uu
         "#,
         presented.as_slice()
     )
-    .fetch_optional(db)
+    .fetch_optional(&mut **tx)
     .await?
     .ok_or(AppError::Forbidden)?;
 

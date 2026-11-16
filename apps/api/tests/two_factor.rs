@@ -143,3 +143,34 @@ async fn disable_wipes_second_factor(pool: PgPool) {
         .await
         .unwrap());
 }
+
+/// RFC 6238 §5.2: a TOTP code is good once. The step of an accepted code is
+/// recorded; that step again (a replay) or an older one still inside the skew
+/// window is refused, and only a newer step is accepted. Starting enrollment
+/// over resets the marker for the new secret.
+#[sqlx::test(migrations = "./migrations")]
+async fn totp_steps_cannot_be_replayed(pool: PgPool) {
+    let uid = make_user(&pool).await;
+    let accept = |step: i64| {
+        let pool = pool.clone();
+        async move {
+            two_factor::accept_totp_step(&pool, uid, step)
+                .await
+                .unwrap()
+        }
+    };
+
+    assert!(accept(1_000).await, "first use of a step is accepted");
+    assert!(!accept(1_000).await, "the same code again is a replay");
+    assert!(
+        !accept(999).await,
+        "an older step inside the window is refused"
+    );
+    assert!(accept(1_001).await, "the next step is fine");
+
+    // Re-enrolling (new secret) starts the counter over.
+    two_factor::enroll_pending(&pool, uid, &totp::generate_secret())
+        .await
+        .unwrap();
+    assert!(accept(1).await, "a fresh enrollment accepts any step");
+}

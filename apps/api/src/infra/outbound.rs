@@ -299,6 +299,53 @@ fn embedded_v4(ip: Ipv6Addr) -> Option<Ipv4Addr> {
     None
 }
 
+/// Render curl config-file lines (fed via `-K -`) for `entries` such as
+/// `("url", …)` or `("header", "Authorization: …")`. Values are double-quoted
+/// with `\` and `"` escaped, and control characters are refused outright, so a
+/// value can't smuggle an extra directive onto a new line.
+pub fn curl_config(entries: &[(&str, &str)]) -> Result<String, String> {
+    let mut out = String::new();
+    for (key, value) in entries {
+        if value.chars().any(char::is_control) {
+            return Err(format!("control character in curl {key}"));
+        }
+        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+        out.push_str(key);
+        out.push_str(" = \"");
+        out.push_str(&escaped);
+        out.push_str("\"\n");
+    }
+    Ok(out)
+}
+
+/// Run curl with `entries` (URL, headers) passed as a config file on stdin
+/// rather than in argv. Credentials in those — Slack/Discord webhook URLs
+/// (the URL *is* the secret), provider API tokens, presigned URLs — would
+/// otherwise be readable by every process on the host via `ps` /
+/// `/proc/<pid>/cmdline`. `args` must carry only non-secret flags.
+pub async fn curl_with_config(
+    args: &[&str],
+    entries: &[(&str, &str)],
+) -> std::io::Result<std::process::Output> {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+
+    let config = curl_config(entries)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let mut child = tokio::process::Command::new("curl")
+        .args(["-K", "-"])
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(config.as_bytes()).await?;
+        // `stdin` drops here, closing the pipe: curl reads the config to EOF.
+    }
+    child.wait_with_output().await
+}
+
 /// Short, non-revealing reason for a failed curl run, keyed on its exit code.
 /// Raw stderr is never stored: it turned delivery logs into a port scanner.
 pub fn curl_failure_reason(exit_code: Option<i32>) -> &'static str {
@@ -447,6 +494,22 @@ mod tests {
         assert!(check_with("http://10.0.0.5/", &allowed).await.is_ok());
         // …but the shape check still applies.
         assert!(check_with("gopher://localhost/", &allowed).await.is_err());
+    }
+
+    #[test]
+    fn curl_config_quotes_values_and_refuses_line_breaks() {
+        let cfg = curl_config(&[
+            ("url", "https://hooks.slack.com/services/T0/B0/x?a=\"b\""),
+            ("header", "Authorization: Bearer abc\\def"),
+        ])
+        .unwrap();
+        assert_eq!(
+            cfg,
+            "url = \"https://hooks.slack.com/services/T0/B0/x?a=\\\"b\\\"\"\n\
+             header = \"Authorization: Bearer abc\\\\def\"\n"
+        );
+        // A newline would start a new curl directive — refused, not escaped.
+        assert!(curl_config(&[("header", "X: a\noutput = \"/etc/x\"")]).is_err());
     }
 
     #[test]

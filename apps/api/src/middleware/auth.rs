@@ -24,7 +24,7 @@ use crate::{
     config::Config,
     domain::{api_tokens, permissions::Role, sessions, tokens},
     infra::AppState,
-    AppError,
+    AppError, AppResult,
 };
 
 /// The actor on the current request. Cheap to clone.
@@ -42,6 +42,19 @@ impl CurrentUser {
         crate::domain::permissions::Actor {
             id: self.id,
             role: self.role,
+        }
+    }
+
+    /// Refuse personal-API-token callers. For credential management —
+    /// minting/revoking API tokens and turning 2FA on or off — a write-scoped
+    /// token is not enough: a leaked token could otherwise mint itself a
+    /// non-expiring successor (surviving its own revocation) or enrol 2FA and
+    /// lock the owner out. These need a real, interactive login session.
+    pub fn require_session(&self) -> AppResult<()> {
+        if self.session_id.is_some() {
+            Ok(())
+        } else {
+            Err(AppError::Forbidden)
         }
     }
 }

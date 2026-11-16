@@ -79,18 +79,27 @@ export function sendPresence(projectId: string, taskId: string | null, active: b
 
 function open(qc: QueryClient) {
   if (typeof window === "undefined" || !enabled) return;
+  let s: WebSocket;
   try {
-    socket = new WebSocket(resolveWsUrl());
+    s = new WebSocket(resolveWsUrl());
   } catch (e) {
     scheduleReconnect(qc);
     return;
   }
+  socket = s;
 
-  socket.onopen = () => {
+  // Every handler first checks that `s` is still THE socket. A socket that
+  // was replaced (disable → enable on sign-in as someone else) keeps firing
+  // events while it closes: its late `onclose` used to schedule a reconnect
+  // (a second live socket), and its messages — the previous user's — still
+  // reached this user's query cache.
+  s.onopen = () => {
+    if (socket !== s) return;
     backoffMs = 1000;
   };
 
-  socket.onmessage = (msg) => {
+  s.onmessage = (msg) => {
+    if (socket !== s) return;
     let parsed: ServerEvent | null = null;
     try {
       parsed = JSON.parse(msg.data) as ServerEvent;
@@ -101,10 +110,11 @@ function open(qc: QueryClient) {
     for (const fn of listeners) fn(parsed);
   };
 
-  socket.onclose = () => {
+  s.onclose = () => {
+    if (socket !== s) return;
     if (!intentionalClose) scheduleReconnect(qc);
   };
-  socket.onerror = () => {
+  s.onerror = () => {
     // onclose will follow; backoff happens there.
   };
 }

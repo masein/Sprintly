@@ -41,6 +41,10 @@ async fn create(
     user: CurrentUser,
     Json(req): Json<CreateReq>,
 ) -> AppResult<impl IntoResponse> {
+    // Minting needs an interactive session: a (possibly leaked) write token
+    // must not be able to mint itself a non-expiring successor that survives
+    // its own revocation.
+    user.require_session()?;
     let name = req.name.trim();
     if name.is_empty() || name.len() > 60 {
         return Err(AppError::BadRequest("token name must be 1–60 chars".into()));
@@ -71,6 +75,7 @@ async fn revoke(
     user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> AppResult<impl IntoResponse> {
+    user.require_session()?;
     api_tokens::revoke(&state.db, user.id, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
