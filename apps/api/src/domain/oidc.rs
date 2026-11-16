@@ -232,8 +232,8 @@ pub async fn upsert_user(
     claims: &IdClaims,
 ) -> AppResult<(Uuid, String)> {
     // 1. Already federated — the common case on repeat logins.
-    if let Some((id, role)) = sqlx::query_as::<_, (Uuid, String)>(
-        r#"SELECT id, role FROM users
+    if let Some((id, role, status)) = sqlx::query_as::<_, (Uuid, String, String)>(
+        r#"SELECT id, role, status FROM users
             WHERE oidc_issuer = $1 AND oidc_subject = $2 AND deleted_at IS NULL"#,
     )
     .bind(issuer)
@@ -241,6 +241,7 @@ pub async fn upsert_user(
     .fetch_optional(db)
     .await?
     {
+        ensure_active(&status)?;
         touch_last_seen(db, id).await?;
         return Ok((id, role));
     }
@@ -253,13 +254,14 @@ pub async fn upsert_user(
         .ok_or_else(|| AppError::BadRequest("identity provider did not supply an email".into()))?;
 
     // 2. Existing local account with this email.
-    if let Some((id, role)) = sqlx::query_as::<_, (Uuid, String)>(
-        r#"SELECT id, role FROM users WHERE email = $1 AND deleted_at IS NULL"#,
+    if let Some((id, role, status)) = sqlx::query_as::<_, (Uuid, String, String)>(
+        r#"SELECT id, role, status FROM users WHERE email = $1 AND deleted_at IS NULL"#,
     )
     .bind(&email)
     .fetch_optional(db)
     .await?
     {
+        ensure_active(&status)?;
         if !claims.email_verified {
             return Err(AppError::Conflict(
                 "an account with this email already exists; sign in with your password".into(),
@@ -309,6 +311,17 @@ pub async fn upsert_user(
     .await?;
 
     Ok((id, "member".to_string()))
+}
+
+/// SSO must not be a side door around suspension: password login refuses a
+/// non-active account, and so does federation — linking included, so a
+/// suspended account can't be re-entered by attaching a fresh IdP identity.
+fn ensure_active(status: &str) -> AppResult<()> {
+    if status == "active" {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
 }
 
 async fn touch_last_seen(db: &PgPool, id: Uuid) -> AppResult<()> {

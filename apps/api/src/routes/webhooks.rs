@@ -32,12 +32,22 @@ use crate::{
         vault::{encrypt, ProjectKey},
         webhooks as webhook_domain,
     },
-    infra::AppState,
+    infra::{outbound, AppState},
     middleware::CurrentUser,
     AppError, AppResult,
 };
 
 const TARGET_TYPES: [&str; 3] = ["outbound", "slack", "discord"];
+
+/// Refuse destinations the delivery worker would refuse anyway (internal
+/// addresses, non-http schemes) at save time, so a lead finds out now rather
+/// than from a failed delivery log.
+async fn check_destination(url: &str) -> AppResult<()> {
+    outbound::check(url)
+        .await
+        .map(|_| ())
+        .map_err(|e| AppError::BadRequest(format!("webhook url rejected: {e}")))
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -163,6 +173,7 @@ async fn create(
     }
     let target_type = req.target_type.as_deref().unwrap_or("outbound");
     check_target_type(target_type)?;
+    check_destination(&req.url).await?;
     // Only the generic target signs, so only it needs a secret.
     let secret = req.secret.as_deref().filter(|s| !s.is_empty());
     if target_type == "outbound" && secret.is_none() {
@@ -222,6 +233,9 @@ async fn edit(
     let ctx = project_ctx::load_by_id(&state.db, pid, user.id).await?;
     if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
         return Err(AppError::Forbidden);
+    }
+    if let Some(url) = req.url.as_deref() {
+        check_destination(url).await?;
     }
     // Re-encrypt the secret only if a new one was supplied.
     let new_secret: Option<(Vec<u8>, Vec<u8>)> =

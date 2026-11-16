@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 use crate::domain::{achievements, backups, email_prefs};
 use crate::infra::email::{self, Mailer};
+use crate::infra::outbound;
 
 /// What the worker needs to send mail: a mailer and the public base URL that
 /// goes into every link. Cloned per job — both are cheap.
@@ -492,8 +493,35 @@ async fn run_deliver_webhook(
             .ok_or_else(|| anyhow::anyhow!("unknown webhook target_type: {target_type}"))?
     };
 
+    // SSRF guard: re-checked at delivery time (DNS may have changed since the
+    // webhook was saved, and rows saved before the guard existed are not
+    // trusted). A refused destination is recorded and NOT retried — retrying
+    // can't make an internal address public.
+    let dest = match outbound::check(&url).await {
+        Ok(dest) => dest,
+        Err(reason) => {
+            let msg = format!("blocked: {reason}");
+            record_delivery(pool, webhook_id, event, 0, false, Some(&msg), attempt).await?;
+            warn!(%webhook_id, "webhook destination refused by the outbound guard");
+            return Ok(());
+        }
+    };
+
     let mut cmd = tokio::process::Command::new("curl");
-    cmd.args(["-sS", "-X", "POST", &url]);
+    // http(s) only, no redirects, and connect to exactly the address the guard
+    // checked.
+    cmd.args([
+        "-sS",
+        "--proto",
+        "=http,https",
+        "--proto-redir",
+        "=http,https",
+    ])
+    .args(["--max-redirs", "0"]);
+    if let Some(pin) = &dest.resolve {
+        cmd.args(["--resolve", pin]);
+    }
+    cmd.args(["-X", "POST", &dest.url]);
     for (name, value) in &headers {
         cmd.args(["-H", &format!("{name}: {value}")]);
     }
@@ -508,15 +536,38 @@ async fn run_deliver_webhook(
         .parse()
         .unwrap_or(0);
     let ok = (200..300).contains(&code);
+    // Never store curl's stderr: echoing it back made the delivery log an
+    // oracle for probing hosts and ports. A coarse reason is enough to debug.
     let err = (!ok).then(|| {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        if stderr.trim().is_empty() {
+        if out.status.success() {
             format!("HTTP {code}")
         } else {
-            format!("HTTP {code}: {}", stderr.trim())
+            format!(
+                "HTTP {code}: {}",
+                outbound::curl_failure_reason(out.status.code())
+            )
         }
     });
 
+    record_delivery(pool, webhook_id, event, code, ok, err.as_deref(), attempt).await?;
+
+    if ok {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("webhook {webhook_id} POST returned {code}"))
+    }
+}
+
+/// Append a `webhook_deliveries` row and stamp the webhook's last status.
+async fn record_delivery(
+    pool: &PgPool,
+    webhook_id: Uuid,
+    event: &str,
+    code: i32,
+    ok: bool,
+    error: Option<&str>,
+    attempt: i32,
+) -> anyhow::Result<()> {
     sqlx::query(
         r#"INSERT INTO webhook_deliveries (id, webhook_id, event, status_code, ok, error, attempt)
            VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
@@ -526,7 +577,7 @@ async fn run_deliver_webhook(
     .bind(event)
     .bind(code)
     .bind(ok)
-    .bind(err.as_deref())
+    .bind(error)
     .bind(attempt)
     .execute(pool)
     .await?;
@@ -535,12 +586,7 @@ async fn run_deliver_webhook(
         .bind(code)
         .execute(pool)
         .await?;
-
-    if ok {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!("webhook {webhook_id} POST returned {code}"))
-    }
+    Ok(())
 }
 
 /// Push the task's state to every status-enabled provider connection of its
@@ -635,7 +681,17 @@ async fn run_push_commit_status(
             .map_err(|e| anyhow::anyhow!("{e}"))?;
 
             let mut cmd = tokio::process::Command::new("curl");
-            cmd.args(["-sS", "-X", req.method, &req.url]);
+            // The base URL is lead-configured: never let curl wander off
+            // http(s) (gopher://, file://, …) or follow a redirect elsewhere.
+            cmd.args([
+                "-sS",
+                "--proto",
+                "=http,https",
+                "--proto-redir",
+                "=http,https",
+            ])
+            .args(["--max-redirs", "0"]);
+            cmd.args(["-X", req.method, &req.url]);
             for (name, value) in &req.headers {
                 cmd.args(["-H", &format!("{name}: {value}")]);
             }

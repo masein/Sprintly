@@ -19,4 +19,19 @@ ignore = [
     # enable the MySQL driver — at which point this becomes real and this entry
     # must go.
     "RUSTSEC-2023-0071",
+
+    # RUSTSEC-2026-0459 — `libsqlite3-sys` 0.30.x bundles a C SQLite with
+    # CVE-2026-119375; fixed in libsqlite3-sys ≥0.39.
+    #
+    # Same shape as the `rsa` entry above: it reaches the lockfile through
+    # `sqlx-sqlite`, a driver we never build (sqlx is configured with the
+    # postgres feature only). `cargo tree -i libsqlite3-sys --target all` finds
+    # no normal, build or dev path to it, so no SQLite is linked into anything
+    # we ship. Nor can it be bumped: every sqlx 0.8.x pins libsqlite3-sys
+    # ^0.30.1 and sqlx 0.9.0 caps it below 0.38, so no sqlx release allows
+    # the fixed ≥0.39 yet.
+    #
+    # Recheck on the next sqlx upgrade, or immediately if the SQLite driver is
+    # ever enabled.
+    "RUSTSEC-2026-0459",
 ]

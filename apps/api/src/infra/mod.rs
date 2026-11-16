@@ -6,6 +6,7 @@
 pub mod db;
 pub mod email;
 pub mod events;
+pub mod outbound;
 pub mod pdf;
 pub mod redis_pool;
 pub mod s3;

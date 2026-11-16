@@ -397,15 +397,23 @@ pub struct JiraImportOptions {
     pub temp_password_hash: Option<String>,
     /// The importing user, recorded as `project_members.added_by`.
     pub added_by: Uuid,
+    /// When true, each worklog lands on whichever Sprintly user matches its
+    /// Jira author. When false, only `added_by`'s own worklogs are imported and
+    /// the rest are skipped with a warning: time logs drive payroll and
+    /// timesheet-approval rights, so a non-admin importer must not be able to
+    /// fabricate hours for other people. The route sets this for admins only.
+    pub worklogs_for_anyone: bool,
 }
 
 impl JiraImportOptions {
-    /// Match-only (today's behaviour) — no provisioning.
+    /// Match-only — no provisioning; worklogs attributed to any matched user
+    /// (the trusted, operator-run migration). Routes narrow this per caller.
     pub fn match_only() -> Self {
         JiraImportOptions {
             create_missing_users: false,
             temp_password_hash: None,
             added_by: Uuid::nil(),
+            worklogs_for_anyone: true,
         }
     }
 }
@@ -965,6 +973,8 @@ pub async fn apply_jira_import(
     let mut next_order = 1024.0_f64;
     // Worklogs whose Jira author matched no Sprintly user — skipped, warned once.
     let mut worklog_skips = 0i64;
+    // Worklogs by someone other than the importer, when that isn't allowed.
+    let mut foreign_worklog_skips = 0i64;
     for issue in plan.issues.iter().filter(|i| !i.is_epic()) {
         let column = col_id
             .get(&issue.status.trim().to_lowercase())
@@ -1136,6 +1146,10 @@ pub async fn apply_jira_import(
                 worklog_skips += 1;
                 continue;
             };
+            if !opts.worklogs_for_anyone && user_id != opts.added_by {
+                foreign_worklog_skips += 1;
+                continue;
+            }
             let ended = wl.started + Duration::seconds(wl.seconds);
             let dur_min = (wl.seconds / 60) as i32;
             let exists: bool = sqlx::query_scalar(
@@ -1171,6 +1185,11 @@ pub async fn apply_jira_import(
     if worklog_skips > 0 {
         report.warnings.push(format!(
             "{worklog_skips} worklog(s) skipped — their Jira author had no Sprintly match (worklogs never provision users)"
+        ));
+    }
+    if foreign_worklog_skips > 0 {
+        report.warnings.push(format!(
+            "{foreign_worklog_skips} worklog(s) by other people skipped — only an administrator can import time on someone else's behalf"
         ));
     }
 

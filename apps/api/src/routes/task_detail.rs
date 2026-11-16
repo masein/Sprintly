@@ -701,13 +701,23 @@ async fn add_link(
         return Err(AppError::BadRequest("kind invalid".into()));
     }
     let from = resolve_task(&state.db, &task_key).await?;
-    let to = resolve_task(&state.db, &req.to_task_key).await?;
-    if from.id == to.id {
-        return Err(AppError::BadRequest("cannot link a task to itself".into()));
-    }
     let ctx = project_ctx::load_by_id(&state.db, from.project_id, user.id).await?;
     if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
+    }
+    // The target must be a task the caller can see. Otherwise linking to
+    // `OTHER-7` and reading the link list back would disclose another
+    // project's titles and statuses. Hidden and missing both answer 404, so
+    // this isn't an existence oracle either.
+    let to = resolve_task(&state.db, &req.to_task_key).await?;
+    if to.project_id != from.project_id {
+        let to_ctx = project_ctx::load_by_id(&state.db, to.project_id, user.id).await?;
+        if !can(&user.as_actor(), Action::ViewBoard, to_ctx.as_resource()) {
+            return Err(AppError::NotFound);
+        }
+    }
+    if from.id == to.id {
+        return Err(AppError::BadRequest("cannot link a task to itself".into()));
     }
     sqlx::query(
         r#"
@@ -730,11 +740,11 @@ async fn remove_link(
     Json(req): Json<LinkReq>,
 ) -> AppResult<impl IntoResponse> {
     let from = resolve_task(&state.db, &task_key).await?;
-    let to = resolve_task(&state.db, &req.to_task_key).await?;
     let ctx = project_ctx::load_by_id(&state.db, from.project_id, user.id).await?;
     if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
+    let to = resolve_task(&state.db, &req.to_task_key).await?;
     sqlx::query(
         r#"DELETE FROM task_links
            WHERE from_task_id = $1 AND to_task_id = $2 AND kind = $3"#,
@@ -792,8 +802,18 @@ async fn list_links(
     )
     .fetch_all(&state.db)
     .await?;
+    // Links can cross projects (and could be created before the visibility
+    // check in `add_link` existed), so only show the ones whose other end
+    // the caller may see.
+    let visible = visible_task_keys(
+        &state.db,
+        &user,
+        rows.iter().map(|r| r.other_key.clone()).collect(),
+    )
+    .await?;
     let items: Vec<LinkDto> = rows
         .into_iter()
+        .filter(|r| visible.contains(&r.other_key))
         .map(|r| LinkDto {
             kind: r.kind,
             direction: r.direction,
@@ -1302,6 +1322,31 @@ async fn delete_attachment(
 struct TaskRef {
     id: Uuid,
     project_id: Uuid,
+}
+
+/// The subset of `keys` naming live tasks the caller may view: tasks in a
+/// (non-deleted) project they're a member of — any role, as for
+/// `Action::ViewBoard` — or any task at all for a global admin.
+async fn visible_task_keys(
+    db: &PgPool,
+    user: &CurrentUser,
+    keys: Vec<String>,
+) -> AppResult<std::collections::HashSet<String>> {
+    if keys.is_empty() || user.role == GlobalRole::Admin {
+        return Ok(keys.into_iter().collect());
+    }
+    let visible: Vec<String> = sqlx::query_scalar(
+        r#"SELECT t.key
+             FROM tasks t
+             JOIN projects p ON p.id = t.project_id AND p.deleted_at IS NULL
+             JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = $2
+            WHERE t.key = ANY($1) AND t.deleted_at IS NULL"#,
+    )
+    .bind(&keys)
+    .bind(user.id)
+    .fetch_all(db)
+    .await?;
+    Ok(visible.into_iter().collect())
 }
 
 async fn resolve_task(db: &PgPool, task_key: &str) -> AppResult<TaskRef> {

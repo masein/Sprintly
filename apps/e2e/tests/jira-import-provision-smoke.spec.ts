@@ -2,7 +2,12 @@
 // is created on import (when "create missing users" is on), added to the
 // project, and assigned the card — so an assignee avatar shows on the board.
 //
-// Pre-reqs: dev stack up (`just up`), SPRINTLY_OPEN_SIGNUP=true.
+// Provisioning creates global accounts, so it's admin-only: a project lead who
+// isn't a global admin gets a 403 (covered by the API's integration tests).
+// This spec runs as the seeded admin.
+//
+// Pre-reqs: dev stack up (`just up`) + `just seed` (demo@sprintly.local /
+// sprintly is the seeded global admin).
 
 import { test, expect } from "@playwright/test";
 
@@ -12,7 +17,6 @@ function rand(): string {
 
 test.describe("Jira import — user provisioning", () => {
   test("provisions a missing assignee and shows their avatar on the card", async ({ page }) => {
-    const handle = `e2e${rand()}`;
     const key = `JP${rand().slice(0, 3).toUpperCase()}`;
     // Unique assignee per run so the dev DB (shared across runs) always has to
     // *provision* them rather than matching a leftover from a prior run.
@@ -20,13 +24,11 @@ test.describe("Jira import — user provisioning", () => {
     const who = `Dana${suffix}`;
     const whoHandle = who.toLowerCase();
 
-    await test.step("register + create a project", async () => {
-      await page.goto("/register");
-      await page.getByLabel("Display name", { exact: false }).fill("Import Owner");
-      await page.getByLabel("Handle", { exact: false }).fill(handle);
-      await page.getByLabel("Email", { exact: false }).fill(`${handle}@sprintly.test`);
-      await page.getByLabel("Password", { exact: false }).fill("correct-horse-battery-staple");
-      await page.getByRole("button", { name: /\$ git init account/ }).click();
+    await test.step("sign in as the admin + create a project", async () => {
+      await page.goto("/login");
+      await page.getByLabel("Email", { exact: false }).fill("demo@sprintly.local");
+      await page.getByLabel("Password", { exact: false }).fill("sprintly");
+      await page.getByRole("button", { name: /\$ ssh sprintly/ }).click();
       await expect(page).toHaveURL(/\/(me\/day)?$/);
 
       await page.goto("/projects");
