@@ -341,7 +341,7 @@ async fn csv_export(
             date,
             row.task_key,
             row.project_key,
-            csv_escape(&row.title),
+            crate::domain::csv::escape(&row.title),
             row.billable,
             mins
         ));
@@ -672,14 +672,6 @@ async fn require_can_approve(
         Ok(())
     } else {
         Err(AppError::Forbidden)
-    }
-}
-
-fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
     }
 }
 

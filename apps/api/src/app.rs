@@ -19,6 +19,7 @@ use crate::{infra::AppState, middleware as own_mw, routes};
 // we want and the replacement's signature is version-sensitive; allow it here.
 #[allow(deprecated)]
 pub fn router(state: AppState) -> Router {
+    let dev = state.cfg.is_dev();
     // Liveness/readiness live outside /api/v1 so dumb HTTP checks work.
     let probes = Router::new()
         .route("/healthz", get(routes::health::liveness))
@@ -65,7 +66,7 @@ pub fn router(state: AppState) -> Router {
         .merge(routes::webhooks::router())
         .merge(routes::ws::router());
 
-    Router::new()
+    let app = Router::new()
         .nest("/api/v1", v1)
         // Bare /healthz too, for orchestrators that prefer root probes.
         .merge(probes)
@@ -83,14 +84,22 @@ pub fn router(state: AppState) -> Router {
                 .layer(TraceLayer::new_for_http())
                 .layer(PropagateRequestIdLayer::x_request_id())
                 .layer(CompressionLayer::new())
-                .layer(TimeoutLayer::new(Duration::from_secs(30)))
-                .layer(permissive_cors_for_dev()),
-        )
+                .layer(TimeoutLayer::new(Duration::from_secs(30))),
+        );
+    // Permissive CORS exists for the Next dev server on :3000 calling the API
+    // directly. Production is same-origin behind Caddy and needs none — it
+    // used to be applied there too, answering every preflight from any origin
+    // with "allowed".
+    if dev {
+        app.layer(permissive_cors_for_dev())
+    } else {
+        app
+    }
 }
 
 /// CORS in dev is permissive so the Next dev server (port 3000) can hit the
-/// API directly. In prod, everything is same-origin via Caddy, so CORS is
-/// effectively unused.
+/// API directly. Only attached when `SPRINTLY_ENV=dev` (see `router`); in prod
+/// everything is same-origin via Caddy.
 fn permissive_cors_for_dev() -> CorsLayer {
     CorsLayer::new()
         .allow_origin(tower_http::cors::Any)

@@ -336,7 +336,7 @@ async fn invoice_csv(
     for line in &inv.lines {
         csv.push_str(&format!(
             "{},{},{},{},{}\n",
-            csv_escape(&line.description),
+            crate::domain::csv::escape(&line.description),
             line.minutes,
             hours(line.minutes),
             line.rate_cents,
@@ -359,12 +359,4 @@ async fn invoice_csv(
         .unwrap(),
     );
     Ok((StatusCode::OK, h, csv).into_response())
-}
-
-fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
 }

@@ -240,14 +240,27 @@ pub async fn generate(
 
     let mut tx = db.begin().await?;
     // Human-friendly sequential number, scoped to the period's year.
+    //
+    // It used to be COUNT(*)+1, which collides as soon as a draft is deleted
+    // (two invoices left → "0003" is taken, but COUNT says 2 → "0003" again,
+    // and the UNIQUE constraint fails every generation for the rest of the
+    // year), and races between two concurrent generations. Now: the highest
+    // number issued for that year + 1, under a per-year advisory lock held
+    // until this transaction commits.
     let year = end.format("%Y").to_string();
-    let seq: i64 = sqlx::query_scalar(
-        r#"SELECT COUNT(*) FROM invoices WHERE to_char(period_end, 'YYYY') = $1"#,
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext('sprintly:invoice-number:' || $1))")
+        .bind(&year)
+        .execute(&mut *tx)
+        .await?;
+    let last: i64 = sqlx::query_scalar(
+        r#"SELECT COALESCE(MAX(substring(number from '^INV-[0-9]{4}-([0-9]+)$')::bigint), 0)
+             FROM invoices
+            WHERE number LIKE 'INV-' || $1 || '-%'"#,
     )
     .bind(&year)
     .fetch_one(&mut *tx)
     .await?;
-    let number = format!("INV-{year}-{:04}", seq + 1);
+    let number = format!("INV-{year}-{:04}", last + 1);
 
     let invoice_id = Uuid::now_v7();
     sqlx::query(

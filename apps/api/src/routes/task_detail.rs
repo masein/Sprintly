@@ -465,15 +465,42 @@ async fn add_reaction(
     Json(req): Json<ReactionTarget>,
 ) -> AppResult<impl IntoResponse> {
     // Must specify exactly one target.
-    let (task_id, comment_id) = match (req.task_key.as_deref(), req.comment_id) {
-        (Some(k), None) => (Some(resolve_task(&state.db, k).await?.id), None),
-        (None, Some(cid)) => (None, Some(cid)),
+    let (task_id, comment_id, project_id) = match (req.task_key.as_deref(), req.comment_id) {
+        (Some(k), None) => {
+            let t = resolve_task(&state.db, k).await?;
+            (Some(t.id), None, t.project_id)
+        }
+        (None, Some(cid)) => {
+            let project_id: Uuid = sqlx::query_scalar(
+                r#"SELECT t.project_id
+                     FROM task_comments c
+                     JOIN tasks t ON t.id = c.task_id AND t.deleted_at IS NULL
+                    WHERE c.id = $1 AND c.deleted_at IS NULL"#,
+            )
+            .bind(cid)
+            .fetch_optional(&state.db)
+            .await?
+            .ok_or(AppError::NotFound)?;
+            (None, Some(cid), project_id)
+        }
         _ => {
             return Err(AppError::BadRequest(
                 "target task_key XOR comment_id".into(),
             ))
         }
     };
+    // Reacting follows commenting's rule (EditTask: leads and contributors of
+    // a live project). It used to have no check at all — any signed-in user,
+    // member or not, could react anywhere, and 201-vs-404 confirmed which
+    // task keys exist in projects they can't see. Outsiders get the same 404
+    // as a missing target.
+    let ctx = project_ctx::load_by_id(&state.db, project_id, user.id).await?;
+    if !can(&user.as_actor(), Action::ViewBoard, ctx.as_resource()) {
+        return Err(AppError::NotFound);
+    }
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
+        return Err(AppError::Forbidden);
+    }
 
     if !is_emoji_ok(&req.emoji) {
         return Err(AppError::BadRequest("emoji invalid".into()));

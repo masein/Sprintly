@@ -19,6 +19,7 @@ import {
 import { getProject } from "@/lib/projects";
 import { pluralize } from "@/lib/format";
 import type { ApiError } from "@/lib/api";
+import { localDateISO } from "@/lib/localtime";
 
 export default function SprintsPage() {
   const router = useRouter();
@@ -334,8 +335,14 @@ function CreateSprintForm({
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
-  const today = new Date().toISOString().slice(0, 10);
-  const twoWeeks = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10);
+  // Defaults in the user's local calendar: toISOString() is UTC, so the
+  // "today" default was yesterday/tomorrow for part of every day off-UTC.
+  const today = localDateISO();
+  const twoWeeks = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 14);
+    return localDateISO(d);
+  })();
   const [start, setStart] = useState(today);
   const [end, setEnd] = useState(twoWeeks);
   const [error, setError] = useState<string | null>(null);

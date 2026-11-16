@@ -194,3 +194,57 @@ async fn generate_rejects_when_no_billable_time(pool: PgPool) {
         .await
         .is_err());
 }
+
+/// Numbers stay unique when a draft is deleted and under concurrency.
+/// (Regression: numbering was COUNT(*)+1 — delete a draft and the next
+/// number collided with one already issued, failing every generation for the
+/// rest of the year on the UNIQUE constraint; two concurrent generations
+/// could also pick the same number.)
+#[sqlx::test(migrations = "./migrations")]
+async fn invoice_numbers_survive_deleted_drafts_and_races(pool: PgPool) {
+    let admin = make_user(&pool, 0).await;
+    let dev = make_user(&pool, 6000).await;
+    let client = invoicing::create_client(
+        &pool,
+        admin,
+        invoicing::NewClient {
+            name: "Numbering Co".into(),
+            email: None,
+            address: None,
+            currency: None,
+            notes: None,
+        },
+    )
+    .await
+    .unwrap();
+    let (_pid, task) = make_project_with_task(&pool, "NUM", admin, Some(client.id)).await;
+    log(&pool, task, dev, 60, true).await;
+    let start = NaiveDate::from_ymd_opt(2026, 5, 1).unwrap();
+    let end = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+    let gen = || invoicing::generate(&pool, client.id, start, end, admin);
+    let number = |id| {
+        let pool = pool.clone();
+        async move { invoicing::fetch(&pool, id).await.unwrap().invoice.number }
+    };
+
+    let first = gen().await.unwrap();
+    let _second = gen().await.unwrap();
+    let third = gen().await.unwrap();
+    assert_eq!(number(third).await, "INV-2026-0003");
+
+    // Deleting an older draft must not make the next number collide.
+    invoicing::delete_draft(&pool, first).await.unwrap();
+    let fourth = gen().await.expect("generation still works after a delete");
+    assert_eq!(number(fourth).await, "INV-2026-0004");
+
+    // Concurrent generations get distinct numbers.
+    let (a, b) = tokio::join!(gen(), gen());
+    let (na, nb) = (number(a.unwrap()).await, number(b.unwrap()).await);
+    assert_ne!(na, nb);
+    let mut got = [na, nb];
+    got.sort();
+    assert_eq!(
+        got,
+        ["INV-2026-0005".to_string(), "INV-2026-0006".to_string()]
+    );
+}

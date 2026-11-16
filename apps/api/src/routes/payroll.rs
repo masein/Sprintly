@@ -151,7 +151,7 @@ async fn month_overview(
             csv.push_str(&format!(
                 "{},{},{},{},{},{},{}\n",
                 u.handle,
-                csv_escape(&u.display_name),
+                crate::domain::csv::escape(&u.display_name),
                 u.total_minutes,
                 u.billable_minutes,
                 u.total_pay_cents,
@@ -606,14 +606,6 @@ async fn aggregate_user_detail(
 fn bounds_or_400(year: i32, month: u32) -> AppResult<(NaiveDate, NaiveDate)> {
     payroll_math::month_bounds(year, month)
         .ok_or_else(|| AppError::BadRequest("month must be 1..=12".into()))
-}
-
-fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
 }
 
 fn csv_response(filename: String, body: String) -> impl IntoResponse {
