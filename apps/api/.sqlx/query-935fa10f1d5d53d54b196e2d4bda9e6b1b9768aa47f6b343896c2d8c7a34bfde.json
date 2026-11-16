@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id           AS \"id!: Uuid\",\n               handle       AS \"handle!: String\",\n               display_name AS \"display_name!: String\"\n        FROM   users\n        WHERE  deleted_at IS NULL\n          -- Email matches only the exact (case-insensitive) address: you can\n          -- still find someone by their email to add them to a project, but a\n          -- prefix match let any user recover every address one character at\n          -- a time (with `%` as a wildcard, all at once).\n          AND  (handle ILIKE $3 OR lower(email::text) = lower($1) OR display_name % $1)\n        ORDER BY (handle ILIKE $3 OR lower(email::text) = lower($1)) DESC,\n                 similarity(display_name, $1) DESC\n        LIMIT  $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "handle!: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name!: String",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "935fa10f1d5d53d54b196e2d4bda9e6b1b9768aa47f6b343896c2d8c7a34bfde"
+}

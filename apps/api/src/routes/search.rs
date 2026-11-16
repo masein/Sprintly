@@ -168,6 +168,8 @@ async fn search(
         .collect()
     };
 
+    // Handles match by prefix, with `%`/`_` taken literally.
+    let handle_prefix = format!("{}%", crate::domain::jql::escape_like(raw));
     let users: Vec<SearchUserHit> = sqlx::query!(
         r#"
         SELECT id           AS "id!: Uuid",
@@ -175,15 +177,18 @@ async fn search(
                display_name AS "display_name!: String"
         FROM   users
         WHERE  deleted_at IS NULL
-          -- Also match an email prefix so you can find someone by their email
-          -- (e.g. adding a project member) — the address itself is never
-          -- returned, only handle + display_name.
-          AND  (handle ILIKE $1 || '%' OR email ILIKE $1 || '%' OR display_name % $1)
-        ORDER BY (handle ILIKE $1 || '%' OR email ILIKE $1 || '%') DESC, similarity(display_name, $1) DESC
+          -- Email matches only the exact (case-insensitive) address: you can
+          -- still find someone by their email to add them to a project, but a
+          -- prefix match let any user recover every address one character at
+          -- a time (with `%` as a wildcard, all at once).
+          AND  (handle ILIKE $3 OR lower(email::text) = lower($1) OR display_name % $1)
+        ORDER BY (handle ILIKE $3 OR lower(email::text) = lower($1)) DESC,
+                 similarity(display_name, $1) DESC
         LIMIT  $2
         "#,
         raw,
-        limit
+        limit,
+        handle_prefix
     )
     .fetch_all(&state.db)
     .await?

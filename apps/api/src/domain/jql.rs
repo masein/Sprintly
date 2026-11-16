@@ -1118,7 +1118,8 @@ fn lower_all(items: &[String]) -> Vec<String> {
 }
 
 /// `%` and `_` are wildcards in ILIKE; a user typing them means the character.
-fn escape_like(v: &str) -> String {
+/// (Postgres' default LIKE escape character is the backslash.)
+pub(crate) fn escape_like(v: &str) -> String {
     v.replace('\\', "\\\\")
         .replace('%', "\\%")
         .replace('_', "\\_")
