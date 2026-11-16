@@ -23,8 +23,10 @@ export function useSignOut(): () => Promise<void> {
     disableRealtime();
     markSignedOut();
     // Nothing from this session may be served to the next one: cached
-    // queries (tasks, people, revealed vault values held in mutation state).
+    // queries (tasks, people), and pages the service worker kept for
+    // offline use (public/sw.js drops its page cache on this message).
     qc.clear();
+    navigator.serviceWorker?.controller?.postMessage({ type: "sprintly:signed-out" });
     router.push("/login");
   }, [qc, router]);
 }
