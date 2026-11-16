@@ -341,7 +341,7 @@ async fn csv_export(
             date,
             row.task_key,
             row.project_key,
-            csv_escape(&row.title),
+            crate::domain::csv::escape(&row.title),
             row.billable,
             mins
         ));
@@ -675,13 +675,6 @@ async fn require_can_approve(
     }
 }
 
-fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
-}
 
 // chrono::TimeZone is referenced in compute_view; surface it once at top.
 use chrono::TimeZone as _;

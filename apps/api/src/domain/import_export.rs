@@ -1481,12 +1481,12 @@ pub fn export_csv(bundle: &ExportBundle) -> String {
         csv.push_str(&format!(
             "{},{},{},{},{},{},{},{},{}\n",
             t.key,
-            csv_escape(&t.title),
+            crate::domain::csv::escape(&t.title),
             t.status,
             t.task_type,
             t.priority,
-            csv_escape(&t.column),
-            csv_escape(&t.labels.join("; ")),
+            crate::domain::csv::escape(&t.column),
+            crate::domain::csv::escape(&t.labels.join("; ")),
             t.comments.len(),
             t.attachments.len(),
         ));
@@ -1494,13 +1494,6 @@ pub fn export_csv(bundle: &ExportBundle) -> String {
     csv
 }
 
-fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
-}
 
 #[cfg(test)]
 mod tests {

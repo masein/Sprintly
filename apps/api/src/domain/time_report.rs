@@ -322,10 +322,10 @@ pub fn to_csv(logs: &[FetchedLog], total_minutes: i64) -> String {
         csv.push_str(&format!(
             "{},{},{},{},{},{},{}\n",
             r.started_at.date_naive(),
-            csv_escape(&r.handle),
+            crate::domain::csv::escape(&r.handle),
             r.task_key,
-            csv_escape(&r.task_title),
-            csv_escape(r.sprint_name.as_deref().unwrap_or("")),
+            crate::domain::csv::escape(&r.task_title),
+            crate::domain::csv::escape(r.sprint_name.as_deref().unwrap_or("")),
             r.billable,
             r.minutes,
         ));
@@ -334,13 +334,6 @@ pub fn to_csv(logs: &[FetchedLog], total_minutes: i64) -> String {
     csv
 }
 
-fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
-}
 
 #[cfg(test)]
 mod tests {
