@@ -33,6 +33,10 @@ pub struct MailCtx {
 }
 
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
+/// How long a claimed-but-unfinished job is presumed still running. Past
+/// this, its worker is assumed dead and the job is reclaimed (see `run_one`).
+/// Generous: the slowest job (a `pg_dump` + upload) takes minutes, not hours.
+const CLAIM_LEASE_SECS: i32 = 2 * 60 * 60;
 const ACHIEVEMENT_SCAN_EVERY_SECS: i64 = 300;
 /// How often the worker materialises due recurring templates (F9).
 const TEMPLATE_MATERIALIZE_EVERY_SECS: i64 = 300;
@@ -100,7 +104,8 @@ async fn ensure_seed_jobs(pool: &PgPool) -> anyhow::Result<()> {
 }
 
 /// Claim + run one job. Returns true if a job was processed.
-async fn run_one(
+#[doc(hidden)] // public only so tests/jobs.rs can drive one claim cycle
+pub async fn run_one(
     pool: &PgPool,
     vault_master_key: &[u8; 32],
     mail: &MailCtx,
@@ -109,23 +114,57 @@ async fn run_one(
 
     // Claim a single runnable job. SKIP LOCKED so concurrent workers don't
     // serialize on the same row.
-    let row: Option<(Uuid, String)> = sqlx::query_as(
+    //
+    // A claim older than CLAIM_LEASE_SECS is stale: the worker that took it
+    // died mid-run (restart, deploy, OOM) without finishing or failing it.
+    // Those used to sit claimed forever — and since `ensure_seed_jobs` counts
+    // them as live, a periodic kind (scheduled backups, retention, digests)
+    // stopped running for good after one ill-timed restart.
+    let row: Option<(Uuid, String, bool)> = sqlx::query_as(
         r#"
-        SELECT id, kind
+        SELECT id, kind, claimed_at IS NOT NULL AS stale
         FROM   jobs
-        WHERE  finished_at IS NULL AND claimed_at IS NULL AND run_at <= now()
+        WHERE  finished_at IS NULL AND run_at <= now()
+          AND  (claimed_at IS NULL
+                OR claimed_at < now() - make_interval(secs => $1::int))
         ORDER  BY run_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT  1
         "#,
     )
+    .bind(CLAIM_LEASE_SECS)
     .fetch_optional(&mut *tx)
     .await?;
 
-    let Some((id, kind)) = row else {
+    let Some((id, kind, stale)) = row else {
         tx.commit().await?;
         return Ok(false);
     };
+
+    if stale {
+        // The interrupted run counts as a failed attempt, so a job that
+        // reliably kills the worker still runs out of attempts instead of
+        // looping forever.
+        let (attempts, max_attempts): (i32, i32) = sqlx::query_as(
+            r#"UPDATE jobs
+                  SET attempts = attempts + 1,
+                      last_error = 'interrupted: the worker stopped mid-run (reclaimed)'
+                WHERE id = $1
+            RETURNING attempts, max_attempts"#,
+        )
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+        warn!(%id, kind = %kind, attempts, "reclaiming a stale job claim");
+        if attempts >= max_attempts {
+            sqlx::query("UPDATE jobs SET finished_at = now(), claimed_at = NULL WHERE id = $1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            tx.commit().await?;
+            return Ok(true);
+        }
+    }
 
     sqlx::query("UPDATE jobs SET claimed_at = now() WHERE id = $1")
         .bind(id)
