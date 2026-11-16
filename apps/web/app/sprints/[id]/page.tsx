@@ -48,6 +48,7 @@ import { me } from "@/lib/auth-bundle";
 import { canEditTasks, canManageProject } from "@/lib/roles";
 import { pluralize } from "@/lib/format";
 import type { ApiError } from "@/lib/api";
+import { localDateISO } from "@/lib/localtime";
 
 export default function SprintDetailPage() {
   const router = useRouter();
@@ -351,11 +352,12 @@ function CompleteSprintModal({
   const [choice, setChoice] = useState<Choice>(unfinished > 0 ? "backlog" : "leave");
   const [targetId, setTargetId] = useState("");
   const [name, setName] = useState(nextSprintName(sprint.name));
-  const [starts, setStarts] = useState(() => new Date().toISOString().slice(0, 10));
+  // Local calendar dates, not UTC (toISOString) — see localDateISO.
+  const [starts, setStarts] = useState(() => localDateISO());
   const [ends, setEnds] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 14);
-    return d.toISOString().slice(0, 10);
+    return localDateISO(d);
   });
 
   const sprintsQ = useQuery({
