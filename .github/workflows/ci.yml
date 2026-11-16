@@ -65,6 +65,23 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --locked
 
+  # The job above runs on `stable`, so it can't see a dependency bump that
+  # raises the minimum Rust version past what the Docker images ship. That's
+  # how uuid 1.27 (needs 1.89) sailed through while every API image build —
+  # release and e2e alike — failed on 1.88. Compile on exactly the pinned
+  # version too. Keep this in lock-step with `rust-version` in Cargo.toml and
+  # the `FROM rust:` lines in infra/docker/api.Dockerfile.
+  msrv:
+    name: api · msrv (rust 1.89)
+    runs-on: ubuntu-latest
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.89
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets --locked
+
   web:
     name: web · lint · build
     runs-on: ubuntu-latest
