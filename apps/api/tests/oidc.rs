@@ -143,3 +143,51 @@ async fn missing_email_is_rejected(pool: PgPool) {
     .await;
     assert!(err.is_err());
 }
+
+#[sqlx::test(migrations = "./migrations")]
+async fn suspended_user_cannot_sign_in_or_link_via_sso(pool: PgPool) {
+    // Federated account, then suspended: the repeat login must be refused.
+    let (id, _) = sprintly_api::domain::oidc::upsert_user(
+        &pool,
+        &cfg(),
+        ISSUER,
+        &claims("sub-susp", Some("susp@idp.test"), true),
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE users SET status = 'suspended' WHERE id = $1")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = sprintly_api::domain::oidc::upsert_user(
+        &pool,
+        &cfg(),
+        ISSUER,
+        &claims("sub-susp", Some("susp@idp.test"), true),
+    )
+    .await;
+    assert!(err.is_err(), "a suspended federated user must not get in");
+
+    // Suspended local account: linking a fresh IdP identity is no way back in.
+    let local = make_local_user(&pool, "local-susp@idp.test").await;
+    sqlx::query("UPDATE users SET status = 'suspended' WHERE id = $1")
+        .bind(local)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let err = sprintly_api::domain::oidc::upsert_user(
+        &pool,
+        &cfg(),
+        ISSUER,
+        &claims("sub-new-idp", Some("local-susp@idp.test"), true),
+    )
+    .await;
+    assert!(err.is_err(), "SSO must not link onto a suspended account");
+    let linked: Option<String> = sqlx::query_scalar("SELECT oidc_subject FROM users WHERE id = $1")
+        .bind(local)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(linked, None, "the suspended account stays unlinked");
+}
