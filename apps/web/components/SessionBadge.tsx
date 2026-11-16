@@ -4,17 +4,13 @@
 // Calls /users/me; on 401 the api wrapper attempts a refresh exactly once.
 
 import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { me, logout, type Me } from "@/lib/auth-bundle";
+import { me, type Me } from "@/lib/auth-bundle";
+import { useSignOut } from "@/lib/useSignOut";
 import { Avatar } from "./Avatar";
-import { disableRealtime } from "@/lib/ws";
-import { markSignedOut } from "@/lib/session-signal";
 
 export function SessionBadge() {
-  const router = useRouter();
-  const qc = useQueryClient();
+  const signOut = useSignOut();
   const [user, setUser] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -91,14 +87,10 @@ export function SessionBadge() {
       <button
         type="button"
         onClick={async () => {
-          await logout().catch(() => {});
-          disableRealtime();
-          markSignedOut();
-          setUser(null);
           // Land on the sign-in page with nothing cached — staying put with
           // stale query data made logout look like it did nothing.
-          qc.clear();
-          router.push("/login");
+          setUser(null);
+          await signOut();
         }}
         className="text-accent hover:underline"
       >
@@ -112,8 +104,7 @@ export function SessionBadge() {
 // header's mobile dropdown, where there's no room for the inline SessionBadge
 // row (that starvation was the whole header-overflow bug).
 export function SessionMenuContents({ onNavigate }: { onNavigate?: () => void }) {
-  const router = useRouter();
-  const qc = useQueryClient();
+  const signOut = useSignOut();
   const [user, setUser] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -208,12 +199,8 @@ export function SessionMenuContents({ onNavigate }: { onNavigate?: () => void })
         type="button"
         onClick={async () => {
           onNavigate?.();
-          await logout().catch(() => {});
-          disableRealtime();
-          markSignedOut();
           setUser(null);
-          qc.clear();
-          router.push("/login");
+          await signOut();
         }}
         className="rounded px-2 py-1.5 text-left hover:bg-white/5"
       >

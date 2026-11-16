@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { enableRealtime } from "@/lib/ws";
+import { disableRealtime, enableRealtime } from "@/lib/ws";
 import { markSignedIn } from "@/lib/session-signal";
 import {
   login,
@@ -51,6 +51,11 @@ export function AuthForm({ mode }: { mode: Mode }) {
   }, [mode]);
 
   function done() {
+    // Start this session clean: if an earlier one in this tab ended without
+    // a full sign-out (expired, or signed out elsewhere), its cached queries
+    // and its socket — authenticated as that user — must not carry over.
+    qc.clear();
+    disableRealtime();
     // A session exists now — bring realtime up (and let the achievement
     // watcher start polling) without waiting for a reload; Providers only
     // does that for visitors who already had a session on load.

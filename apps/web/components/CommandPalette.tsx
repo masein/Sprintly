@@ -23,7 +23,7 @@ import {
   Settings, LogOut, FolderPlus, AtSign, ListTodo, Receipt,
 } from "lucide-react";
 import { search, type SearchHits } from "@/lib/search";
-import { logout } from "@/lib/auth-bundle";
+import { useSignOut } from "@/lib/useSignOut";
 
 const CHORD_TIMEOUT_MS = 1500;
 
@@ -51,6 +51,8 @@ type Action = {
 type ActionCtx = {
   router: ReturnType<typeof useRouter>;
   close: () => void;
+  /** Full sign-out (cache, realtime, session) — see lib/useSignOut. */
+  signOut: () => Promise<void>;
 };
 
 const ACTIONS: Action[] = [
@@ -123,10 +125,9 @@ const ACTIONS: Action[] = [
     id: "logout",
     label: "logout",
     icon: LogOut,
-    run: async ({ router, close }) => {
-      await logout().catch(() => {});
+    run: async ({ close, signOut }) => {
       close();
-      router.push("/login");
+      await signOut();
     },
   },
 ];
@@ -141,6 +142,7 @@ export function CommandPalette({
   initialQuery?: string;
 }) {
   const router = useRouter();
+  const signOut = useSignOut();
   const [q, setQ] = useState(initialQuery);
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -194,7 +196,7 @@ export function CommandPalette({
   function runActive() {
     const item = flat[activeIdx];
     if (!item) return;
-    item.run({ router, close });
+    item.run({ router, close, signOut });
   }
 
   if (!open) return null;
