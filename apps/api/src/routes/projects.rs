@@ -698,6 +698,12 @@ async fn add_member(
     if !exists {
         return Err(AppError::NotFound);
     }
+    // This is an upsert, so "adding" an existing member re-sets their role.
+    // It must not be a back door around `change_member_role`'s guard: re-adding
+    // the only lead as a contributor/watcher would leave the project leaderless.
+    if role != "lead" {
+        ensure_not_last_lead(&state.db, ctx.id, req.user_id).await?;
+    }
 
     sqlx::query(
         r#"

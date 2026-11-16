@@ -4746,3 +4746,28 @@ async fn vault_grants_end_with_project_membership(pool: PgPool) {
         .unwrap();
     assert_eq!(left, 0, "removal cleans up their grants");
 }
+
+/// A new task's parent must be in the same project (as `set_parent` already
+/// required), and re-adding the only lead with a lesser role can't leave the
+/// project leaderless.
+#[sqlx::test(migrations = "./migrations")]
+async fn task_parent_and_last_lead_guards(pool: PgPool) {
+    let app = app(pool.clone());
+    let (lead, lead_user) = register(&app, "guardlead").await; // first user → admin
+    let lead_id = lead_user["id"].as_str().unwrap().to_string();
+    make_project(&app, &lead, "PA").await;
+    make_project(&app, &lead, "PB").await;
+    let (s, other) = send(&app, "POST", "/api/v1/projects/PB/tasks", Some(&lead),
+        Some(json!({ "title": "B's task" }))).await;
+    assert_eq!(s, StatusCode::CREATED, "{other:?}");
+    let other_id = other["id"].as_str().unwrap().to_string();
+
+    let (s, body) = send(&app, "POST", "/api/v1/projects/PA/tasks", Some(&lead),
+        Some(json!({ "title": "stray", "parent_task_id": other_id }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "cross-project parent refused: {body:?}");
+
+    // The creator is PA's only lead; re-adding them as a watcher must fail.
+    let (s, _) = send(&app, "POST", "/api/v1/projects/PA/members", Some(&lead),
+        Some(json!({ "user_id": lead_id, "role": "watcher" }))).await;
+    assert_eq!(s, StatusCode::CONFLICT, "can't demote the last lead via add_member");
+}
