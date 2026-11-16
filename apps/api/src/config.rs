@@ -120,9 +120,18 @@ impl Config {
     where
         F: Fn(&str) -> Option<String>,
     {
-        let env = match get("SPRINTLY_ENV").as_deref() {
-            Some("prod") => Environment::Prod,
-            _ => Environment::Dev,
+        // Fail closed. Dev mode loosens things (e.g. password-reset responses
+        // carry the token), so it must be asked for by name: unset means
+        // prod, and anything unrecognised — "production ", "staging", a typo —
+        // refuses to boot rather than silently running as dev.
+        let env = match get("SPRINTLY_ENV").as_deref().map(str::trim) {
+            Some("dev") | Some("development") => Environment::Dev,
+            None | Some("") | Some("prod") | Some("production") => Environment::Prod,
+            Some(other) => {
+                return Err(anyhow!(
+                    "SPRINTLY_ENV must be `dev` or `prod` (got {other:?})"
+                ))
+            }
         };
 
         let api_bind: SocketAddr = required(&get, "SPRINTLY_API_BIND")?
@@ -397,6 +406,28 @@ mod tests {
     #[test]
     fn valid_env_parses() {
         assert!(cfg_from(&valid_env()).is_ok());
+    }
+
+    #[test]
+    fn environment_fails_closed() {
+        let env_of = |v: Option<&str>| {
+            let mut m = valid_env();
+            if let Some(v) = v {
+                m.insert("SPRINTLY_ENV".into(), v.into());
+            }
+            cfg_from(&m).map(|c| c.env)
+        };
+        // Unset / empty / prod spellings → prod.
+        assert_eq!(env_of(None).unwrap(), Environment::Prod);
+        assert_eq!(env_of(Some("")).unwrap(), Environment::Prod);
+        assert_eq!(env_of(Some("prod")).unwrap(), Environment::Prod);
+        assert_eq!(env_of(Some(" production ")).unwrap(), Environment::Prod);
+        // Dev only when asked for by name.
+        assert_eq!(env_of(Some("dev")).unwrap(), Environment::Dev);
+        assert_eq!(env_of(Some("development")).unwrap(), Environment::Dev);
+        // Anything else refuses to boot, naming the variable.
+        let e = env_of(Some("staging")).unwrap_err();
+        assert!(format!("{e:#}").contains("SPRINTLY_ENV"));
     }
 
     #[test]
