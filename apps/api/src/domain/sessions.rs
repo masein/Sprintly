@@ -313,6 +313,30 @@ pub async fn revoke(pool: &PgPool, session_id: Uuid, reason: &str) -> AppResult<
     Ok(())
 }
 
+/// The user's *current* global role, if `session_id` is a live session of
+/// `user_id` and the account is active. The auth middleware uses this
+/// instead of the role baked into the access token: the JWT lives ~15 min,
+/// so a demoted admin used to keep admin rights until it expired. Same one
+/// cheap query the liveness check already cost.
+pub async fn live_session_role(
+    pool: &PgPool,
+    session_id: Uuid,
+    user_id: Uuid,
+) -> AppResult<Option<String>> {
+    let role: Option<String> = sqlx::query_scalar(
+        r#"SELECT u.role
+             FROM sessions s
+             JOIN users u ON u.id = s.user_id
+            WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL
+              AND u.status = 'active' AND u.deleted_at IS NULL"#,
+    )
+    .bind(session_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(role)
+}
+
 /// Look up the user_id+role tied to a still-live session. Used by the
 /// middleware to enforce session revocation independently of JWT expiry.
 pub async fn session_is_live(pool: &PgPool, session_id: Uuid) -> AppResult<bool> {

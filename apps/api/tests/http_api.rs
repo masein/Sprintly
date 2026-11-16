@@ -4880,3 +4880,87 @@ async fn task_parent_and_last_lead_guards(pool: PgPool) {
         "can't demote the last lead via add_member"
     );
 }
+
+/// A role change takes effect on the user's very next request, with the
+/// token they already hold — not when that token expires (~15 min later).
+#[sqlx::test(migrations = "./migrations")]
+async fn role_changes_apply_to_existing_tokens_immediately(pool: PgPool) {
+    let app = app(pool.clone());
+    let (admin, _) = register(&app, "rootadmin").await; // first user → admin
+    let (bob, bob_user) = register(&app, "bobby").await;
+    let bob_id = bob_user["id"].as_str().unwrap().to_string();
+    let role_path = format!("/api/v1/admin/users/{bob_id}/role");
+
+    let (s, _) = send(&app, "GET", "/api/v1/admin/users", Some(&bob), None).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "a member isn't an admin");
+
+    let (s, _) = send(&app, "POST", &role_path, Some(&admin), Some(json!({ "role": "admin" }))).await;
+    assert!(s.is_success(), "{s}");
+    let (s, _) = send(&app, "GET", "/api/v1/admin/users", Some(&bob), None).await;
+    assert_eq!(s, StatusCode::OK, "promotion applies to the token Bob already has");
+
+    let (s, _) = send(&app, "POST", &role_path, Some(&admin), Some(json!({ "role": "member" }))).await;
+    assert!(s.is_success(), "{s}");
+    let (s, _) = send(&app, "GET", "/api/v1/admin/users", Some(&bob), None).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "demotion applies at once, not at token expiry");
+}
+
+/// Reacting needs the same rights as commenting; outsiders can't react (or
+/// probe which task keys exist), and logging time is for the team — not a
+/// watcher who can merely see the project.
+#[sqlx::test(migrations = "./migrations")]
+async fn reactions_and_time_logs_need_team_rights(pool: PgPool) {
+    let app = app(pool.clone());
+    let (_admin, _) = register(&app, "rxadmin").await; // first user → admin
+    let (lead, _) = register(&app, "rxlead").await;
+    let (watcher, watcher_user) = register(&app, "rxwatch").await;
+    let (outsider, _) = register(&app, "rxout").await;
+    make_project(&app, &lead, "RX").await;
+    let (s, _) = send(&app, "POST", "/api/v1/projects/RX/members", Some(&lead),
+        Some(json!({ "user_id": watcher_user["id"], "role": "watcher" }))).await;
+    assert!(s.is_success(), "{s}");
+    let (s, _) = send(&app, "POST", "/api/v1/projects/RX/tasks", Some(&lead),
+        Some(json!({ "title": "react to me" }))).await;
+    assert_eq!(s, StatusCode::CREATED);
+
+    let react = json!({ "task_key": "RX-1", "emoji": "👍" });
+    let (s, _) = send(&app, "POST", "/api/v1/reactions", Some(&outsider), Some(react.clone())).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "outsiders can't react — or tell the task exists");
+    let (s, _) = send(&app, "POST", "/api/v1/reactions", Some(&lead), Some(react)).await;
+    assert_eq!(s, StatusCode::CREATED);
+
+    let entry = json!({ "started_at": "2026-05-13T09:00:00Z", "duration_minutes": 30 });
+    let (s, _) = send(&app, "POST", "/api/v1/tasks/RX-1/time-logs", Some(&watcher), Some(entry.clone())).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "a watcher can't log time");
+    let (s, _) = send(&app, "POST", "/api/v1/tasks/RX-1/timer/start", Some(&watcher), None).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "…or start a timer");
+    let (s, body) = send(&app, "POST", "/api/v1/tasks/RX-1/time-logs", Some(&lead), Some(entry)).await;
+    assert!(s.is_success(), "the team can: {s} {body:?}");
+}
+
+/// An `Authorization: Bearer` header with no token must not fall back to the
+/// cookie: the CSRF guard skips every Bearer request, so the fallback was a
+/// CSRF bypass for cookie-authenticated writes.
+#[sqlx::test(migrations = "./migrations")]
+async fn empty_bearer_does_not_fall_back_to_the_cookie(pool: PgPool) {
+    let app = app(pool.clone());
+    let (token, _) = register(&app, "cookieuser").await;
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/users/me")
+        .header(header::AUTHORIZATION, "Bearer ")
+        .header(header::COOKIE, format!("sprintly_access={token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    // The cookie alone still works.
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/users/me")
+        .header(header::COOKIE, format!("sprintly_access={token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}

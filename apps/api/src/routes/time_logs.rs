@@ -113,7 +113,10 @@ async fn start_timer(
     .ok_or(AppError::NotFound)?;
 
     let ctx = project_ctx::load_by_id(&state.db, task.project_id, user.id).await?;
-    if !can(&user.as_actor(), Action::ViewBoard, ctx.as_resource()) {
+    // Logging time is work on the task (it feeds timesheets, payroll and
+    // invoices): the team's leads and contributors, never watchers, global
+    // viewers or anyone on an archived project — not just anyone who can see it.
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
 
@@ -232,7 +235,10 @@ async fn create_manual(
     .ok_or(AppError::NotFound)?;
 
     let ctx = project_ctx::load_by_id(&state.db, task.project_id, user.id).await?;
-    if !can(&user.as_actor(), Action::ViewBoard, ctx.as_resource()) {
+    // Logging time is work on the task (it feeds timesheets, payroll and
+    // invoices): the team's leads and contributors, never watchers, global
+    // viewers or anyone on an archived project — not just anyone who can see it.
+    if !can(&user.as_actor(), Action::EditTask, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
 

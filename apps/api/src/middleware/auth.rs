@@ -86,12 +86,14 @@ where
 
         let claims = tokens::verify_access(&state.cfg.auth, &token)?;
 
-        // Session liveness — revoked sessions stop working before JWT expiry.
-        if !sessions::session_is_live(&state.db, claims.sid).await? {
-            return Err(AppError::Unauthorized);
-        }
-
-        let role = Role::parse(&claims.role).ok_or(AppError::Unauthorized)?;
+        // Session liveness — revoked sessions stop working before JWT expiry —
+        // and the role as it is *now*, not as it was when the token was
+        // minted: a role change (e.g. demoting an admin) applies on the very
+        // next request instead of up to ~15 minutes later.
+        let current_role = sessions::live_session_role(&state.db, claims.sid, claims.sub)
+            .await?
+            .ok_or(AppError::Unauthorized)?;
+        let role = Role::parse(&current_role).ok_or(AppError::Unauthorized)?;
         Ok(Self {
             id: claims.sub,
             session_id: Some(claims.sid),
@@ -104,12 +106,16 @@ where
 /// same way as the browser. Cookie is the browser path.
 fn extract_access_token(parts: &Parts) -> Option<String> {
     // Authorization: Bearer xxx
+    //
+    // A request that sends a Bearer header authenticates with it or not at
+    // all — never by falling back to the cookie. The CSRF guard waves every
+    // `Bearer ` request through (no cookie, no CSRF), so an *empty* bearer
+    // used to skip CSRF and then quietly authenticate via the cookie anyway.
     if let Some(h) = parts.headers.get(header::AUTHORIZATION) {
         if let Ok(s) = h.to_str() {
             if let Some(rest) = s.strip_prefix("Bearer ") {
-                if !rest.is_empty() {
-                    return Some(rest.to_string());
-                }
+                let rest = rest.trim();
+                return (!rest.is_empty()).then(|| rest.to_string());
             }
         }
     }
