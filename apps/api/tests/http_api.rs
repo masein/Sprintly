@@ -4964,3 +4964,39 @@ async fn empty_bearer_does_not_fall_back_to_the_cookie(pool: PgPool) {
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
+
+/// The permissive dev CORS layer only exists in dev: in prod (same-origin
+/// behind Caddy) a cross-origin preflight gets no CORS grant.
+#[sqlx::test(migrations = "./migrations")]
+async fn cors_is_dev_only(pool: PgPool) {
+    let preflight = || {
+        Request::builder()
+            .method("OPTIONS")
+            .uri("/api/v1/users/me")
+            .header(header::ORIGIN, "https://evil.example")
+            .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+            .body(Body::empty())
+            .unwrap()
+    };
+    let allow_origin = |resp: &axum::response::Response| {
+        resp.headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .map(|v| v.to_str().unwrap().to_string())
+    };
+
+    let dev = app(pool.clone()); // test_config() is dev
+    let resp = dev.oneshot(preflight()).await.unwrap();
+    assert!(allow_origin(&resp).is_some(), "dev keeps permissive CORS");
+
+    let mut cfg = test_config();
+    cfg.env = Environment::Prod;
+    let state = AppState {
+        redis: redis_pool::connect(&cfg).expect("redis pool"),
+        mailer: email::build(&cfg.email),
+        cfg: Arc::new(cfg),
+        db: pool,
+    };
+    let prod = sprintly_api::app::router(state);
+    let resp = prod.oneshot(preflight()).await.unwrap();
+    assert_eq!(allow_origin(&resp), None, "prod grants no cross-origin access");
+}
