@@ -212,6 +212,10 @@ pub fn parse_comment(cell: &str) -> Option<JiraComment> {
     }
 }
 
+/// Longest single worklog we accept: a year. Anything beyond is a corrupt or
+/// hostile cell, not time someone logged.
+const MAX_WORKLOG_SECS: i64 = 366 * 24 * 60 * 60;
+
 /// Jira CSV "Log Work" cell toString is `comment;started;author;timeSpentSeconds`
 /// (the comment may itself contain `;`). We peel the three trailing fields off
 /// the right so the comment keeps its semicolons. Returns `None` for an empty
@@ -227,7 +231,10 @@ pub fn parse_worklog(cell: &str) -> Option<JiraWorklog> {
     // may still contain `;`). A missing leading comment field → empty comment.
     let mut it = cell.rsplitn(4, ';');
     let seconds: i64 = it.next()?.trim().parse().ok()?;
-    if seconds <= 0 {
+    // Also refuse absurd durations: a huge value overflowed the
+    // `started + seconds` arithmetic downstream (a panic, aborting the
+    // import request) and truncated in the minutes cast.
+    if seconds <= 0 || seconds > MAX_WORKLOG_SECS {
         return None;
     }
     let author = it.next()?.trim();
@@ -790,5 +797,22 @@ mod tests {
     #[test]
     fn rejects_non_jira_csv() {
         assert!(parse_jira_csv("Name,Status\nx,Done\n").is_err());
+    }
+}
+
+#[cfg(test)]
+mod worklog_bounds {
+    use super::*;
+
+    #[test]
+    fn absurd_durations_are_rejected_not_panicked_on() {
+        assert!(parse_worklog("note;12/Jan/24 3:45 PM;Sam;3600").is_some());
+        assert!(parse_worklog(&format!("x;12/Jan/24 3:45 PM;Sam;{}", MAX_WORKLOG_SECS)).is_some());
+        for secs in [MAX_WORKLOG_SECS + 1, i64::MAX] {
+            assert!(
+                parse_worklog(&format!("x;12/Jan/24 3:45 PM;Sam;{secs}")).is_none(),
+                "{secs}"
+            );
+        }
     }
 }

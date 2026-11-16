@@ -121,8 +121,12 @@ fn lex(src: &str) -> Result<Vec<Spanned>, ParseError> {
                     }
                     let ch = b[i] as char;
                     if ch == '\\' && i + 1 < b.len() {
-                        s.push(b[i + 1] as char);
-                        i += 2;
+                        // Take the whole escaped *character*, not one byte:
+                        // `\é` used to push a mangled byte and land mid-char,
+                        // and the next slice below then panicked.
+                        let esc = src[i + 1..].chars().next().unwrap_or('\\');
+                        s.push(esc);
+                        i += 1 + esc.len_utf8();
                         continue;
                     }
                     if ch == quote {
@@ -407,7 +411,14 @@ struct Parser {
     toks: Vec<Spanned>,
     pos: usize,
     end: usize,
+    /// Current `(`/`NOT` nesting. Parsing (and later compiling) recurses per
+    /// level, so it's capped: ~2000 `(` fit in the length limit and would
+    /// overflow the stack, aborting the whole process.
+    depth: usize,
 }
+
+/// Deepest `(`/`NOT` nesting a query may use — far beyond any real query.
+const MAX_NESTING: usize = 32;
 
 impl Parser {
     fn peek(&self) -> Option<&Spanned> {
@@ -452,23 +463,33 @@ impl Parser {
     }
 
     fn term(&mut self) -> Result<Expr, ParseError> {
+        if self.word_is("not") || matches!(self.peek().map(|s| &s.tok), Some(Tok::LParen)) {
+            if self.depth >= MAX_NESTING {
+                return err("query is nested too deeply", self.at());
+            }
+            self.depth += 1;
+            let nested = self.nested_term();
+            self.depth -= 1;
+            return nested;
+        }
+        Ok(Expr::Cond(self.cond()?))
+    }
+
+    /// `NOT term` or `( expr )` — the two recursive forms of `term`.
+    fn nested_term(&mut self) -> Result<Expr, ParseError> {
         if self.word_is("not") {
             self.bump();
             return Ok(Expr::Not(Box::new(self.term()?)));
         }
-        if matches!(self.peek().map(|s| &s.tok), Some(Tok::LParen)) {
-            let open = self.at();
-            self.bump();
-            let inner = self.expr()?;
-            match self.peek().map(|s| &s.tok) {
-                Some(Tok::RParen) => {
-                    self.bump();
-                    Ok(inner)
-                }
-                _ => err("unclosed `(`", open),
+        let open = self.at();
+        self.bump(); // `(`
+        let inner = self.expr()?;
+        match self.peek().map(|s| &s.tok) {
+            Some(Tok::RParen) => {
+                self.bump();
+                Ok(inner)
             }
-        } else {
-            Ok(Expr::Cond(self.cond()?))
+            _ => err("unclosed `(`", open),
         }
     }
 
@@ -795,22 +816,21 @@ fn parse_date(raw: &str) -> Option<NaiveDate> {
     if let Ok(d) = NaiveDate::parse_from_str(raw, "%Y-%m-%d") {
         return Some(d);
     }
-    let bytes = lower.as_bytes();
-    if bytes.len() >= 2 {
-        let unit = *bytes.last().unwrap() as char;
-        let num: String = lower[..lower.len() - 1].to_string();
-        if let Ok(n) = num.parse::<i64>() {
-            let days = match unit {
-                'd' => n,
-                'w' => n * 7,
-                'm' => n * 30,
-                'y' => n * 365,
-                _ => return None,
-            };
-            return Some(today + Duration::days(days));
-        }
-    }
-    None
+    // Relative `<n><unit>` (7d, -2w, 3m, 1y). Split by *character* — slicing
+    // off the last byte panicked on input like `5é` — and do the arithmetic
+    // checked, so `999999999y` is "not a date" rather than an overflow panic.
+    let mut chars = lower.chars();
+    let unit = chars.next_back()?;
+    let n: i64 = chars.as_str().parse().ok()?;
+    let per_unit = match unit {
+        'd' => 1,
+        'w' => 7,
+        'm' => 30,
+        'y' => 365,
+        _ => return None,
+    };
+    let days = n.checked_mul(per_unit)?;
+    today.checked_add_signed(Duration::try_days(days)?)
 }
 
 /// Parse a whole query: an optional filter, an optional `ORDER BY`.
@@ -820,6 +840,7 @@ pub fn parse(src: &str) -> Result<Query, ParseError> {
         toks,
         pos: 0,
         end: src.len(),
+        depth: 0,
     };
 
     // ORDER BY only, or nothing at all.
@@ -1420,5 +1441,44 @@ mod tests {
         assert_eq!(sql("status ≠ done"), sql("status != done"));
         assert_eq!(sql("points ≥ 3"), sql("points >= 3"));
         assert_eq!(sql("points ≤ 3"), sql("points <= 3"));
+    }
+}
+
+/// Inputs that used to panic the request handler (or, for deep nesting,
+/// overflow the stack and abort the whole process). Each must now come back
+/// as an ordinary parse result.
+#[cfg(test)]
+mod panic_regressions {
+    use super::*;
+
+    #[test]
+    fn escaped_multibyte_characters_lex_cleanly() {
+        let q = parse(r#"title ~ "caf\é \"au lait\"""#).expect("parses");
+        assert!(q.filter.is_some());
+        // An escape right before the closing quote of a multi-byte value.
+        assert!(parse(r#"title ~ "\ü""#).is_ok());
+    }
+
+    #[test]
+    fn odd_relative_dates_are_errors_not_panics() {
+        for v in ["5é", "é", "999999999999y", "-999999999999d", "9223372036854775807w"] {
+            let r = std::panic::catch_unwind(|| parse(&format!("due < {v}")));
+            assert!(r.is_ok(), "panicked on due < {v}");
+        }
+        assert!(parse_date("5é").is_none());
+        assert!(parse_date("999999999y").is_none());
+        assert!(parse_date("7d").is_some());
+        assert!(parse_date("-2w").is_some());
+    }
+
+    #[test]
+    fn nesting_is_capped() {
+        let deep = format!("{}status = todo{}", "(".repeat(1999), ")".repeat(1999));
+        let e = parse(&deep).unwrap_err();
+        assert!(e.message.contains("nested too deeply"), "{}", e.message);
+        let nots = format!("{}status = todo", "NOT ".repeat(400));
+        assert!(parse(&nots).is_err());
+        // Reasonable nesting still works.
+        assert!(parse("((status = todo OR status = review) AND NOT (priority = p3))").is_ok());
     }
 }
