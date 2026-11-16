@@ -5,7 +5,9 @@
 // would change before committing.
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Download, Upload, X } from "lucide-react";
+import { me } from "@/lib/auth-bundle";
 import {
   exportUrl,
   importProject,
@@ -35,6 +37,10 @@ export function ImportExportModal({
   const [done, setDone] = useState<string | null>(null);
   // Jira: provision a user for each unmatched assignee/reporter (off by default).
   const [createUsers, setCreateUsers] = useState(false);
+  // Provisioning creates global accounts, so the API only allows it for
+  // global admins — don't offer the option to anyone else.
+  const currentUser = useQuery({ queryKey: ["me"], queryFn: () => me() });
+  const isAdmin = currentUser.data?.role === "admin";
   const [tempPassword, setTempPassword] = useState("123456");
 
   async function readFile(file: File) {
@@ -173,25 +179,27 @@ export function ImportExportModal({
             </div>
           )}
 
-          {/* Jira: optional user provisioning. */}
-          <label className="mono flex items-start gap-2 text-[11px] text-chrome-dim">
-            <input
-              type="checkbox"
-              checked={createUsers}
-              onChange={(e) => {
-                setCreateUsers(e.target.checked);
-                setReport(null);
-              }}
-              className="mt-0.5"
-            />
-            <span>
-              create missing users (Jira) — provision a Sprintly account for each
-              unmatched assignee/reporter, add them to the project, and assign
-              their tasks. They sign in with the temp password below and must set
-              a new one.
-            </span>
-          </label>
-          {createUsers && (
+          {/* Jira: optional user provisioning (global admins only). */}
+          {isAdmin && (
+            <label className="mono flex items-start gap-2 text-[11px] text-chrome-dim">
+              <input
+                type="checkbox"
+                checked={createUsers}
+                onChange={(e) => {
+                  setCreateUsers(e.target.checked);
+                  setReport(null);
+                }}
+                className="mt-0.5"
+              />
+              <span>
+                create missing users (Jira) — provision a Sprintly account for each
+                unmatched assignee/reporter, add them to the project, and assign
+                their tasks. They sign in with the temp password below and must set
+                a new one.
+              </span>
+            </label>
+          )}
+          {isAdmin && createUsers && (
             <label className="mono flex items-center gap-2 pl-6 text-[11px] text-chrome-dim">
               temp password
               <input
