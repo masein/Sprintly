@@ -230,17 +230,24 @@ async fn run_create_backup(pool: &PgPool, job_id: Uuid) -> anyhow::Result<()> {
     // Try to run pg_dump. If the binary isn't present (dev image without
     // postgresql-client), mark this attempt failed with a helpful error
     // instead of panicking.
-    let dump = Command::new("pg_dump")
-        .args([
-            "--format=custom",
-            "--no-owner",
-            "--no-acl",
-            "-Z",
-            "6",
-            "-f",
-            &tmp_path,
-            &database_url,
-        ])
+    // The DB password goes in the child's environment, not argv: an argument
+    // is visible to every process on the host via `ps`.
+    let (dump_target, db_password) = crate::infra::db::libpq_target(&database_url);
+    let mut dump_cmd = Command::new("pg_dump");
+    dump_cmd.args([
+        "--format=custom",
+        "--no-owner",
+        "--no-acl",
+        "-Z",
+        "6",
+        "-f",
+        &tmp_path,
+        &dump_target,
+    ]);
+    if let Some(pw) = &db_password {
+        dump_cmd.env("PGPASSWORD", pw);
+    }
+    let dump = dump_cmd
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .output()
@@ -285,22 +292,22 @@ async fn run_create_backup(pool: &PgPool, job_id: Uuid) -> anyhow::Result<()> {
     let signer = crate::infra::s3::Presigner::new(&cfg);
     let url = signer.put(&storage_key, "application/octet-stream", 900);
 
-    let upload = Command::new("curl")
-        .args([
+    // The presigned URL is a (short-lived) credential: pass it on stdin.
+    let upload_from = format!("@{tmp_path}");
+    let upload = outbound::curl_with_config(
+        &[
             "--fail-with-body",
             "-sS",
             "-X",
             "PUT",
             "--data-binary",
-            &format!("@{tmp_path}"),
+            &upload_from,
             "-H",
             "Content-Type: application/octet-stream",
-            &url,
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await;
+        ],
+        &[("url", url.as_str())],
+    )
+    .await;
     // Tidy the temp file regardless of upload result.
     let _ = tokio::fs::remove_file(&tmp_path).await;
 
@@ -395,10 +402,12 @@ async fn run_backup_retention(pool: &PgPool) -> anyhow::Result<()> {
             // Best-effort object delete; we drop the row regardless so a
             // missing/half-deleted object can't wedge retention forever.
             let url = signer.delete(key, 300);
-            let out = tokio::process::Command::new("curl")
-                .args(["-sS", "-X", "DELETE", "-o", "/dev/null", &url])
-                .output()
-                .await;
+            // Presigned URL on stdin, not argv (see outbound::curl_with_config).
+            let out = outbound::curl_with_config(
+                &["-sS", "-X", "DELETE", "-o", "/dev/null"],
+                &[("url", url.as_str())],
+            )
+            .await;
             if let Err(e) = &out {
                 warn!(error = %e, key, "jobs: backup object delete failed");
             }
@@ -546,30 +555,30 @@ async fn run_deliver_webhook(
         }
     };
 
-    let mut cmd = tokio::process::Command::new("curl");
     // http(s) only, no redirects, and connect to exactly the address the guard
-    // checked.
-    cmd.args([
+    // checked. The URL (for chat targets it *is* the credential) and headers
+    // go to curl on stdin, not argv, so they never show up in `ps`.
+    let mut args: Vec<&str> = vec![
         "-sS",
         "--proto",
         "=http,https",
         "--proto-redir",
         "=http,https",
-    ])
-    .args(["--max-redirs", "0"]);
+        "--max-redirs",
+        "0",
+    ];
     if let Some(pin) = &dest.resolve {
-        cmd.args(["--resolve", pin]);
+        args.extend(["--resolve", pin.as_str()]);
     }
-    cmd.args(["-X", "POST", &dest.url]);
-    for (name, value) in &headers {
-        cmd.args(["-H", &format!("{name}: {value}")]);
-    }
-    let out = cmd
-        .args(["--data-binary", &body])
-        .args(["--max-time", "10"])
-        .args(["-o", "/dev/null", "-w", "%{http_code}"])
-        .output()
-        .await?;
+    args.extend(["-X", "POST", "--data-binary", body.as_str()]);
+    args.extend(["--max-time", "10", "-o", "/dev/null", "-w", "%{http_code}"]);
+    let header_lines: Vec<String> = headers
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}"))
+        .collect();
+    let mut entries: Vec<(&str, &str)> = vec![("url", dest.url.as_str())];
+    entries.extend(header_lines.iter().map(|h| ("header", h.as_str())));
+    let out = outbound::curl_with_config(&args, &entries).await?;
     let code: i32 = String::from_utf8_lossy(&out.stdout)
         .trim()
         .parse()
@@ -719,27 +728,37 @@ async fn run_push_commit_status(
             )
             .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-            let mut cmd = tokio::process::Command::new("curl");
             // The base URL is lead-configured: never let curl wander off
             // http(s) (gopher://, file://, …) or follow a redirect elsewhere.
-            cmd.args([
+            // The provider token rides in a header, so URL + headers go to
+            // curl on stdin, never argv (`ps` would show them).
+            let args = [
                 "-sS",
                 "--proto",
                 "=http,https",
                 "--proto-redir",
                 "=http,https",
-            ])
-            .args(["--max-redirs", "0"]);
-            cmd.args(["-X", req.method, &req.url]);
-            for (name, value) in &req.headers {
-                cmd.args(["-H", &format!("{name}: {value}")]);
-            }
-            let out = cmd
-                .args(["--data-binary", &req.body])
-                .args(["--max-time", "10"])
-                .args(["-o", "/dev/null", "-w", "%{http_code}"])
-                .output()
-                .await?;
+                "--max-redirs",
+                "0",
+                "-X",
+                req.method,
+                "--data-binary",
+                req.body.as_str(),
+                "--max-time",
+                "10",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+            ];
+            let header_lines: Vec<String> = req
+                .headers
+                .iter()
+                .map(|(name, value)| format!("{name}: {value}"))
+                .collect();
+            let mut entries: Vec<(&str, &str)> = vec![("url", req.url.as_str())];
+            entries.extend(header_lines.iter().map(|h| ("header", h.as_str())));
+            let out = outbound::curl_with_config(&args, &entries).await?;
             let code: i32 = String::from_utf8_lossy(&out.stdout)
                 .trim()
                 .parse()
