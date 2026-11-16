@@ -62,6 +62,7 @@ struct EnrollDto {
 }
 
 async fn enroll(State(state): State<AppState>, user: CurrentUser) -> AppResult<impl IntoResponse> {
+    user.require_session()?;
     // Re-enrolling while active would silently invalidate the working app and
     // recovery codes — make the user disable first.
     if two_factor::status(&state.db, user.id).await?.enabled {
@@ -100,6 +101,7 @@ async fn activate(
     user: CurrentUser,
     Json(req): Json<CodeReq>,
 ) -> AppResult<impl IntoResponse> {
+    user.require_session()?;
     rate_limit::hit(
         &state,
         &format!("sprintly:rl:2fa:{}", user.id),
@@ -112,8 +114,14 @@ async fn activate(
         .await?
         .ok_or_else(|| AppError::BadRequest("start enrolment first".into()))?;
 
+    // Record the confirming code's step, so it can't be replayed straight
+    // into a login.
     let now = chrono::Utc::now().timestamp() as u64;
-    if !totp::verify(&secret, &req.code, now, 1) {
+    let ok = match totp::verify_step(&secret, &req.code, now, 1) {
+        Some(step) => two_factor::accept_totp_step(&state.db, user.id, step).await?,
+        None => false,
+    };
+    if !ok {
         return Err(AppError::Unauthorized);
     }
 
@@ -135,6 +143,7 @@ async fn disable(
     user: CurrentUser,
     Json(req): Json<CodeReq>,
 ) -> AppResult<impl IntoResponse> {
+    user.require_session()?;
     rate_limit::hit(
         &state,
         &format!("sprintly:rl:2fa:{}", user.id),
@@ -147,10 +156,12 @@ async fn disable(
         .await?
         .ok_or_else(|| AppError::BadRequest("two-factor isn't on".into()))?;
 
-    // Accept either a live TOTP code or a recovery code to turn it off.
+    // Accept either a fresh (non-replayed) TOTP code or a recovery code.
     let now = chrono::Utc::now().timestamp() as u64;
-    let ok = totp::verify(&secret, &req.code, now, 1)
-        || two_factor::consume_recovery_code(&state.db, user.id, &req.code).await?;
+    let ok = match totp::verify_step(&secret, &req.code, now, 1) {
+        Some(step) => two_factor::accept_totp_step(&state.db, user.id, step).await?,
+        None => two_factor::consume_recovery_code(&state.db, user.id, &req.code).await?,
+    };
     if !ok {
         return Err(AppError::Unauthorized);
     }

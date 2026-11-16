@@ -509,6 +509,90 @@ async fn invite_role_wins_over_open_signup(pool: PgPool) {
     assert_eq!(walkin["role"], "member");
 }
 
+fn signup_body(handle: &str, invite: Option<&str>) -> Value {
+    let mut b = json!({
+        "email": format!("{handle}@sprintly.test"),
+        "handle": handle,
+        "display_name": handle,
+        "password": "correct-horse-battery-staple",
+    });
+    if let Some(t) = invite {
+        b["invite_token"] = json!(t);
+    }
+    b
+}
+
+/// A single-use invite stays single-use under concurrency: two registrations
+/// racing on the same (admin!) invite must not both get in. (Regression: the
+/// check and the consume weren't atomic, so both could pass the check.)
+#[sqlx::test(migrations = "./migrations")]
+async fn racing_registrations_cannot_spend_one_invite_twice(pool: PgPool) {
+    let app = app(pool.clone());
+    let (admin_token, _) = register(&app, "founder").await;
+    let (_, invite) = send(
+        &app,
+        "POST",
+        "/api/v1/admin/invites",
+        Some(&admin_token),
+        Some(json!({ "suggested_role": "admin" })),
+    )
+    .await;
+    let token = invite["token"].as_str().unwrap().to_string();
+
+    let ((s1, b1), (s2, b2)) = tokio::join!(
+        send(
+            &app,
+            "POST",
+            "/api/v1/auth/register",
+            None,
+            Some(signup_body("racer1", Some(&token)))
+        ),
+        send(
+            &app,
+            "POST",
+            "/api/v1/auth/register",
+            None,
+            Some(signup_body("racer2", Some(&token)))
+        ),
+    );
+    let ok = [s1, s2].iter().filter(|s| **s == StatusCode::OK).count();
+    assert_eq!(ok, 1, "exactly one may use the invite: {s1} {b1:?} / {s2} {b2:?}");
+    let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(admins, 2, "the founder plus exactly one invitee");
+}
+
+/// "First user becomes admin" can only be won once, even when the first two
+/// sign-ups on a fresh instance race.
+#[sqlx::test(migrations = "./migrations")]
+async fn racing_first_signups_yield_one_admin(pool: PgPool) {
+    let app = app(pool.clone());
+    let ((s1, _), (s2, _)) = tokio::join!(
+        send(
+            &app,
+            "POST",
+            "/api/v1/auth/register",
+            None,
+            Some(signup_body("first1", None))
+        ),
+        send(
+            &app,
+            "POST",
+            "/api/v1/auth/register",
+            None,
+            Some(signup_body("first2", None))
+        ),
+    );
+    assert_eq!((s1, s2), (StatusCode::OK, StatusCode::OK), "open signup lets both in");
+    let admins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(admins, 1, "only one of them may become admin");
+}
+
 /// Admin email change over HTTP: applies, rejects duplicates with 409, and
 /// requires admin.
 #[sqlx::test(migrations = "./migrations")]
@@ -4570,4 +4654,45 @@ async fn custom_field_values_save_and_clear(pool: PgPool) {
         kinds.contains("field_set") && kinds.contains("field_cleared"),
         "{activity:?}"
     );
+}
+
+/// Credential management needs an interactive session: a write-scoped
+/// personal API token can't mint more tokens (a leaked token could otherwise
+/// mint a non-expiring successor that survives its own revocation), revoke
+/// tokens, or turn 2FA on/off (and lock the owner out).
+#[sqlx::test(migrations = "./migrations")]
+async fn api_tokens_cannot_manage_credentials(pool: PgPool) {
+    let app = app(pool.clone());
+    let (session_token, user) = register(&app, "scripter").await;
+    let uid: uuid::Uuid = user["id"].as_str().unwrap().parse().unwrap();
+    let (row, api_token) = sprintly_api::domain::api_tokens::create(
+        &pool,
+        uid,
+        "ci",
+        &["read".to_string(), "write".to_string()],
+        None,
+    )
+    .await
+    .unwrap();
+
+    let mint = json!({ "name": "child", "scopes": ["read", "write"] });
+    let (status, _) = send(&app, "POST", "/api/v1/me/tokens", Some(&api_token), Some(mint.clone())).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a token can't mint tokens");
+    let (status, _) = send(
+        &app,
+        "DELETE",
+        &format!("/api/v1/me/tokens/{}", row.id),
+        Some(&api_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a token can't revoke tokens");
+    let (status, _) = send(&app, "POST", "/api/v1/me/2fa/enroll", Some(&api_token), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a token can't enrol 2FA");
+
+    // It still works for ordinary API use, and the session can do all of it.
+    let (status, _) = send(&app, "GET", "/api/v1/users/me", Some(&api_token), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send(&app, "POST", "/api/v1/me/tokens", Some(&session_token), Some(mint)).await;
+    assert_eq!(status, StatusCode::CREATED);
 }

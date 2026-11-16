@@ -79,6 +79,9 @@ async fn cmd_serve() -> anyhow::Result<()> {
     }
 
     let state = infra::AppState::connect(&cfg).await?;
+    // Build login's no-such-account hash now, so even the first unknown-email
+    // login costs exactly what a real one does (it's built lazily otherwise).
+    let _ = sprintly_api::domain::password::dummy_hash(&cfg.auth);
     // Background worker: achievement scans, backups, and webhook delivery. The
     // vault master key lets it decrypt webhook signing secrets.
     sprintly_api::jobs::spawn(

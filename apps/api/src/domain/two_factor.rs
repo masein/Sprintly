@@ -33,7 +33,8 @@ pub async fn enroll_pending(db: &PgPool, user_id: Uuid, secret: &[u8]) -> AppRes
     let encoded = URL_SAFE_NO_PAD.encode(secret);
     sqlx::query(
         r#"UPDATE users
-              SET totp_secret = $2, totp_enrolled_at = NULL, backup_codes = '{}'
+              SET totp_secret = $2, totp_enrolled_at = NULL, backup_codes = '{}',
+                  totp_last_step = NULL
             WHERE id = $1"#,
     )
     .bind(user_id)
@@ -41,6 +42,25 @@ pub async fn enroll_pending(db: &PgPool, user_id: Uuid, secret: &[u8]) -> AppRes
     .execute(db)
     .await?;
     Ok(())
+}
+
+/// Record that a TOTP code for time `step` was just used, if — and only if —
+/// that step is newer than the last one accepted. Returns `false` for a
+/// replay: the same code again, or an older code still inside the skew
+/// window. The conditional UPDATE is the check, so two concurrent uses of
+/// one code can't both succeed.
+pub async fn accept_totp_step(db: &PgPool, user_id: Uuid, step: i64) -> AppResult<bool> {
+    let res = sqlx::query(
+        r#"UPDATE users
+              SET totp_last_step = $2
+            WHERE id = $1
+              AND (totp_last_step IS NULL OR totp_last_step < $2)"#,
+    )
+    .bind(user_id)
+    .bind(step)
+    .execute(db)
+    .await?;
+    Ok(res.rows_affected() == 1)
 }
 
 pub async fn status(db: &PgPool, user_id: Uuid) -> AppResult<Status> {
@@ -105,7 +125,8 @@ pub async fn activate(db: &PgPool, user_id: Uuid, hashed_codes: &[String]) -> Ap
 pub async fn disable(db: &PgPool, user_id: Uuid) -> AppResult<()> {
     sqlx::query(
         r#"UPDATE users
-              SET totp_secret = NULL, totp_enrolled_at = NULL, backup_codes = '{}'
+              SET totp_secret = NULL, totp_enrolled_at = NULL, backup_codes = '{}',
+                  totp_last_step = NULL
             WHERE id = $1"#,
     )
     .bind(user_id)

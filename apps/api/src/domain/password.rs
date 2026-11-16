@@ -34,6 +34,23 @@ pub fn hash(cfg: &AuthConfig, password: &str) -> AppResult<String> {
     Ok(h.to_string())
 }
 
+/// A real Argon2id hash made with the *configured* cost, for login to verify
+/// against when no account matches the email. It must cost the same as a real
+/// account's hash: the old baked-in dummy (m=4096, t=1) verified many times
+/// faster than real hashes (m=65536, t=3 in the shipped config), so response
+/// time told an attacker which emails have accounts. Built once, on first use.
+pub fn dummy_hash(cfg: &AuthConfig) -> &'static str {
+    static DUMMY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DUMMY.get_or_init(|| {
+        // Any password works — it's never compared against a real attempt's
+        // outcome. Falls back to a valid (cheap) PHC string only if hashing
+        // itself fails, which would also break every real login.
+        hash(cfg, "sprintly:no-such-account").unwrap_or_else(|_| {
+            "$argon2id$v=19$m=4096,t=1,p=1$YWFhYWFhYWFhYWFhYWFhYQ$X9DkxLgGCgnLEXJ2v0+TJoLg+8iX/qsAqK1zybvk7n0".into()
+        })
+    })
+}
+
 /// Verify a plaintext against a stored hash. Returns Ok(true) on match,
 /// Ok(false) on mismatch, Err for malformed hashes.
 pub fn verify(stored: &str, password: &str) -> AppResult<bool> {
@@ -73,6 +90,15 @@ mod tests {
         let cfg = cheap_cfg();
         let h = hash(&cfg, "hunter2").unwrap();
         assert!(!verify(&h, "hunter3").unwrap());
+    }
+
+    #[test]
+    fn dummy_hash_uses_the_configured_cost() {
+        let cfg = cheap_cfg();
+        let h = dummy_hash(&cfg);
+        // Same params as a real hash under this config → same verify cost.
+        assert!(h.starts_with("$argon2id$v=19$m=4096,t=1,p=1$"), "{h}");
+        assert!(!verify(h, "anything").unwrap());
     }
 
     #[test]

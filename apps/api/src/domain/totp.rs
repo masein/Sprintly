@@ -72,16 +72,29 @@ pub fn code_at(secret: &[u8], unix_secs: u64) -> String {
 
 /// Verify `code` against `secret` at `now_unix`, tolerating `window` steps of
 /// clock skew on each side (window = 1 → ±30s). Constant-time digit compare.
+///
+/// This alone does NOT stop replay: callers that authenticate should use
+/// [`verify_step`] and refuse a step that isn't newer than the last one they
+/// accepted (`two_factor::accept_totp_step`).
 pub fn verify(secret: &[u8], code: &str, now_unix: u64, window: i64) -> bool {
+    verify_step(secret, code, now_unix, window).is_some()
+}
+
+/// Like [`verify`], but returns the time step the code matched, so the caller
+/// can record it and reject any later attempt for the same or an older step.
+pub fn verify_step(secret: &[u8], code: &str, now_unix: u64, window: i64) -> Option<i64> {
     let code = code.trim();
     if code.len() != DIGITS as usize || !code.bytes().all(|b| b.is_ascii_digit()) {
-        return false;
+        return None;
     }
     let step = (now_unix / PERIOD) as i64;
     use subtle::ConstantTimeEq;
-    (-window..=window).any(|d| {
-        let counter = (step + d).max(0) as u64;
-        let candidate = format!("{:0width$}", hotp(secret, counter), width = DIGITS as usize);
+    (-window..=window).map(|d| (step + d).max(0)).find(|&counter| {
+        let candidate = format!(
+            "{:0width$}",
+            hotp(secret, counter as u64),
+            width = DIGITS as usize
+        );
         bool::from(candidate.as_bytes().ct_eq(code.as_bytes()))
     })
 }
@@ -171,6 +184,21 @@ mod tests {
         assert!(!verify(&secret, "000000", now, 1) || code == "000000");
         assert!(!verify(&secret, "12345", now, 1));
         assert!(!verify(&secret, "abcdef", now, 1));
+    }
+
+    #[test]
+    fn verify_step_reports_the_matched_step() {
+        let secret = generate_secret();
+        let now = 1_700_000_000u64;
+        let step = (now / PERIOD) as i64;
+        assert_eq!(verify_step(&secret, &code_at(&secret, now), now, 1), Some(step));
+        // A code from the previous period matches *that* step.
+        let earlier = now - PERIOD;
+        assert_eq!(
+            verify_step(&secret, &code_at(&secret, earlier), now, 1),
+            Some(step - 1)
+        );
+        assert_eq!(verify_step(&secret, "12345", now, 1), None);
     }
 
     #[test]
