@@ -11,7 +11,7 @@
 #   runtime  — small final image with just the binary + ca-certs
 # ─────────────────────────────────────────────────────────────────────────────
 
-FROM rust:1.88-slim-bookworm AS chef
+FROM rust:1.89-slim-bookworm AS chef
 RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config libssl-dev ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
@@ -36,7 +36,7 @@ COPY apps/api ./apps/api
 RUN cargo build --release --locked --bin sprintly-api --bin sprintly-seed
 
 # ─── Dev image: source-mounted, watch mode ───────────────────────────────
-FROM rust:1.88-slim-bookworm AS dev
+FROM rust:1.89-slim-bookworm AS dev
 RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config libssl-dev ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/*
@@ -52,7 +52,7 @@ CMD ["cargo", "run", "--bin", "sprintly-api"]
 # Backs `just test` / `just lint` / `just sqlx-prepare` against a running
 # stack. Lean on purpose (no cargo-watch); source + target are mounted at run
 # time, so this layer rebuilds only when the toolchain pins change.
-FROM rust:1.88-slim-bookworm AS tools
+FROM rust:1.89-slim-bookworm AS tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config libssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
