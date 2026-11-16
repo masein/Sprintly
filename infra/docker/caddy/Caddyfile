@@ -64,6 +64,22 @@
 
     # Frontend (catch-all).
     handle {
+        # Content-Security-Policy for the app's pages. What it buys today:
+        # no plugins/objects, no <base> hijack, forms post only to us, no
+        # framing (clickjacking), and scripts/connections/fonts only from
+        # our own origin — injected markup can't pull in a remote script or
+        # beacon data to a third-party API. Origins allowed:
+        #   - rsms.me: the Inter webfont stylesheet + font files;
+        #   - img https:/data:/blob:: avatars and markdown images may be any
+        #     https URL; charts and generated avatars use data:/blob:;
+        #   - ws:/wss:: the realtime socket (older Safari doesn't treat
+        #     'self' as covering ws/wss).
+        # script-src still needs 'unsafe-inline' for Next.js' inline
+        # bootstrap scripts; moving to per-request nonces (Next middleware)
+        # is the follow-up that would make this a real XSS backstop.
+        # If MINIO_PUBLIC_ENDPOINT is ever an absolute URL on another origin,
+        # add that origin to connect-src (uploads) and img-src.
+        header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://rsms.me; font-src 'self' data: https://rsms.me; img-src 'self' data: blob: https:; connect-src 'self' ws: wss:; worker-src 'self'; manifest-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
         reverse_proxy web:3000
     }
 }
