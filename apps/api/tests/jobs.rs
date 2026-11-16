@@ -61,7 +61,10 @@ async fn stale_claims_are_reclaimed_and_run(pool: PgPool) {
 async fn fresh_claims_are_left_alone(pool: PgPool) {
     let key = [0u8; 32];
     let id = claimed_job(&pool, 60, 0).await; // claimed a minute ago: still running
-    assert!(!run_one(&pool, &key, &mail()).await.unwrap(), "nothing to do");
+    assert!(
+        !run_one(&pool, &key, &mail()).await.unwrap(),
+        "nothing to do"
+    );
     let (finished, attempts, _) = state(&pool, id).await;
     assert!(!finished);
     assert_eq!(attempts, 0);

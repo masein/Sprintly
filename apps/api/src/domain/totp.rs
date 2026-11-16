@@ -89,14 +89,16 @@ pub fn verify_step(secret: &[u8], code: &str, now_unix: u64, window: i64) -> Opt
     }
     let step = (now_unix / PERIOD) as i64;
     use subtle::ConstantTimeEq;
-    (-window..=window).map(|d| (step + d).max(0)).find(|&counter| {
-        let candidate = format!(
-            "{:0width$}",
-            hotp(secret, counter as u64),
-            width = DIGITS as usize
-        );
-        bool::from(candidate.as_bytes().ct_eq(code.as_bytes()))
-    })
+    (-window..=window)
+        .map(|d| (step + d).max(0))
+        .find(|&counter| {
+            let candidate = format!(
+                "{:0width$}",
+                hotp(secret, counter as u64),
+                width = DIGITS as usize
+            );
+            bool::from(candidate.as_bytes().ct_eq(code.as_bytes()))
+        })
 }
 
 // ─── recovery codes ──────────────────────────────────────────────────────────
@@ -191,7 +193,10 @@ mod tests {
         let secret = generate_secret();
         let now = 1_700_000_000u64;
         let step = (now / PERIOD) as i64;
-        assert_eq!(verify_step(&secret, &code_at(&secret, now), now, 1), Some(step));
+        assert_eq!(
+            verify_step(&secret, &code_at(&secret, now), now, 1),
+            Some(step)
+        );
         // A code from the previous period matches *that* step.
         let earlier = now - PERIOD;
         assert_eq!(

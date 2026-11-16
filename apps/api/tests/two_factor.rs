@@ -153,12 +153,19 @@ async fn totp_steps_cannot_be_replayed(pool: PgPool) {
     let uid = make_user(&pool).await;
     let accept = |step: i64| {
         let pool = pool.clone();
-        async move { two_factor::accept_totp_step(&pool, uid, step).await.unwrap() }
+        async move {
+            two_factor::accept_totp_step(&pool, uid, step)
+                .await
+                .unwrap()
+        }
     };
 
     assert!(accept(1_000).await, "first use of a step is accepted");
     assert!(!accept(1_000).await, "the same code again is a replay");
-    assert!(!accept(999).await, "an older step inside the window is refused");
+    assert!(
+        !accept(999).await,
+        "an older step inside the window is refused"
+    );
     assert!(accept(1_001).await, "the next step is fine");
 
     // Re-enrolling (new secret) starts the counter over.
