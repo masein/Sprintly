@@ -17,7 +17,7 @@ use crate::{
     domain::{
         import_export::{self, ImportFormat, JiraImportOptions},
         password,
-        permissions::{can, Action},
+        permissions::{can, Action, Role},
         projects as project_ctx,
     },
     infra::AppState,
@@ -61,6 +61,14 @@ async fn import(
     if !can(&user.as_actor(), Action::EditProject, ctx.as_resource()) {
         return Err(AppError::Forbidden);
     }
+    // Provisioning creates active global accounts (any email, a password the
+    // importer picks) — that's user administration, not project editing. Any
+    // member can create a project and so become a lead; without this gate the
+    // import was a side door around admin-only invites.
+    let is_admin = user.role == Role::Admin;
+    if req.create_missing_users && !is_admin {
+        return Err(AppError::Forbidden);
+    }
 
     let requested = ImportFormat::parse(req.format.as_deref().unwrap_or("auto"));
     let format = import_export::resolve_format(&req.content, requested);
@@ -79,6 +87,7 @@ async fn import(
                 None
             },
             added_by: user.id,
+            worklogs_for_anyone: is_admin,
         };
         let plan = crate::domain::jira::parse_jira_csv(&req.content)?;
         import_export::apply_jira_import(&state.db, ctx.id, board_id, &plan, req.dry_run, &opts)

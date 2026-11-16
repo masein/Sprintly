@@ -630,6 +630,7 @@ fn provision_opts(added_by: Uuid) -> ie::JiraImportOptions {
         create_missing_users: true,
         temp_password_hash: Some(sprintly_api::domain::password::hash(&cfg(), "123456").unwrap()),
         added_by,
+        worklogs_for_anyone: true,
     }
 }
 
@@ -977,5 +978,55 @@ async fn resolved_and_wont_do_import_as_done_and_are_not_overdue(pool: PgPool) {
     assert!(
         completed.is_none(),
         "a reopened task must not keep a stale completion stamp"
+    );
+}
+
+// A non-admin importer (the route sets `worklogs_for_anyone` for admins only)
+// can bring in their *own* worklogs, never someone else's: time logs feed
+// payroll and timesheet-approval rights, so they must not be forgeable.
+#[sqlx::test(migrations = "./migrations")]
+async fn non_admin_import_only_lands_the_importers_own_worklogs(pool: PgPool) {
+    let owner = make_user(&pool, "ow-wl2@x.test", "Owner").await;
+    let sam = make_user(&pool, "sam@x.test", "Sam Adams").await;
+    let (pid, board) = make_project(&pool, "WLN", owner).await;
+    let plan = jira::parse_jira_csv(WORKLOG_CSV).unwrap();
+
+    // The owner imports: Sam's worklog is someone else's → skipped + warned.
+    let as_owner = ie::JiraImportOptions {
+        added_by: owner,
+        worklogs_for_anyone: false,
+        ..ie::JiraImportOptions::match_only()
+    };
+    let report = ie::apply_jira_import(&pool, pid, board, &plan, false, &as_owner)
+        .await
+        .unwrap();
+    assert_eq!(report.worklogs_imported, 0, "no time forged for Sam");
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("by other people")),
+        "foreign worklogs are warned: {:?}",
+        report.warnings
+    );
+    let logged: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM time_logs WHERE user_id = $1")
+        .bind(sam)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(logged, 0);
+
+    // Sam imports the same file: their own worklog lands.
+    let as_sam = ie::JiraImportOptions {
+        added_by: sam,
+        worklogs_for_anyone: false,
+        ..ie::JiraImportOptions::match_only()
+    };
+    let report = ie::apply_jira_import(&pool, pid, board, &plan, false, &as_sam)
+        .await
+        .unwrap();
+    assert_eq!(
+        report.worklogs_imported, 1,
+        "the importer's own worklog lands"
     );
 }
